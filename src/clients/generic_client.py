@@ -1,4 +1,3 @@
-import httpx
 from src.clients.base_client import BaseAhqClient
 from src.config.ahq_services import (
     ASSET_SVC, TEST_MGMT_SVC, BACKGROUND_SVC, CONFIG_SVC,
@@ -59,14 +58,9 @@ class GenericClient(BaseAhqClient):
                 "error": f"{service_name} does not expose an OpenAPI spec.",
                 "note": "ahq-background-v2-services has no springdoc dependency.",
             }
-        async with httpx.AsyncClient() as client:
-            r = await client.get(
-                f"{settings.ahq_base_url}{prefix}/v3/api-docs",
-                headers=self._headers,
-                timeout=15,
-            )
-            r.raise_for_status()
-            return r.json()
+        return await self._request(
+            "GET", f"{settings.ahq_base_url}{prefix}/v3/api-docs", timeout=15
+        )
 
     async def call_api(
         self,
@@ -79,23 +73,10 @@ class GenericClient(BaseAhqClient):
     ) -> dict:
         prefix = self._resolve(service)
         url = f"{settings.ahq_base_url}{prefix}{path}"
-        headers = {**self._headers, **(extra_headers or {})}
-        method = method.upper()
 
-        async with httpx.AsyncClient() as client:
-            r = await client.request(
-                method=method,
-                url=url,
-                headers=headers,
-                json=body,
-                params=params,
-                timeout=30,
-            )
-            r.raise_for_status()
-            try:
-                return r.json()
-            except Exception:
-                return {"status": r.status_code, "body": r.text}
+        return await self._request(
+            method.upper(), url, json=body, params=params, extra_headers=extra_headers, timeout=30
+        )
 
 
 generic_client = GenericClient()
