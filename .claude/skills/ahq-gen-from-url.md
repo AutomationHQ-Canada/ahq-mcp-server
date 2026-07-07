@@ -18,7 +18,8 @@ The user has a deployed web application and wants test scripts generated automat
 
 ## Workflow
 
-1. Call `crawl_url` with the provided URL and credentials (if any)
+1. Call `get_ahq_context` — load full project snapshot (websites, envs, epics, bots, queue)
+2. Call `crawl_url` with the provided URL and credentials (if any)
 
 2. Review the crawl result:
    - If any page has `passes_threshold: false` (resolution_rate < 0.80), skip it and note it in the final summary

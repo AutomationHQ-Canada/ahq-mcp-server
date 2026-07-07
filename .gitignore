@@ -10,3 +10,6 @@ build/
 .pytest_cache/
 ~/.ahq-mcp/
 .playwright/
+.idea/
+*.png
+*.log
