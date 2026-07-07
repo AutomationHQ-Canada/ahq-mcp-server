@@ -14,6 +14,7 @@ from src.clients.generic_client import generic_client, SERVICE_MAP
 from src.clients.user_client import user_client
 from src.clients.executor_client import executor_client
 from src.tools.crawl_url import crawl_url as _crawl_url
+from src.tools.extract_requirements import extract_requirements as _extract_requirements
 
 server = Server("ahq-mcp-server")
 
@@ -87,6 +88,21 @@ TOOLS = [
 
     # Application context
     Tool(name="crawl_url", description="Crawl a live web application and capture locators (XPath, CSS, aria-label) for test script generation.", inputSchema={"type": "object", "properties": {"url": {"type": "string"}, "credentials": {"type": "object", "properties": {"username": {"type": "string"}, "password": {"type": "string"}}}, "max_pages": {"type": "integer", "default": 20}}, "required": ["url"]}),
+    Tool(
+        name="extract_requirements",
+        description=(
+            "Parse a local requirements file (PDF/DOCX/XLSX/CSV/TXT/MD) into structured text or rows, "
+            "for generating Given/When/Then test cases. Does not generate test cases itself — "
+            "returns extracted content for the caller to reason over."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "Absolute path to the requirements file"},
+            },
+            "required": ["file_path"],
+        },
+    ),
 
     # Auto-discovery — future-proof API access
     Tool(
@@ -218,6 +234,8 @@ async def _dispatch(name: str, args: dict):
             credentials=args.get("credentials"),
             max_pages=args.get("max_pages", 20),
         )
+    if name == "extract_requirements":
+        return _extract_requirements(args["file_path"])
 
     # Auto-discovery
     if name == "get_service_spec":

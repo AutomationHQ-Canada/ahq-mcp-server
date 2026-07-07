@@ -1,0 +1,70 @@
+---
+name: ahq-gen-from-requirements
+description: Generate AHQ test scripts from a requirements document (PDF/DOCX/XLSX/CSV/TXT)
+tools:
+  - mcp__ahq-mcp-server__extract_requirements
+  - mcp__ahq-mcp-server__get_ahq_context
+  - mcp__ahq-mcp-server__list_epics
+  - mcp__ahq-mcp-server__create_test_script
+  - mcp__ahq-mcp-server__create_suite
+  - mcp__ahq-mcp-server__add_scripts_to_suite
+---
+
+## When to use this skill
+The user has a requirements doc, user story export, or spec file and wants AHQ test scripts
+generated from it — no live app/URL involved.
+
+## What to collect before starting
+- Absolute path to the requirements file (required)
+- Which epic/story to attach the scripts to, if any (optional — ask, don't guess)
+
+## Workflow
+
+1. Call `get_ahq_context` — load existing epics/bots/suites so generated scripts don't duplicate
+   something that already exists.
+2. Call `extract_requirements` with the file path.
+   - The tool only parses the file — it does not generate test cases. That reasoning happens here.
+   - `.pdf`/`.docx`/`.txt`/`.md` return `raw_text` (and `.docx` also returns `sections` by heading).
+   - `.csv` returns `rows` (list of dicts keyed by header) — treat each row as one requirement/story.
+   - `.xlsx` returns `sheets` (sheet name → rows) — ask the user which sheet if more than one has content.
+   - If the result has an `error` key, stop and report it to the user (bad path, unsupported type, or
+     file too large) rather than guessing at a fix.
+
+3. Read the extracted content and identify discrete requirements — each row (CSV/XLSX), each heading
+   section (DOCX), or each paragraph/numbered item (PDF/TXT) that describes a single piece of
+   behavior.
+
+4. For each requirement, derive one or more Given/When/Then test cases:
+   - **Given** — preconditions / starting state
+   - **When** — the user action being tested
+   - **Then** — the expected observable outcome
+   - Assign a **priority**: `critical` (core flow, blocks release), `high` (common path), `medium`
+     (edge case), `low` (cosmetic/rare). Base it on language cues in the requirement (e.g. "must",
+     "shall" → critical/high; "may", "optional" → low) — do not invent a priority scheme per file.
+
+5. Build a **traceability matrix** before creating anything: one row per requirement showing
+   `requirement_id/heading → test case name(s) → priority`. Show this to the user for confirmation
+   before writing scripts, since requirements → test case mapping is not always 1:1.
+
+6. Call `create_test_script` for each derived test case:
+   - Name format: "<Requirement ref> — <Scenario>" (e.g. "REQ-12 — Login with invalid password")
+   - Steps use AHQ action types: navigate / click / type / assert-text / assert-element /
+     select-option / wait-for-element — only if concrete UI targets are known from context; otherwise
+     leave steps as a single descriptive placeholder step and flag it as needing manual locator work.
+   - Attach to an epic/story only if the user specified one.
+
+7. If more than a few scripts were created, call `create_suite` and `add_scripts_to_suite` to group
+   them under one suite named after the source file.
+
+8. Return to the user:
+   - The traceability matrix (requirement → test case → priority)
+   - Scripts created (count + names)
+   - Any requirements skipped and why (ambiguous, no clear UI target, duplicate of existing script)
+
+## Rules
+- Never fabricate UI locators that weren't derivable from context — flag those scripts instead of
+  guessing (this mirrors the grounding-rules discipline used for `crawl_url`/`ahq-gen-from-url`)
+- Never create a script with 0 steps
+- Script names must be unique — append " (2)", " (3)" if duplicates arise
+- Always show the traceability matrix before writing scripts, not just in the final summary
+- If the file has an `error` from `extract_requirements`, do not retry — report it to the user
