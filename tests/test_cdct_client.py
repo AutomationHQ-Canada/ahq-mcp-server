@@ -26,6 +26,18 @@ async def test_list_consumers_sends_lowercase_org_project_headers():
     assert result == [{"id": "c1", "name": "WebApp"}]
 
 
+async def test_list_consumers_normalizes_null_data_to_empty_list():
+    # cdct-core returns {"data": null} (not {"data": []}) when there are zero consumers —
+    # confirmed live against the real API. Callers should always get a list, never None.
+    async def fake_request(method, url, **kwargs):
+        return httpx.Response(200, json={"message": "No consumers found", "status": 404, "data": None}, request=httpx.Request(method, url))
+
+    client = _client_with_fake_transport(fake_request)
+    result = await client.list_consumers()
+
+    assert result == []
+
+
 async def test_create_contract_sends_expected_payload():
     captured = {}
 

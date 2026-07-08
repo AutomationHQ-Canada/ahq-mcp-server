@@ -2,6 +2,16 @@ from src.clients.base_client import BaseAhqClient
 from src.config.ahq_services import CDCT_SVC
 
 
+def _unwrap(result) -> list:
+    # cdct-core returns {"data": null} (not {"data": []}) when a list is empty — e.g.
+    # MtafConsumerController.getAllConsumers() literally does
+    # `return new MtafConsumerResponseList("No consumers found", 404, null)`.
+    # Normalize to [] so callers never have to special-case None vs an empty list.
+    if not isinstance(result, dict):
+        return result
+    return result.get("data") or []
+
+
 class CdctClient(BaseAhqClient):
     """
     Consumer-Driven Contract Testing (Pact-based) — a niche capability for teams verifying that
@@ -16,7 +26,7 @@ class CdctClient(BaseAhqClient):
     # --- Consumers ---
     async def list_consumers(self) -> list:
         result = await self.get("/rest/api/consumers/list", extra_headers=self._org_project)
-        return result.get("data", result) if isinstance(result, dict) else result
+        return _unwrap(result)
 
     async def create_consumer(self, name: str) -> dict:
         return await self.post("/rest/api/consumers/create", json={"name": name}, extra_headers=self._org_project)
@@ -27,7 +37,7 @@ class CdctClient(BaseAhqClient):
     # --- Providers ---
     async def list_providers(self) -> list:
         result = await self.get("/rest/api/providers/list", extra_headers=self._org_project)
-        return result.get("data", result) if isinstance(result, dict) else result
+        return _unwrap(result)
 
     async def create_provider(self, name: str) -> dict:
         return await self.post("/rest/api/providers/create", json={"name": name}, extra_headers=self._org_project)
@@ -38,7 +48,7 @@ class CdctClient(BaseAhqClient):
     # --- Contracts ---
     async def list_contracts(self) -> list:
         result = await self.get("/rest/api/contracts/list", extra_headers=self._org_project)
-        return result.get("data", result) if isinstance(result, dict) else result
+        return _unwrap(result)
 
     async def create_contract(
         self,
