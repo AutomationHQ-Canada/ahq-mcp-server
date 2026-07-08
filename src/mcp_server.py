@@ -63,7 +63,57 @@ TOOLS = [
     # Test scripts
     Tool(name="list_test_scripts", description="List or search test scripts by name.", inputSchema={"type": "object", "properties": {"name": {"type": "string", "description": "Optional name filter"}}}),
     Tool(name="get_test_script", description="Get full details of a test script by ID.", inputSchema={"type": "object", "properties": {"script_id": {"type": "string"}}, "required": ["script_id"]}),
-    Tool(name="create_test_script", description="Create a test script in AHQ.", inputSchema={"type": "object", "properties": {"name": {"type": "string"}, "steps": {"type": "array", "items": {"type": "object"}}, "page_id": {"type": "string"}}, "required": ["name", "steps"]}),
+    Tool(
+        name="create_test_script",
+        description=(
+            "Create a test script in AHQ. Each step's templateId MUST come from "
+            "list_step_templates/search_step_templates — never invent one. Call get_step_template "
+            "on the chosen template first to see which params sub-fields it actually uses."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "page_id": {"type": "string"},
+                "steps": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "templateId": {"type": "string", "description": "Real template ID from list_step_templates/search_step_templates — required, never fabricate"},
+                            "testStepTitle": {"type": "string", "description": "Human-readable label for this step, e.g. 'Enter username'"},
+                            "sequence": {"type": "integer", "description": "0-based order of this step within the script"},
+                            "params": {
+                                "type": "object",
+                                "description": "Only set the sub-fields the chosen template actually uses (check get_step_template first)",
+                                "properties": {
+                                    "uiLocator": {
+                                        "type": "object",
+                                        "description": "Element target for click/type/assert-element style steps",
+                                        "properties": {
+                                            "locateBy": {"type": "string", "description": "Strategy: xpath, css, id, class, ..."},
+                                            "locatorValue": {"type": "string", "description": "The selector itself; may contain {{placeholder}} tokens"},
+                                            "locatorType": {"type": "string", "description": "Element type, e.g. button, input, select"}
+                                        }
+                                    },
+                                    "text": {"type": "object", "description": "Input value for type/navigate steps", "properties": {"value": {"type": "string"}}},
+                                    "expected": {"type": "object", "description": "Expected value for assert steps", "properties": {"value": {"type": "string"}}},
+                                    "variable": {"type": "object", "description": "Runtime variable reference", "properties": {"value": {"type": "string"}}}
+                                }
+                            }
+                        },
+                        "required": ["templateId", "testStepTitle"]
+                    }
+                }
+            },
+            "required": ["name", "steps"]
+        }
+    ),
+
+    # Step templates — resolve real templateIds before writing any test step
+    Tool(name="list_step_templates", description="List available step templates (built-in action types + org-defined Common Functions) for the current project. Use this or search_step_templates before writing any test step — templateId is never invented.", inputSchema={"type": "object", "properties": {"offset": {"type": "integer", "default": 0}}}),
+    Tool(name="search_step_templates", description="Search step templates by title (e.g. 'Click', 'Navigate', 'Assert Text') to find the real templateId for an action.", inputSchema={"type": "object", "properties": {"title": {"type": "string"}}, "required": ["title"]}),
+    Tool(name="get_step_template", description="Get full detail of a step template by ID, including which params sub-fields it expects.", inputSchema={"type": "object", "properties": {"template_id": {"type": "string"}}, "required": ["template_id"]}),
 
     # Organization
     Tool(name="list_epics", description="List all epics in the project.", inputSchema={"type": "object", "properties": {}}),
@@ -189,6 +239,12 @@ async def _dispatch(name: str, args: dict):
         return await test_mgmt_client.get_test_script(args["script_id"])
     if name == "create_test_script":
         return await test_mgmt_client.create_test_script(args["name"], args["steps"], args.get("page_id"))
+    if name == "list_step_templates":
+        return await test_mgmt_client.list_templates(args.get("offset", 0))
+    if name == "search_step_templates":
+        return await test_mgmt_client.search_templates(args["title"])
+    if name == "get_step_template":
+        return await test_mgmt_client.get_template(args["template_id"])
 
     # Organization
     if name == "list_epics":

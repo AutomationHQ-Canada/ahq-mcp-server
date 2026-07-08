@@ -96,6 +96,62 @@ Health check per microservice: Liveness, Readiness, Ping — each shows UP (gree
 | Website | `name`, `websiteUrl` |
 | TestBot execution | `gridUrlForExecution`, `browser`, `profileId` |
 
+### TestStep shape — never fabricate a `templateId`
+
+A `TestStep` is NOT `{action_type, locator, value}`. Real shape (from `ahq-data-commons`
+`TestStep`/`Params`/`TypeValuePair`/`UILocator`):
+
+```
+{
+  "templateId": "<real id from list_step_templates/search_step_templates>",
+  "testStepTitle": "Enter username",
+  "sequence": 0,
+  "params": {
+    "uiLocator": {"locateBy": "xpath", "locatorValue": "//input[@id='username']", "locatorType": "input"},
+    "text": {"value": "testuser@example.com"},
+    "expected": {"value": "Welcome back"}
+  }
+}
+```
+
+- `templateId` references a live, per-project catalog (platform built-ins + org-defined
+  "Common Functions") — there is no fixed enum of action types to hardcode. Always resolve it via
+  `search_step_templates`/`list_step_templates` first; use `get_step_template` to see exactly which
+  `params` sub-fields a given template expects before filling them in.
+- `params.uiLocator` targets an element (click/type/assert-element steps); `params.text.value` holds
+  input values (also URLs for navigate steps); `params.expected.value` holds the expected value for
+  assertions; `params.variable` references a runtime variable. Only set the sub-fields the chosen
+  template actually uses — leave the rest out.
+- `locatorValue` may contain `{{placeholder}}` tokens resolved at runtime via `params.locatorParams`
+  (index-aligned with `uiLocator.locatorParamNames`) — only needed for dynamic locators.
+
+## Gateway routing gotcha — mtaf-* services
+
+The gateway routes the `managed-testing-*`/`mtaf-cdct-core` family on SHORT route ids, not the repo
+name. `src/config/ahq_services.py` constants already reflect this (fixed 2026-07-08) — don't
+"correct" them back to the repo name if it looks wrong at a glance:
+
+| Repo name | Real gateway route |
+|---|---|
+| `managed-testing-service-core` | `/mtaf-core` |
+| `managed-testing-virtualization-client` | `/mtaf-sv-client` |
+| `managed-testing-virtualization-server` | `/mtaf-sv-server` |
+| `mtaf-cdct-core` | `/mtaf-cdct` |
+
+`test-local-execution-services` has NO gateway route at all — it runs on the user's own machine
+(ports ~9200/9202), not in the cluster. Any tool targeting it needs a direct-to-localhost call with
+a fast-fail liveness check (see `local_exec_client.get_agent_status()`), not a gateway call.
+
+## Services intentionally NOT covered by hand-written tools
+
+These are infra/session plumbing, not something a user would ask for in plain language — don't
+treat their absence as a gap to "rediscover":
+- `ahq-gateway-services` — pure ingress/auth/tunnel infra
+- `ahq-auth-services` — login/SSO/JWT issuance (service-to-service, not conversational)
+- Most of `ahq-standalone-local-v2-services` — internal proxy/cache layer for the local agent
+  (exceptions: `FakeDataController.generate` and token validation have standalone user-facing value)
+- Ops-only endpoints in any service: job queues, log-migration/cleanup/admin endpoints, SSE log streams
+
 ## MCP Tool Quick Reference
 
 | Tool | When to use |
@@ -103,6 +159,7 @@ Health check per microservice: Liveness, Readiness, Ping — each shows UP (gree
 | `get_ahq_context` | Always call first — loads project snapshot |
 | `crawl_url` | Discover pages + locators from a live URL |
 | `create_website` / `create_page` / `add_locators` | Build UI component library |
+| `search_step_templates` / `list_step_templates` / `get_step_template` | Resolve a real `templateId` before writing any test step |
 | `create_test_script` | Add a new test script (pass `storyId` to attach to a story) |
 | `list_bots` / `execute_bot` | Run a TestBot by name |
 | `get_execution_report` | View pass/fail results |

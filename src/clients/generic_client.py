@@ -3,10 +3,14 @@ from src.config.ahq_services import (
     ASSET_SVC, TEST_MGMT_SVC, BACKGROUND_SVC, CONFIG_SVC,
     USER_MGMT_SVC, EXECUTOR_SVC, LOCAL_EXEC_SVC, STANDALONE_SVC,
     MANAGED_TEST_SVC, VIRT_CLIENT_SVC, VIRT_SERVER_SVC, CDCT_SVC, AUTH_SVC,
+    EMAIL_SVC,
     settings,
 )
 
-# Maps user-friendly service name → gateway prefix
+# Maps user-friendly service name → gateway prefix.
+# NOTE: for the mtaf-* family the map value is the gateway ROUTE ID (e.g. "/mtaf-core"),
+# not the repo name (e.g. "managed-testing-service-core") — the gateway does not route on
+# the repo name for these four services. See src/config/ahq_services.py comments.
 SERVICE_MAP = {
     "ahq-asset-services":                    ASSET_SVC,
     "ahq-test-management-services":          TEST_MGMT_SVC,
@@ -21,6 +25,7 @@ SERVICE_MAP = {
     "managed-testing-virtualization-server": VIRT_SERVER_SVC,
     "mtaf-cdct-core":                        CDCT_SVC,
     "ahq-auth-services":                     AUTH_SVC,
+    "ahq-email-v2-services":                 EMAIL_SVC,
     # short aliases
     "asset":          ASSET_SVC,
     "test-mgmt":      TEST_MGMT_SVC,
@@ -30,6 +35,7 @@ SERVICE_MAP = {
     "executor":       EXECUTOR_SVC,
     "managed-testing": MANAGED_TEST_SVC,
     "cdct":           CDCT_SVC,
+    "email":          EMAIL_SVC,
 }
 
 # Services that expose OpenAPI specs

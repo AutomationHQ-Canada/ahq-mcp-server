@@ -1,5 +1,5 @@
 from src.clients.base_client import BaseAhqClient
-from src.config.ahq_services import TEST_MGMT_SVC
+from src.config.ahq_services import TEST_MGMT_SVC, settings
 
 
 class TestMgmtClient(BaseAhqClient):
@@ -62,6 +62,24 @@ class TestMgmtClient(BaseAhqClient):
 
     async def add_scripts_to_suite(self, suite_id: str, script_ids: list) -> dict:
         return await self.post(f"/rest/api/suites/{suite_id}/scripts", json={"scriptIds": script_ids})
+
+    # --- Step Templates ---
+    # A TestStep's `templateId` must reference one of these — there is no static/hardcodable
+    # list of action types, since templates include per-org "Common Functions" as well as
+    # platform built-ins. Always resolve a real templateId before writing a step.
+    async def list_templates(self, offset: int = 0) -> list:
+        result = await self.get(
+            f"/rest/api/templates/{settings.ahq_project_id}", params={"offset": offset}
+        )
+        return result.get("content", result) if isinstance(result, dict) else result
+
+    async def search_templates(self, title: str) -> list:
+        return await self.get(
+            f"/rest/api/templates/{settings.ahq_project_id}/search", params={"title": title}
+        )
+
+    async def get_template(self, template_id: str) -> dict:
+        return await self.get(f"/rest/api/templates/{template_id}")
 
 
 test_mgmt_client = TestMgmtClient()

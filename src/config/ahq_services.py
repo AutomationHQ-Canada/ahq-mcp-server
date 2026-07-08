@@ -22,13 +22,14 @@ BACKGROUND_SVC    = "/ahq-background-v2-services"
 CONFIG_SVC        = "/ahq-config-services"
 USER_MGMT_SVC     = "/ahq-user-management-services"
 EXECUTOR_SVC      = "/ahq-test-bot-executor-services"
-LOCAL_EXEC_SVC    = "/test-local-execution-services"
+LOCAL_EXEC_SVC    = "/test-local-execution-services"  # NOT gateway-routed — runs on the user's machine, see local_exec_client.py
 STANDALONE_SVC    = "/ahq-standalone-local-v2-services"
-MANAGED_TEST_SVC  = "/managed-testing-service-core"
-VIRT_CLIENT_SVC   = "/managed-testing-virtualization-client"
-VIRT_SERVER_SVC   = "/managed-testing-virtualization-server"
-CDCT_SVC          = "/mtaf-cdct-core"
+MANAGED_TEST_SVC  = "/mtaf-core"          # gateway route id, NOT the repo name "managed-testing-service-core"
+VIRT_CLIENT_SVC   = "/mtaf-sv-client"     # gateway route id, NOT the repo name "managed-testing-virtualization-client"
+VIRT_SERVER_SVC   = "/mtaf-sv-server"     # gateway route id, NOT the repo name "managed-testing-virtualization-server"
+CDCT_SVC          = "/mtaf-cdct"          # gateway route id, NOT the repo name "mtaf-cdct-core"
 AUTH_SVC          = "/ahq-auth-services"
+EMAIL_SVC         = "/ahq-email-v2-services"
 
 
 settings = Settings()

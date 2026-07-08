@@ -5,6 +5,8 @@ tools:
   - mcp__ahq-mcp-server__extract_requirements
   - mcp__ahq-mcp-server__get_ahq_context
   - mcp__ahq-mcp-server__list_epics
+  - mcp__ahq-mcp-server__search_step_templates
+  - mcp__ahq-mcp-server__get_step_template
   - mcp__ahq-mcp-server__create_test_script
   - mcp__ahq-mcp-server__create_suite
   - mcp__ahq-mcp-server__add_scripts_to_suite
@@ -46,17 +48,23 @@ generated from it — no live app/URL involved.
    `requirement_id/heading → test case name(s) → priority`. Show this to the user for confirmation
    before writing scripts, since requirements → test case mapping is not always 1:1.
 
-6. Call `create_test_script` for each derived test case:
+6. For each concrete UI action a test case needs, call `search_step_templates` (e.g. title="Navigate",
+   title="Click", title="Enter Text", title="Assert Text") to get the real `templateId` — templates
+   are live per-project data (built-ins plus org-defined Common Functions), never a fixed list you can
+   assume. Call `get_step_template` if it's unclear which `params` sub-fields a template expects.
+   **Never invent a templateId.**
+
+7. Call `create_test_script` for each derived test case:
    - Name format: "<Requirement ref> — <Scenario>" (e.g. "REQ-12 — Login with invalid password")
-   - Steps use AHQ action types: navigate / click / type / assert-text / assert-element /
-     select-option / wait-for-element — only if concrete UI targets are known from context; otherwise
-     leave steps as a single descriptive placeholder step and flag it as needing manual locator work.
+   - Steps use the templateIds resolved above, only if concrete UI targets are known from context;
+     otherwise leave the script as a single descriptive placeholder step and flag it as needing
+     manual locator/template work.
    - Attach to an epic/story only if the user specified one.
 
-7. If more than a few scripts were created, call `create_suite` and `add_scripts_to_suite` to group
+8. If more than a few scripts were created, call `create_suite` and `add_scripts_to_suite` to group
    them under one suite named after the source file.
 
-8. Return to the user:
+9. Return to the user:
    - The traceability matrix (requirement → test case → priority)
    - Scripts created (count + names)
    - Any requirements skipped and why (ambiguous, no clear UI target, duplicate of existing script)
@@ -64,6 +72,7 @@ generated from it — no live app/URL involved.
 ## Rules
 - Never fabricate UI locators that weren't derivable from context — flag those scripts instead of
   guessing (this mirrors the grounding-rules discipline used for `crawl_url`/`ahq-gen-from-url`)
+- Never fabricate a templateId — always resolve it via `search_step_templates`/`get_step_template` first
 - Never create a script with 0 steps
 - Script names must be unique — append " (2)", " (3)" if duplicates arise
 - Always show the traceability matrix before writing scripts, not just in the final summary
