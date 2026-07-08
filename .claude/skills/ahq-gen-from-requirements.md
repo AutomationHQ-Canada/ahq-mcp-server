@@ -48,17 +48,32 @@ generated from it — no live app/URL involved.
    `requirement_id/heading → test case name(s) → priority`. Show this to the user for confirmation
    before writing scripts, since requirements → test case mapping is not always 1:1.
 
-6. For each concrete UI action a test case needs, call `search_step_templates` (e.g. title="Navigate",
-   title="Click", title="Enter Text", title="Assert Text") to get the real `templateId` — templates
-   are live per-project data (built-ins plus org-defined Common Functions), never a fixed list you can
-   assume. Call `get_step_template` if it's unclear which `params` sub-fields a template expects.
-   **Never invent a templateId.**
+6. For each concrete UI action a test case needs, call `search_step_templates` to get the real
+   `templateId` AND `templateTitle` — templates are live per-project data (built-ins plus
+   org-defined Common Functions), never a fixed list you can assume. Single-word searches work
+   much better than full phrases — e.g. "Navigate" only matches back/forward history templates,
+   use "Go to"/"Open" to find "Open Web Browser and go to page {{text}}"; "Enter Text" matches
+   nothing, use "Enter"; "Assert Text" matches nothing, this platform uses "Verify". Call
+   `get_step_template` if it's unclear which placeholder names (`{{...}}` in `templateTitle`) a
+   template expects. **Never invent a templateId.**
 
 7. Call `create_test_script` for each derived test case:
    - Name format: "<Requirement ref> — <Scenario>" (e.g. "REQ-12 — Login with invalid password")
    - Steps use the templateIds resolved above, only if concrete UI targets are known from context;
      otherwise leave the script as a single descriptive placeholder step and flag it as needing
      manual locator/template work.
+   - See CLAUDE.md's "TestStep shape" section for the exact, proven-working shape. In short: each
+     step needs `templateId` + `templateTitle` (built-ins only) + a `parameters` array (NOT
+     `params`) with one entry per `{{placeholder}}` in `templateTitle` — `{"key": "ui-locator",
+     "value": {"locatorId": "<real id>"}, "paramClass":
+     "ai.automationhq.commons.entities.assets.UILocator"}` for element targets (never fabricate
+     locateBy/locatorValue, the server enriches from the saved locator), and `{"key": "text",
+     "value": {"type": 0, "value": "<literal>"}, "paramClass":
+     "ai.automationhq.commons.entities.assets.TypeValuePair"}` for scalar values.
+   - **For every built-in templateId (`"template-id-N"`), copy that template's `templateTitle`
+     string verbatim into the step's `templateTitle` field** (placeholders intact) — the server
+     does not look this up itself for built-ins and omitting it causes a 500 error. Not needed for
+     Common-Function templateIds (real UUIDs).
    - Attach to an epic/story only if the user specified one.
 
 8. If more than a few scripts were created, call `create_suite` and `add_scripts_to_suite` to group
@@ -73,6 +88,9 @@ generated from it — no live app/URL involved.
 - Never fabricate UI locators that weren't derivable from context — flag those scripts instead of
   guessing (this mirrors the grounding-rules discipline used for `crawl_url`/`ahq-gen-from-url`)
 - Never fabricate a templateId — always resolve it via `search_step_templates`/`get_step_template` first
+- Never omit `templateTitle` on a step whose templateId is a built-in (`"template-id-N"`) — causes a 500
+- Never put step values in `params` — use `parameters` (a list); `params` does not drive step titles or execution
+- Never fabricate `locateBy`/`locatorValue` on a `ui-locator` parameter — pass only `{"locatorId": "..."}` and let the server enrich it
 - Never create a script with 0 steps
 - Script names must be unique — append " (2)", " (3)" if duplicates arise
 - Always show the traceability matrix before writing scripts, not just in the final summary

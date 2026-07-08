@@ -32,6 +32,18 @@ async def test_list_websites_returns_bare_list_as_is():
     assert result == [{"id": "1"}]
 
 
+async def test_list_pages_unwraps_object_repository_shape():
+    # The real endpoint returns an ObjectRepository ({"name": ..., "pages": [...]}),
+    # not {"content": [...]} like other list endpoints in this service.
+    async def fake_request(method, url, **kwargs):
+        return httpx.Response(200, json={"name": "Object Repository", "pages": [{"pageId": "p1", "pageName": "Login"}]}, request=httpx.Request(method, url))
+
+    client = _client_with_fake_transport(fake_request)
+    result = await client.list_pages("site-1")
+
+    assert result == [{"pageId": "p1", "pageName": "Login"}]
+
+
 async def test_create_website_posts_expected_body():
     captured = {}
 
@@ -61,3 +73,29 @@ async def test_create_page_uses_pageName_pageUrl_fields():
     await client.create_page("site-1", "Login Page", "https://acme.example.com/login")
 
     assert captured["json"] == {"pageName": "Login Page", "pageUrl": "https://acme.example.com/login"}
+
+
+async def test_add_locators_sends_raw_page_array_not_wrapped_object():
+    # pushSpyElements takes @RequestBody List<Page> - a bare JSON array of full page objects
+    # with locators embedded, not {"pageId": ..., "elements": [...]}.
+    captured = {}
+
+    async def fake_request(method, url, **kwargs):
+        captured["url"] = url
+        captured["json"] = kwargs["json"]
+        captured["headers"] = kwargs["headers"]
+        return httpx.Response(200, json={"message": "ok"}, request=httpx.Request(method, url))
+
+    client = _client_with_fake_transport(fake_request)
+    locators = [{"locatorName": "Email input", "locatorType": "input", "locationStrategies": [{"locateBy": "css", "locatorValue": "input#email", "selected": True}]}]
+    await client.add_locators("page-1", "site-1", "https://acme.example.com/login", "Login Page", locators)
+
+    assert captured["url"] == "https://api-dev.automationhq.ai/ahq-asset-services/rest/api/locators/pushSpyElements"
+    assert captured["json"] == [{
+        "pageId": "page-1",
+        "pageName": "Login Page",
+        "pageUrl": "https://acme.example.com/login",
+        "websiteId": "site-1",
+        "locators": locators,
+    }]
+    assert captured["headers"]["websiteId"] == "site-1"

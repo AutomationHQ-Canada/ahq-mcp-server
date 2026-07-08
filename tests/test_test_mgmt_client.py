@@ -47,7 +47,7 @@ async def test_search_templates_sends_title_param():
     client = _client_with_fake_transport(fake_request)
     result = await client.search_templates("Navigate")
 
-    assert captured["url"] == "https://api-dev.automationhq.ai/ahq-test-management-services/rest/api/templates/test-project/search"
+    assert captured["url"] == "https://api-dev.automationhq.ai/ahq-test-management-services/rest/api/templates/search"
     assert captured["params"] == {"title": "Navigate"}
     assert result == [{"templateId": "tmpl-2", "templateTitle": "Navigate to URL"}]
 

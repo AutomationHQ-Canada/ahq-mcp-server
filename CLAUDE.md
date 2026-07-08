@@ -96,34 +96,74 @@ Health check per microservice: Liveness, Readiness, Ping — each shows UP (gree
 | Website | `name`, `websiteUrl` |
 | TestBot execution | `gridUrlForExecution`, `browser`, `profileId` |
 
-### TestStep shape — never fabricate a `templateId`
+### TestStep shape — never fabricate a `templateId`, and use `parameters` NOT `params`
 
-A `TestStep` is NOT `{action_type, locator, value}`. Real shape (from `ahq-data-commons`
-`TestStep`/`Params`/`TypeValuePair`/`UILocator`):
+A `TestStep` is NOT `{action_type, locator, value}`, and its values do NOT go in the `Params params`
+field (that typed field exists on the entity but is NOT what `TestScriptController` reads to build
+step titles or execution values — confirmed live, twice, the hard way: a script created with only
+`params` set produced literal `"(Pending) typeValuePair not found"`/`"(Pending) uiLocator not found"`
+text in every step). The field that actually drives everything is the generic
+**`List<Parameters> parameters`**, keyed by the placeholder name in `templateTitle`. Proven-working
+shape (this exact payload produced correct, human-readable step titles against a live org):
 
-```
+```json
 {
-  "templateId": "<real id from list_step_templates/search_step_templates>",
-  "testStepTitle": "Enter username",
-  "sequence": 0,
-  "params": {
-    "uiLocator": {"locateBy": "xpath", "locatorValue": "//input[@id='username']", "locatorType": "input"},
-    "text": {"value": "testuser@example.com"},
-    "expected": {"value": "Welcome back"}
-  }
+  "templateId": "template-id-3",
+  "templateTitle": "Enter {{text}} for the {{ui-locator}}",
+  "sequence": 1,
+  "parameters": [
+    {
+      "key": "ui-locator",
+      "value": {"locatorId": "2be39546-2861-4e02-92b6-ab8a2ff4c126"},
+      "paramClass": "ai.automationhq.commons.entities.assets.UILocator"
+    },
+    {
+      "key": "text",
+      "value": {"type": 0, "value": "testuser@example.com"},
+      "paramClass": "ai.automationhq.commons.entities.assets.TypeValuePair"
+    }
+  ]
 }
 ```
 
 - `templateId` references a live, per-project catalog (platform built-ins + org-defined
   "Common Functions") — there is no fixed enum of action types to hardcode. Always resolve it via
   `search_step_templates`/`list_step_templates` first; use `get_step_template` to see exactly which
-  `params` sub-fields a given template expects before filling them in.
-- `params.uiLocator` targets an element (click/type/assert-element steps); `params.text.value` holds
-  input values (also URLs for navigate steps); `params.expected.value` holds the expected value for
-  assertions; `params.variable` references a runtime variable. Only set the sub-fields the chosen
-  template actually uses — leave the rest out.
-- `locatorValue` may contain `{{placeholder}}` tokens resolved at runtime via `params.locatorParams`
-  (index-aligned with `uiLocator.locatorParamNames`) — only needed for dynamic locators.
+  placeholder names (`{{...}}` tokens in `templateTitle`) a given template expects.
+- **`templateTitle` is REQUIRED for built-in templates** (`templateId` like `"template-id-N"`) —
+  copy the exact `templateTitle` string (placeholders intact) from the search/get result verbatim.
+  Confirmed via `TestScriptController.updateIdForSteps()` →
+  `getTestStepTitleFromTemplateTitleAndParameterList(step.getTemplateTitle(), ...)`: for built-ins
+  the server does `templateTitle.contains("{{")` directly on whatever the CALLER sent — it does
+  **not** re-fetch the Template document server-side. Omit it and every `create_test_script` call
+  with a built-in `templateId` throws a 500 (`Cannot invoke "String.contains(...)" because
+  "templateTitle" is null`). Common-Function templateIds (real UUIDs, not `template-id-N`) take a
+  different code path (`generateCommonFunctionTitle`) that derives the title itself — `templateTitle`
+  is not needed for those.
+- **Each `parameters[]` entry's `key` must match a `{{placeholder}}` name in `templateTitle`**
+  (e.g. `templateTitle: "Enter {{text}} for the {{ui-locator}}"` needs one entry keyed `"text"` and
+  one keyed `"ui-locator"`). Confirmed via `TestScriptController.updatedValueFromParameterList()`'s
+  switch statement, keyed on the placeholder name.
+- **`ui-locator`/`uiLocator` key**: value is `{"locatorId": "<real id>"}` — just a reference to a
+  locator already saved via `add_locators`/`pushSpyElements`. **Do not fabricate `locateBy`/
+  `locatorValue`/`locatorType` here** — the server looks the real locator up by `locatorId` on the
+  page and enriches those fields itself (`TestScriptController.enrichUILocatorsWithPageId` /
+  `enrichUILocatorParameter`). A locatorId that doesn't exist on any page produces
+  `"(Pending) uiLocator not found"` in the step title, not an error.
+- **Any scalar key** (`text`, `number`, `expected`, ...): value is a `TypeValuePair`:
+  `{"type": <int>, "value": "<literal>"}`. `type` codes (from `typeAwareDisplay()`): `0` = literal
+  (the common case), `1` = data-driven column, `2` = configuration var, `3` = runtime variable,
+  `5` = parameter reference, `6` = faker/random, `7` = vault secret.
+- `testStepTitle` is optional — the server regenerates it from `templateTitle` + `parameters` on
+  every save/read (`getTestScriptById` does the same rebuild), so don't rely on whatever value you
+  send surviving as-is.
+- `search_step_templates`'s project-scoped variant (`/rest/api/templates/{projectId}/search`) only
+  returns this org's own saved custom templates and is often empty. **Built-in templates only
+  surface through the root-level `/rest/api/templates/search?title=` endpoint** (merged with this
+  org's Common Functions) — this is what `test_mgmt_client.search_templates()` actually calls.
+  Single-word searches work far better than phrases: "Navigate" only matches history back/forward,
+  use "Go to"/"Open" for URL navigation; "Enter Text" matches nothing, use "Enter"; "Assert Text"
+  matches nothing, this platform's verb is "Verify".
 
 ## Gateway routing gotcha — mtaf-* services
 

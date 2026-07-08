@@ -74,9 +74,14 @@ class TestMgmtClient(BaseAhqClient):
         return result.get("content", result) if isinstance(result, dict) else result
 
     async def search_templates(self, title: str) -> list:
-        return await self.get(
-            f"/rest/api/templates/{self._credentials.project_id}/search", params={"title": title}
-        )
+        # The project-scoped /rest/api/templates/{projectId}/search only returns this org's own
+        # saved custom templates (often empty). Built-in action templates (Click, Navigate, ...)
+        # live org/project-agnostic and only surface through the ROOT-level /search endpoint —
+        # confirmed live: {projectId}/search returned [] for every built-in title, while the root
+        # endpoint returned real templateIds (e.g. "Navigate" -> 21 results including
+        # templateId "template-id-178"). TemplatesController.getSearchedTemplate() (root) merges
+        # global built-ins with this org's Common Functions, so it's a strict superset.
+        return await self.get("/rest/api/templates/search", params={"title": title})
 
     async def get_template(self, template_id: str) -> dict:
         return await self.get(f"/rest/api/templates/{template_id}")

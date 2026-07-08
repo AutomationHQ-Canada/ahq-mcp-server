@@ -80,7 +80,42 @@ TOOLS = [
     Tool(name="list_pages", description="List all pages under a website.", inputSchema={"type": "object", "properties": {"website_id": {"type": "string"}}, "required": ["website_id"]}),
     Tool(name="create_page", description="Create a page under an existing website.", inputSchema={"type": "object", "properties": {"website_id": {"type": "string"}, "name": {"type": "string"}, "url": {"type": "string"}}, "required": ["website_id", "name", "url"]}),
     Tool(name="get_page_by_url", description="Check if a page already exists at a given URL (for dedup).", inputSchema={"type": "object", "properties": {"website_id": {"type": "string"}, "url": {"type": "string"}}, "required": ["website_id", "url"]}),
-    Tool(name="add_locators", description="Batch-create locators for a page.", inputSchema={"type": "object", "properties": {"page_id": {"type": "string"}, "website_id": {"type": "string"}, "locators": {"type": "array", "items": {"type": "object"}}}, "required": ["page_id", "website_id", "locators"]}),
+    Tool(
+        name="add_locators",
+        description="Batch-create locators for a page.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "page_id": {"type": "string"},
+                "website_id": {"type": "string"},
+                "page_url": {"type": "string", "description": "Must match the page's real URL — locators are upserted by URL match, not by page_id"},
+                "page_name": {"type": "string"},
+                "locators": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "locatorName": {"type": "string", "description": "Human-readable label, e.g. 'Email input'"},
+                            "locatorType": {"type": "string", "description": "Element type, e.g. input, button"},
+                            "locationStrategies": {
+                                "type": "array",
+                                "description": "One or more locating strategies for this element, in priority order",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "locateBy": {"type": "string", "description": "css, xpath, id, ..."},
+                                        "locatorValue": {"type": "string"},
+                                        "selected": {"type": "boolean", "description": "True for the primary strategy to use at execution time"}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "required": ["page_id", "website_id", "page_url", "locators"]
+        }
+    ),
 
     # Test scripts
     Tool(name="list_test_scripts", description="List or search test scripts by name.", inputSchema={"type": "object", "properties": {"name": {"type": "string", "description": "Optional name filter"}}}),
@@ -90,7 +125,12 @@ TOOLS = [
         description=(
             "Create a test script in AHQ. Each step's templateId MUST come from "
             "list_step_templates/search_step_templates — never invent one. Call get_step_template "
-            "on the chosen template first to see which params sub-fields it actually uses."
+            "on the chosen template first to see which parameter keys it actually uses. "
+            "For built-in templates (templateId like 'template-id-N'), also copy that template's "
+            "templateTitle string into the step verbatim — the server does not look it up itself "
+            "and omitting it causes a 500 error. Step values go in `parameters` (a list), NOT a "
+            "`params` object — confirmed live against TestScriptController: `params` is not what "
+            "drives step titles or execution values."
         ),
         inputSchema={
             "type": "object",
@@ -103,28 +143,27 @@ TOOLS = [
                         "type": "object",
                         "properties": {
                             "templateId": {"type": "string", "description": "Real template ID from list_step_templates/search_step_templates — required, never fabricate"},
-                            "testStepTitle": {"type": "string", "description": "Human-readable label for this step, e.g. 'Enter username'"},
+                            "templateTitle": {"type": "string", "description": "REQUIRED when templateId is a built-in ('template-id-N') template — copy the exact templateTitle string (with {{placeholder}} tokens intact, e.g. 'Enter {{text}} for the {{ui-locator}}') from the search_step_templates/get_step_template result verbatim. The server does NOT look this up itself for built-ins; omitting it causes a 500 error. Not needed for Common-Function templateIds (real UUIDs) — the server derives the title itself for those."},
+                            "testStepTitle": {"type": "string", "description": "Optional — the server regenerates this from templateTitle + parameters anyway"},
                             "sequence": {"type": "integer", "description": "0-based order of this step within the script"},
-                            "params": {
-                                "type": "object",
-                                "description": "Only set the sub-fields the chosen template actually uses (check get_step_template first)",
-                                "properties": {
-                                    "uiLocator": {
-                                        "type": "object",
-                                        "description": "Element target for click/type/assert-element style steps",
-                                        "properties": {
-                                            "locateBy": {"type": "string", "description": "Strategy: xpath, css, id, class, ..."},
-                                            "locatorValue": {"type": "string", "description": "The selector itself; may contain {{placeholder}} tokens"},
-                                            "locatorType": {"type": "string", "description": "Element type, e.g. button, input, select"}
-                                        }
+                            "parameters": {
+                                "type": "array",
+                                "description": "Values for the placeholder names in templateTitle (e.g. {{text}}, {{ui-locator}}) — one entry per placeholder actually used by the template.",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "key": {"type": "string", "description": "Must match a {{placeholder}} name in templateTitle, e.g. 'text' or 'ui-locator'"},
+                                        "value": {
+                                            "type": "object",
+                                            "description": "For key='ui-locator': {\"locatorId\": \"<real id from add_locators>\"} — the server auto-enriches name/locateBy/locatorValue from the saved page locator, do not fabricate the rest. For any scalar key (text, number, expected, ...): {\"type\": 0, \"value\": \"<literal>\"} — type 0 means literal; other type codes exist for variables/data-driven/vault/etc. but 0 covers the common case.",
+                                        },
+                                        "paramClass": {"type": "string", "description": "Fully-qualified class name matching value's shape: 'ai.automationhq.commons.entities.assets.UILocator' or 'ai.automationhq.commons.entities.assets.TypeValuePair'"}
                                     },
-                                    "text": {"type": "object", "description": "Input value for type/navigate steps", "properties": {"value": {"type": "string"}}},
-                                    "expected": {"type": "object", "description": "Expected value for assert steps", "properties": {"value": {"type": "string"}}},
-                                    "variable": {"type": "object", "description": "Runtime variable reference", "properties": {"value": {"type": "string"}}}
+                                    "required": ["key", "value", "paramClass"]
                                 }
                             }
                         },
-                        "required": ["templateId", "testStepTitle"]
+                        "required": ["templateId"]
                     }
                 }
             },
@@ -323,7 +362,9 @@ async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: boo
     if name == "get_page_by_url":
         return await clients.asset.get_page_by_url(args["website_id"], args["url"])
     if name == "add_locators":
-        return await clients.asset.add_locators(args["page_id"], args["website_id"], args["locators"])
+        return await clients.asset.add_locators(
+            args["page_id"], args["website_id"], args["page_url"], args.get("page_name", ""), args["locators"]
+        )
 
     # Test scripts
     if name == "list_test_scripts":

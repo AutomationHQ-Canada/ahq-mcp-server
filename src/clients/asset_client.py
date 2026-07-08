@@ -31,11 +31,13 @@ class AssetClient(BaseAhqClient):
 
     # --- Pages ---
     async def list_pages(self, website_id: str) -> list:
+        # Returns an ObjectRepository: {"name": "Object Repository", "pages": [...]} — NOT
+        # {"content": [...]} like the other list_* endpoints in this service.
         result = await self.get(
             f"/rest/api/websites/{website_id}/pages/list",
             params={"size": 1000},
         )
-        return result if isinstance(result, list) else result.get("content", result)
+        return result if isinstance(result, list) else result.get("pages", result)
 
     async def create_page(self, website_id: str, name: str, url: str = "") -> dict:
         return await self.post(
@@ -51,10 +53,22 @@ class AssetClient(BaseAhqClient):
         )
 
     # --- Locators ---
-    async def add_locators(self, page_id: str, website_id: str, locators: list) -> dict:
+    async def add_locators(self, page_id: str, website_id: str, page_url: str, page_name: str, locators: list) -> dict:
+        # pushSpyElements expects a raw JSON array of full Page objects (each with its locators
+        # embedded), NOT {"pageId": ..., "elements": [...]} - confirmed against the real
+        # LocatorController.pushSpyElements(@RequestBody List<Page> pages). It upserts by
+        # pageUrl match (findBy...PageUrl...), so page_url must be included or this creates a
+        # duplicate page instead of merging into the one just created via create_page.
+        page_payload = {
+            "pageId": page_id,
+            "pageName": page_name,
+            "pageUrl": page_url,
+            "websiteId": website_id,
+            "locators": locators,
+        }
         return await self.post(
             "/rest/api/locators/pushSpyElements",
-            json={"pageId": page_id, "elements": locators},
+            json=[page_payload],
             extra_headers={"websiteId": website_id},
             timeout=60,
         )
