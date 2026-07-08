@@ -141,6 +141,7 @@ TOOLS = [
                 "story_id": {"type": "string", "description": "Strongly recommended — a script with no story_id was excluded from the UI's default Table View listing entirely in live testing, even though every other field was correct. Get this from list_epics -> list_stories."},
                 "status": {"type": "string", "default": "Not Started", "description": "One of: Not Started, In Progress, Ready, To Be Repaired, On Hold. Sending this as null/absent triggers a UI validation error when the script is opened."},
                 "script_type": {"type": "string", "default": "WEB", "description": "e.g. 'WEB'. Sending this as null/absent triggers a UI validation error when the script is opened."},
+                "branch_name": {"type": "string", "default": "main", "description": "Always defaults to 'main' and should stay that way unless the user explicitly asked for a working branch — omitting this field entirely falls back to an unreliable per-session ambient branch that is NOT guaranteed to be main, confirmed live."},
                 "steps": {
                     "type": "array",
                     "items": {
@@ -381,6 +382,8 @@ async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: boo
             kwargs["status"] = args["status"]
         if "script_type" in args:
             kwargs["script_type"] = args["script_type"]
+        if "branch_name" in args:
+            kwargs["branch_name"] = args["branch_name"]
         return await clients.test_mgmt.create_test_script(
             args["name"], args["steps"], args.get("page_id"), args.get("website_id"), args.get("story_id"), **kwargs
         )

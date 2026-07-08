@@ -25,6 +25,7 @@ async def test_create_test_script_sends_testSteps_field():
         "testSteps": steps,
         "status": "Not Started",
         "type": "WEB",
+        "currentBranchName": "main",
         "pageId": "page-1",
     }
 
@@ -47,10 +48,27 @@ async def test_create_test_script_includes_website_id_when_given():
         "testSteps": steps,
         "status": "Not Started",
         "type": "WEB",
+        "currentBranchName": "main",
         "pageId": "page-1",
         "websiteId": "site-1",
         "storyId": "story-1",
     }
+
+
+async def test_create_test_script_always_sends_explicit_branch_name():
+    # Omitting currentBranchName lets the server fall back to this API token's ambient
+    # "checked out branch" ProjectState for the project, which is NOT reliably "main" — confirmed
+    # live: two scripts created back-to-back with no explicit branch landed on different branches.
+    captured = {}
+
+    async def fake_request(method, url, **kwargs):
+        captured["json"] = kwargs["json"]
+        return httpx.Response(200, json={"id": "s1"}, request=httpx.Request(method, url))
+
+    client = _client_with_fake_transport(fake_request)
+    await client.create_test_script("Some Script", [{"templateId": "tmpl-1"}])
+
+    assert captured["json"]["currentBranchName"] == "main"
 
 
 async def test_list_templates_uses_project_scoped_path():

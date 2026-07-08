@@ -26,6 +26,7 @@ class TestMgmtClient(BaseAhqClient):
         story_id: str = None,
         status: str = "Not Started",
         script_type: str = "WEB",
+        branch_name: str = "main",
     ) -> dict:
         # websiteId is a separate field from pageId on TestScript — the UI's "Application" column
         # and its filtering key off websiteId, NOT pageId. A script with pageId but no websiteId
@@ -37,7 +38,18 @@ class TestMgmtClient(BaseAhqClient):
         # status/type are plain String fields with no server-side default — sending them as JSON
         # null (i.e. omitting them) trips the UI's editor validation ("Expected string, received
         # null") when the script is opened. "Not Started"/"WEB" match real scripts in this project.
-        payload = {"name": name, "testSteps": steps or [], "status": status, "type": script_type}
+        # branch_name is ALWAYS sent explicitly — omitting currentBranchName makes the server fall
+        # back to this API token's ambient "checked out branch" ProjectState for the project, which
+        # is NOT reliably "main" (confirmed live: two scripts created back-to-back with no explicit
+        # branch landed on different branches — one on "main", the next on "Test" — with no payload
+        # difference between the two calls). Never rely on that default; always be explicit.
+        payload = {
+            "name": name,
+            "testSteps": steps or [],
+            "status": status,
+            "type": script_type,
+            "currentBranchName": branch_name,
+        }
         if page_id:
             payload["pageId"] = page_id
         if website_id:
