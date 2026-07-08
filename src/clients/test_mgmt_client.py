@@ -1,10 +1,10 @@
 from src.clients.base_client import BaseAhqClient
-from src.config.ahq_services import TEST_MGMT_SVC, settings
+from src.config.ahq_services import TEST_MGMT_SVC
 
 
 class TestMgmtClient(BaseAhqClient):
-    def __init__(self):
-        super().__init__(TEST_MGMT_SVC)
+    def __init__(self, credentials=None, http_client=None):
+        super().__init__(TEST_MGMT_SVC, credentials, http_client)
 
     # --- Test Scripts ---
     async def list_test_scripts(self, name: str = None) -> list:
@@ -69,17 +69,14 @@ class TestMgmtClient(BaseAhqClient):
     # platform built-ins. Always resolve a real templateId before writing a step.
     async def list_templates(self, offset: int = 0) -> list:
         result = await self.get(
-            f"/rest/api/templates/{settings.ahq_project_id}", params={"offset": offset}
+            f"/rest/api/templates/{self._credentials.project_id}", params={"offset": offset}
         )
         return result.get("content", result) if isinstance(result, dict) else result
 
     async def search_templates(self, title: str) -> list:
         return await self.get(
-            f"/rest/api/templates/{settings.ahq_project_id}/search", params={"title": title}
+            f"/rest/api/templates/{self._credentials.project_id}/search", params={"title": title}
         )
 
     async def get_template(self, template_id: str) -> dict:
         return await self.get(f"/rest/api/templates/{template_id}")
-
-
-test_mgmt_client = TestMgmtClient()

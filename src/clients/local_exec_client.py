@@ -1,5 +1,5 @@
 import httpx
-from src.config.ahq_services import settings, STANDALONE_SVC
+from src.config.ahq_services import STANDALONE_SVC
 from src.clients.base_client import BaseAhqClient
 
 
@@ -14,8 +14,8 @@ class LocalExecClient(BaseAhqClient):
 
     LOCAL_AGENT_URL = "http://localhost:9202"
 
-    def __init__(self):
-        super().__init__(STANDALONE_SVC)  # for standalone data access via gateway
+    def __init__(self, credentials=None, http_client=None):
+        super().__init__(STANDALONE_SVC, credentials, http_client)  # for standalone data access via gateway
         self._local_url = self.LOCAL_AGENT_URL
 
     async def get_agent_status(self) -> dict:
@@ -33,7 +33,7 @@ class LocalExecClient(BaseAhqClient):
 
     async def list_registered_agents(self) -> list:
         """List all registered local agents in the project (via standalone-local-v2 service through gateway)."""
-        result = await self.get("/rest/api/local/agent/getAllAgents", extra_headers={"orgId": settings.ahq_org_id})
+        result = await self.get("/rest/api/local/agent/getAllAgents", extra_headers={"orgId": self._credentials.org_id})
         return result if isinstance(result, list) else result.get("content", result)
 
     async def get_test_bot_definition(self, bot_id: str) -> dict:
@@ -53,6 +53,3 @@ class LocalExecClient(BaseAhqClient):
 
     async def generate_fake_data(self, display_name: str) -> str:
         return await self.post("/rest/api/fake-data/generate", json={"displayName": display_name})
-
-
-local_exec_client = LocalExecClient()

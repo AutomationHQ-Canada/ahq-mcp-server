@@ -3,8 +3,8 @@ from src.config.ahq_services import EMAIL_SVC
 
 
 class EmailClient(BaseAhqClient):
-    def __init__(self):
-        super().__init__(EMAIL_SVC)
+    def __init__(self, credentials=None, http_client=None):
+        super().__init__(EMAIL_SVC, credentials, http_client)
 
     async def send_email(
         self,
@@ -21,6 +21,3 @@ class EmailClient(BaseAhqClient):
             payload["from"] = from_address
         # Controller returns a bare job-id string; r.json() parses it fine as a JSON string literal.
         return await self.post("/background-jobs/email-jobs/run-job", json=payload)
-
-
-email_client = EmailClient()

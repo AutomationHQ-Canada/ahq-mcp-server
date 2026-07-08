@@ -1,5 +1,5 @@
 from src.clients.base_client import BaseAhqClient
-from src.config.ahq_services import CDCT_SVC, settings
+from src.config.ahq_services import CDCT_SVC
 
 
 class CdctClient(BaseAhqClient):
@@ -9,9 +9,9 @@ class CdctClient(BaseAhqClient):
     organizationid/projectid headers (different convention from every other AHQ service).
     """
 
-    def __init__(self):
-        super().__init__(CDCT_SVC)
-        self._org_project = {"organizationid": settings.ahq_org_id, "projectid": settings.ahq_project_id}
+    def __init__(self, credentials=None, http_client=None):
+        super().__init__(CDCT_SVC, credentials, http_client)
+        self._org_project = {"organizationid": self._credentials.org_id, "projectid": self._credentials.project_id}
 
     # --- Consumers ---
     async def list_consumers(self) -> list:
@@ -67,6 +67,3 @@ class CdctClient(BaseAhqClient):
 
     async def run_both_tests(self, contract_id: str) -> dict:
         return await self.post(f"/rest/api/pact-runner/run-both-consumer-provider-tests/{contract_id}")
-
-
-cdct_client = CdctClient()

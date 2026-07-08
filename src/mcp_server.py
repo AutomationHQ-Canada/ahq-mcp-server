@@ -6,38 +6,55 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 
-from src.clients.asset_client import asset_client
-from src.clients.test_mgmt_client import test_mgmt_client
-from src.clients.background_client import background_client
-from src.clients.config_client import config_client
-from src.clients.generic_client import generic_client, SERVICE_MAP
-from src.clients.user_client import user_client
-from src.clients.executor_client import executor_client
-from src.clients.local_exec_client import local_exec_client
-from src.clients.managed_testing_client import managed_testing_client
-from src.clients.email_client import email_client
-from src.clients.cdct_client import cdct_client
-from src.clients.virtualization_client import virtualization_client
+from src.config.ahq_services import settings
+from src.config.credentials import AhqCredentials
+from src.clients.bundle import ClientBundle, DEFAULT_BUNDLE
+from src.clients.generic_client import SERVICE_MAP
 from src.tools.crawl_url import crawl_url as _crawl_url
 from src.tools.extract_requirements import extract_requirements as _extract_requirements
 
 server = Server("ahq-mcp-server")
 
 
+class _HttpClientHolder:
+    """
+    Plain mutable holder (NOT a contextvars.ContextVar) for the one shared, long-lived
+    httpx.AsyncClient used in hosted HTTP mode. A ContextVar was tried first and doesn't work
+    here: it's set once in the Starlette lifespan task, but uvicorn spawns each incoming
+    request in a separate, unrelated task — contextvars only propagate to child tasks created
+    from a context where the var is already set, so the lifespan's value never reaches
+    call_tool's task. A plain attribute, set once at startup and read on every call, is exactly
+    what's needed since the client itself is intentionally shared across every tenant/request
+    (only credentials vary per-request, and those already flow correctly through the SDK's own
+    request_ctx contextvar since it's set inside the request-handling task itself).
+    """
+
+    client = None
+
+
+app_http_client = _HttpClientHolder()
+
+# Tools that are unsafe or meaningless to run from a centrally-hosted server: check_local_agent_status
+# probes the SERVER's own localhost (not the caller's machine); crawl_url fetches arbitrary
+# caller-given URLs from inside the cluster (SSRF surface); extract_requirements reads an arbitrary
+# path off the SERVER's disk (arbitrary-file-read surface once "local" isn't the caller's laptop).
+_HOSTED_UNSUPPORTED = {"check_local_agent_status", "crawl_url", "extract_requirements"}
+
+
 # ---------------------------------------------------------------------------
 # Context
 # ---------------------------------------------------------------------------
 
-async def _get_ahq_context() -> dict:
+async def _get_ahq_context(clients: ClientBundle) -> dict:
     results = await asyncio.gather(
-        user_client.get_current_user(),
-        user_client.list_projects(),
-        asset_client.list_websites(),
-        config_client.list_environments(),
-        test_mgmt_client.list_epics(),
-        test_mgmt_client.list_bots(),
-        test_mgmt_client.list_suites(),
-        background_client.get_queue_status(),
+        clients.user.get_current_user(),
+        clients.user.list_projects(),
+        clients.asset.list_websites(),
+        clients.config.list_environments(),
+        clients.test_mgmt.list_epics(),
+        clients.test_mgmt.list_bots(),
+        clients.test_mgmt.list_suites(),
+        clients.background.get_queue_status(),
         return_exceptions=True,
     )
     keys = ["user", "projects", "websites", "environments", "epics", "bots", "suites", "queue"]
@@ -257,84 +274,107 @@ async def list_tools() -> list[Tool]:
 # Tool dispatch
 # ---------------------------------------------------------------------------
 
+def _resolve_clients() -> tuple[ClientBundle, bool]:
+    """
+    stdio mode: no Starlette request in context -> DEFAULT_BUNDLE (credentials from .env, one
+    per process, identical to today's behavior).
+    HTTP mode (src/http_server.py): a Starlette Request is available per tool-call via
+    server.request_context.request -> build a fresh per-request ClientBundle from that
+    request's X-API-AUTH-KEY/org-id/projectId headers, sharing the one pooled httpx.AsyncClient
+    set up by the HTTP entrypoint's lifespan.
+    """
+    try:
+        req = server.request_context.request
+    except LookupError:
+        req = None
+    if req is None:
+        return DEFAULT_BUNDLE, False
+    creds = AhqCredentials.from_headers(req.headers, base_url=settings.ahq_base_url)
+    return ClientBundle.build(credentials=creds, http_client=app_http_client.client), True
+
+
 @server.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     try:
-        result = await _dispatch(name, arguments)
+        clients, is_hosted = _resolve_clients()
+        result = await _dispatch(name, arguments, clients, is_hosted)
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
     except Exception as e:
         return [TextContent(type="text", text=json.dumps({"error": str(e)}))]
 
 
-async def _dispatch(name: str, args: dict):
+async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: bool = False):
+    if is_hosted and name in _HOSTED_UNSUPPORTED:
+        return {"error": f"{name} is not available over the hosted MCP server yet — run ahq-mcp-server locally via stdio for this tool."}
+
     # Context
     if name == "get_ahq_context":
-        return await _get_ahq_context()
+        return await _get_ahq_context(clients)
 
     # Asset
     if name == "search_websites":
-        return await asset_client.search_websites(args["name"])
+        return await clients.asset.search_websites(args["name"])
     if name == "create_website":
-        return await asset_client.create_website(args["name"], args["url"])
+        return await clients.asset.create_website(args["name"], args["url"])
     if name == "list_pages":
-        return await asset_client.list_pages(args["website_id"])
+        return await clients.asset.list_pages(args["website_id"])
     if name == "create_page":
-        return await asset_client.create_page(args["website_id"], args["name"], args["url"])
+        return await clients.asset.create_page(args["website_id"], args["name"], args["url"])
     if name == "get_page_by_url":
-        return await asset_client.get_page_by_url(args["website_id"], args["url"])
+        return await clients.asset.get_page_by_url(args["website_id"], args["url"])
     if name == "add_locators":
-        return await asset_client.add_locators(args["page_id"], args["website_id"], args["locators"])
+        return await clients.asset.add_locators(args["page_id"], args["website_id"], args["locators"])
 
     # Test scripts
     if name == "list_test_scripts":
-        return await test_mgmt_client.list_test_scripts(args.get("name"))
+        return await clients.test_mgmt.list_test_scripts(args.get("name"))
     if name == "get_test_script":
-        return await test_mgmt_client.get_test_script(args["script_id"])
+        return await clients.test_mgmt.get_test_script(args["script_id"])
     if name == "create_test_script":
-        return await test_mgmt_client.create_test_script(args["name"], args["steps"], args.get("page_id"))
+        return await clients.test_mgmt.create_test_script(args["name"], args["steps"], args.get("page_id"))
     if name == "list_step_templates":
-        return await test_mgmt_client.list_templates(args.get("offset", 0))
+        return await clients.test_mgmt.list_templates(args.get("offset", 0))
     if name == "search_step_templates":
-        return await test_mgmt_client.search_templates(args["title"])
+        return await clients.test_mgmt.search_templates(args["title"])
     if name == "get_step_template":
-        return await test_mgmt_client.get_template(args["template_id"])
+        return await clients.test_mgmt.get_template(args["template_id"])
 
     # Organization
     if name == "list_epics":
-        return await test_mgmt_client.list_epics()
+        return await clients.test_mgmt.list_epics()
     if name == "list_bots":
-        return await test_mgmt_client.list_bots(args.get("name"))
+        return await clients.test_mgmt.list_bots(args.get("name"))
     if name == "list_suites":
-        return await test_mgmt_client.list_suites()
+        return await clients.test_mgmt.list_suites()
     if name == "list_environments":
-        return await config_client.list_environments()
+        return await clients.config.list_environments()
     if name == "create_suite":
-        return await test_mgmt_client.create_suite(args["name"])
+        return await clients.test_mgmt.create_suite(args["name"])
     if name == "add_scripts_to_suite":
-        return await test_mgmt_client.add_scripts_to_suite(args["suite_id"], args["script_ids"])
+        return await clients.test_mgmt.add_scripts_to_suite(args["suite_id"], args["script_ids"])
 
     # Execution
     if name == "execute_bot":
         # Correct entry point: executor-services validates bot, fan-outs, then calls background-v2 internally
-        return await executor_client.execute_bot(args["bot_id"], args["execution_configuration"], args.get("partial_execution", False))
+        return await clients.executor.execute_bot(args["bot_id"], args["execution_configuration"], args.get("partial_execution", False))
     if name == "schedule_bot_recurring":
-        return await background_client.schedule_bot_recurring(args["bot_id"], args["execution_configuration"], args["cron"])
+        return await clients.background.schedule_bot_recurring(args["bot_id"], args["execution_configuration"], args["cron"])
     if name == "schedule_bot_once":
-        return await background_client.schedule_bot_once(args["bot_id"], args["execution_configuration"], args["epoch_ms"])
+        return await clients.background.schedule_bot_once(args["bot_id"], args["execution_configuration"], args["epoch_ms"])
     if name == "cancel_schedule":
-        return await background_client.cancel_schedule(args["schedule_id"])
+        return await clients.background.cancel_schedule(args["schedule_id"])
     if name == "get_job_status":
-        return await background_client.get_job_status(args["job_id"])
+        return await clients.background.get_job_status(args["job_id"])
     if name == "list_recent_runs":
-        return await background_client.list_recent_runs(args.get("bot_id"), args.get("limit", 10))
+        return await clients.background.list_recent_runs(args.get("bot_id"), args.get("limit", 10))
 
     # Reporting
     if name == "get_execution_report":
-        return await background_client.get_execution_report(args["job_id"])
+        return await clients.background.get_execution_report(args["job_id"])
     if name == "get_execution_screenshots":
-        return await executor_client.get_execution_screenshots(args["execution_id"])
+        return await clients.executor.get_execution_screenshots(args["execution_id"])
     if name == "get_performance_report":
-        return await executor_client.get_performance_report(args["execution_id"])
+        return await clients.executor.get_performance_report(args["execution_id"])
 
     # Application context
     if name == "crawl_url":
@@ -348,105 +388,105 @@ async def _dispatch(name: str, args: dict):
 
     # API / Performance Testing (mtaf-core)
     if name == "list_api_collections":
-        return await managed_testing_client.list_api_collections()
+        return await clients.managed_testing.list_api_collections()
     if name == "get_api_collection":
-        return await managed_testing_client.get_api_collection(args["collection_id"])
+        return await clients.managed_testing.get_api_collection(args["collection_id"])
     if name == "create_api_collection":
-        return await managed_testing_client.create_api_collection(args["name"], args.get("description"), args.get("variables"))
+        return await clients.managed_testing.create_api_collection(args["name"], args.get("description"), args.get("variables"))
     if name == "list_api_requests":
-        return await managed_testing_client.list_api_requests()
+        return await clients.managed_testing.list_api_requests()
     if name == "get_api_request":
-        return await managed_testing_client.get_api_request(args["request_id"])
+        return await clients.managed_testing.get_api_request(args["request_id"])
     if name == "create_api_request":
-        return await managed_testing_client.create_api_request(
+        return await clients.managed_testing.create_api_request(
             args["name"], args["method"], args["url"], args.get("collection_id"),
             args.get("query_params"), args.get("header_params"), args.get("body_params"),
         )
     if name == "test_api_request":
-        return await managed_testing_client.test_api_request(
+        return await clients.managed_testing.test_api_request(
             args["request"], args.get("variables"), args.get("data_row"), args.get("environment")
         )
     if name == "import_curl":
-        return await managed_testing_client.import_curl(
+        return await clients.managed_testing.import_curl(
             args["commands"], args.get("save", True), args.get("collection_name", "cURL Import"), args.get("collection_id")
         )
     if name == "import_postman_collection":
-        return await managed_testing_client.import_postman(args["collection"], args.get("save", True))
+        return await clients.managed_testing.import_postman(args["collection"], args.get("save", True))
     if name == "list_workflows":
-        return await managed_testing_client.list_workflows()
+        return await clients.managed_testing.list_workflows()
     if name == "get_workflow":
-        return await managed_testing_client.get_workflow(args["workflow_id"])
+        return await clients.managed_testing.get_workflow(args["workflow_id"])
     if name == "create_workflow":
-        return await managed_testing_client.create_workflow(args["name"], args.get("description"), args.get("workflow_list"))
+        return await clients.managed_testing.create_workflow(args["name"], args.get("description"), args.get("workflow_list"))
     if name == "test_workflow":
-        return await managed_testing_client.test_workflow(
+        return await clients.managed_testing.test_workflow(
             args["name"], args["api_requests"], args.get("description"), args.get("load_ratio")
         )
     if name == "list_performance_bots":
-        return await managed_testing_client.list_performance_bots()
+        return await clients.managed_testing.list_performance_bots()
     if name == "get_performance_bot":
-        return await managed_testing_client.get_performance_bot(args["bot_id"])
+        return await clients.managed_testing.get_performance_bot(args["bot_id"])
     if name == "run_performance_bot":
-        return await managed_testing_client.run_performance_bot(args["bot_id"])
+        return await clients.managed_testing.run_performance_bot(args["bot_id"])
     if name == "stop_performance_bot":
-        return await managed_testing_client.stop_performance_bot(args["bot_id"])
+        return await clients.managed_testing.stop_performance_bot(args["bot_id"])
     if name == "get_performance_results":
-        return await managed_testing_client.get_performance_results(args["metrics_id"], args.get("polling", True))
+        return await clients.managed_testing.get_performance_results(args["metrics_id"], args.get("polling", True))
     if name == "list_vault_secrets":
-        return await managed_testing_client.list_vault_secrets()
+        return await clients.managed_testing.list_vault_secrets()
 
     # Local execution agent
     if name == "check_local_agent_status":
-        return await local_exec_client.get_agent_status()
+        return await clients.local_exec.get_agent_status()
     if name == "list_local_agents":
-        return await local_exec_client.list_registered_agents()
+        return await clients.local_exec.list_registered_agents()
     if name == "list_fake_data_types":
-        return await local_exec_client.list_fake_data_types()
+        return await clients.local_exec.list_fake_data_types()
     if name == "generate_fake_data":
-        return await local_exec_client.generate_fake_data(args["display_name"])
+        return await clients.local_exec.generate_fake_data(args["display_name"])
 
     # Email
     if name == "send_email":
-        return await email_client.send_email(
+        return await clients.email.send_email(
             args["to"], args["subject"], args["message"], args.get("multiple_tos"), args.get("from_address")
         )
 
     # Pact contract testing
     if name == "list_consumers":
-        return await cdct_client.list_consumers()
+        return await clients.cdct.list_consumers()
     if name == "create_consumer":
-        return await cdct_client.create_consumer(args["name"])
+        return await clients.cdct.create_consumer(args["name"])
     if name == "list_providers":
-        return await cdct_client.list_providers()
+        return await clients.cdct.list_providers()
     if name == "create_provider":
-        return await cdct_client.create_provider(args["name"])
+        return await clients.cdct.create_provider(args["name"])
     if name == "list_contracts":
-        return await cdct_client.list_contracts()
+        return await clients.cdct.list_contracts()
     if name == "create_contract":
-        return await cdct_client.create_contract(
+        return await clients.cdct.create_contract(
             args["consumer_id"], args["provider_id"], args["method"],
             args.get("contract_description"), args.get("request_body"), args.get("response_body"),
         )
     if name == "run_pact_tests":
-        return await cdct_client.run_both_tests(args["contract_id"])
+        return await clients.cdct.run_both_tests(args["contract_id"])
 
     # Service Virtualization
     if name == "list_mock_mappings":
-        return await virtualization_client.list_mock_mappings(args.get("method"), args.get("search"))
+        return await clients.virtualization.list_mock_mappings(args.get("method"), args.get("search"))
     if name == "get_mock_mapping":
-        return await virtualization_client.get_mock_mapping(args["mapping_id"])
+        return await clients.virtualization.get_mock_mapping(args["mapping_id"])
     if name == "get_mock_mapping_template":
-        return await virtualization_client.get_mock_mapping_template()
+        return await clients.virtualization.get_mock_mapping_template()
     if name == "create_mock_mapping":
-        return await virtualization_client.create_mock_mapping(args["mapping"])
+        return await clients.virtualization.create_mock_mapping(args["mapping"])
     if name == "delete_mock_mapping":
-        return await virtualization_client.delete_mock_mapping(args["mapping_id"])
+        return await clients.virtualization.delete_mock_mapping(args["mapping_id"])
 
     # Auto-discovery
     if name == "get_service_spec":
-        return await generic_client.get_service_spec(args["service_name"])
+        return await clients.generic.get_service_spec(args["service_name"])
     if name == "call_api":
-        return await generic_client.call_api(
+        return await clients.generic.call_api(
             service=args["service"],
             method=args["method"],
             path=args["path"],
@@ -464,7 +504,7 @@ async def _dispatch(name: str, args: dict):
 
 async def main():
     try:
-        me = await asset_client.validate_token()
+        me = await DEFAULT_BUNDLE.asset.validate_token()
         name = me.get("name") or me.get("userId", "unknown")
         print(f"[ahq-mcp-server] Connected as: {name}", file=sys.stderr)
     except Exception as e:

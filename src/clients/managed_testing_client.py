@@ -13,8 +13,8 @@ class ManagedTestingClient(BaseAhqClient):
     used for REST/GraphQL request validation, chained-workflow testing, and JMeter-backed load testing.
     """
 
-    def __init__(self):
-        super().__init__(MANAGED_TEST_SVC)
+    def __init__(self, credentials=None, http_client=None):
+        super().__init__(MANAGED_TEST_SVC, credentials, http_client)
 
     # --- API Collections v2 ---
     async def list_api_collections(self) -> list:
@@ -139,6 +139,3 @@ class ManagedTestingClient(BaseAhqClient):
     # decrypted plaintext secret and shouldn't land in an LLM conversation transcript by default.
     async def list_vault_secrets(self) -> list:
         return _unwrap(await self.get("/rest/api/v2/vault/list"))
-
-
-managed_testing_client = ManagedTestingClient()

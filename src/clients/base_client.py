@@ -4,6 +4,7 @@ import logging
 import httpx
 
 from src.config.ahq_services import settings
+from src.config.credentials import AhqCredentials
 
 logger = logging.getLogger(__name__)
 
@@ -20,15 +21,22 @@ class AhqApiError(Exception):
 
 
 class BaseAhqClient:
-    def __init__(self, service_prefix: str):
-        self._base = f"{settings.ahq_base_url}{service_prefix}"
+    def __init__(
+        self,
+        service_prefix: str,
+        credentials: AhqCredentials = None,
+        http_client: httpx.AsyncClient = None,
+    ):
+        creds = credentials or AhqCredentials.from_settings(settings)
+        self._credentials = creds
+        self._base = f"{creds.base_url}{service_prefix}"
         self._headers = {
-            "X-API-AUTH-KEY": settings.ahq_api_token,
-            "org-id": settings.ahq_org_id,
-            "projectId": settings.ahq_project_id,
+            "X-API-AUTH-KEY": creds.api_token,
+            "org-id": creds.org_id,
+            "projectId": creds.project_id,
             "Content-Type": "application/json",
         }
-        self._client = httpx.AsyncClient()
+        self._client = http_client or httpx.AsyncClient()
 
     def _extra_headers(self, extra: dict) -> dict:
         return {**self._headers, **extra}

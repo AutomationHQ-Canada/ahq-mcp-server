@@ -3,13 +3,12 @@ from src.config.ahq_services import ASSET_SVC
 
 
 class AssetClient(BaseAhqClient):
-    def __init__(self):
-        super().__init__(ASSET_SVC)
+    def __init__(self, credentials=None, http_client=None):
+        super().__init__(ASSET_SVC, credentials, http_client)
 
     async def validate_token(self) -> dict:
-        from src.config.ahq_services import settings
         import base64, json
-        payload = settings.ahq_api_token.split(".")[1]
+        payload = self._credentials.api_token.split(".")[1]
         payload += "=" * (-len(payload) % 4)
         claims = json.loads(base64.urlsafe_b64decode(payload))
         org_name = claims.get("organizationName", "unknown org")
@@ -59,6 +58,3 @@ class AssetClient(BaseAhqClient):
             extra_headers={"websiteId": website_id},
             timeout=60,
         )
-
-
-asset_client = AssetClient()

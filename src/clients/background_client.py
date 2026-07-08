@@ -9,8 +9,8 @@ class BackgroundClient(BaseAhqClient):
     background-v2-services is called internally by executor-services, not directly by MCP.
     """
 
-    def __init__(self):
-        super().__init__(BACKGROUND_SVC)
+    def __init__(self, credentials=None, http_client=None):
+        super().__init__(BACKGROUND_SVC, credentials, http_client)
 
     # --- Scheduling ---
     async def schedule_bot_recurring(self, bot_id: str, execution_configuration: dict, cron: str) -> dict:
@@ -50,6 +50,3 @@ class BackgroundClient(BaseAhqClient):
             params["botId"] = bot_id
         result = await self.get("/background-jobs/execution-jobs", params=params)
         return result.get("content", result) if isinstance(result, dict) else result
-
-
-background_client = BackgroundClient()

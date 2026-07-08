@@ -9,8 +9,8 @@ class VirtualizationClient(BaseAhqClient):
     controllers are almost identical and exposing both would just give two tools for one job.
     """
 
-    def __init__(self):
-        super().__init__(VIRT_SERVER_SVC)
+    def __init__(self, credentials=None, http_client=None):
+        super().__init__(VIRT_SERVER_SVC, credentials, http_client)
 
     async def list_mock_mappings(self, method: str = None, search: str = None) -> dict:
         params = {}
@@ -41,6 +41,3 @@ class VirtualizationClient(BaseAhqClient):
 
     async def delete_mock_mapping(self, mapping_id: str):
         return await self.delete(f"/api/virtualization/delete-mapping/{mapping_id}")
-
-
-virtualization_client = VirtualizationClient()

@@ -4,7 +4,6 @@ from src.config.ahq_services import (
     USER_MGMT_SVC, EXECUTOR_SVC, LOCAL_EXEC_SVC, STANDALONE_SVC,
     MANAGED_TEST_SVC, VIRT_CLIENT_SVC, VIRT_SERVER_SVC, CDCT_SVC, AUTH_SVC,
     EMAIL_SVC,
-    settings,
 )
 
 # Maps user-friendly service name → gateway prefix.
@@ -46,8 +45,8 @@ OPENAPI_ENABLED = {
 
 
 class GenericClient(BaseAhqClient):
-    def __init__(self):
-        super().__init__("")  # prefix is dynamic per call
+    def __init__(self, credentials=None, http_client=None):
+        super().__init__("", credentials, http_client)  # prefix is dynamic per call
 
     def _resolve(self, service_name: str) -> str:
         key = service_name.lower().strip()
@@ -65,7 +64,7 @@ class GenericClient(BaseAhqClient):
                 "note": "ahq-background-v2-services has no springdoc dependency.",
             }
         return await self._request(
-            "GET", f"{settings.ahq_base_url}{prefix}/v3/api-docs", timeout=15
+            "GET", f"{self._credentials.base_url}{prefix}/v3/api-docs", timeout=15
         )
 
     async def call_api(
@@ -78,11 +77,8 @@ class GenericClient(BaseAhqClient):
         extra_headers: dict = None,
     ) -> dict:
         prefix = self._resolve(service)
-        url = f"{settings.ahq_base_url}{prefix}{path}"
+        url = f"{self._credentials.base_url}{prefix}{path}"
 
         return await self._request(
             method.upper(), url, json=body, params=params, extra_headers=extra_headers, timeout=30
         )
-
-
-generic_client = GenericClient()

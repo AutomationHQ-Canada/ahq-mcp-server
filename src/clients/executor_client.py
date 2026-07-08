@@ -3,8 +3,8 @@ from src.config.ahq_services import EXECUTOR_SVC
 
 
 class ExecutorClient(BaseAhqClient):
-    def __init__(self):
-        super().__init__(EXECUTOR_SVC)
+    def __init__(self, credentials=None, http_client=None):
+        super().__init__(EXECUTOR_SVC, credentials, http_client)
 
     async def execute_bot(self, bot_id: str, execution_configuration: dict, partial_execution: bool = False) -> dict:
         """
@@ -30,6 +30,3 @@ class ExecutorClient(BaseAhqClient):
 
     async def get_performance_report(self, execution_id: str) -> dict:
         return await self.get(f"/rest/api/roi/{execution_id}")
-
-
-executor_client = ExecutorClient()

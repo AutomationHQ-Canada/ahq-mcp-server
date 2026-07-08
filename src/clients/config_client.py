@@ -3,8 +3,8 @@ from src.config.ahq_services import CONFIG_SVC
 
 
 class ConfigClient(BaseAhqClient):
-    def __init__(self):
-        super().__init__(CONFIG_SVC)
+    def __init__(self, credentials=None, http_client=None):
+        super().__init__(CONFIG_SVC, credentials, http_client)
 
     async def list_environments(self) -> list:
         result = await self.get("/rest/api/environments")
@@ -20,6 +20,3 @@ class ConfigClient(BaseAhqClient):
     async def list_profiles(self) -> list:
         result = await self.get("/rest/api/profiles")
         return result if isinstance(result, list) else result.get("content", result)
-
-
-config_client = ConfigClient()

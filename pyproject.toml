@@ -17,6 +17,8 @@ dependencies = [
     "pypdf>=4.0.0",
     "python-docx>=1.1.0",
     "openpyxl>=3.1.0",
+    "uvicorn>=0.30.0",
+    "starlette>=0.37.0",
 ]
 
 [project.optional-dependencies]
@@ -27,6 +29,7 @@ dev = [
 
 [project.scripts]
 ahq-mcp = "src.mcp_server:main"
+ahq-mcp-http = "src.http_server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
