@@ -18,13 +18,26 @@ class TestMgmtClient(BaseAhqClient):
         return await self.get(f"/rest/api/stories/scripts/{script_id}")
 
     async def create_test_script(
-        self, name: str, steps: list = None, page_id: str = None, website_id: str = None, story_id: str = None
+        self,
+        name: str,
+        steps: list = None,
+        page_id: str = None,
+        website_id: str = None,
+        story_id: str = None,
+        status: str = "Not Started",
+        script_type: str = "WEB",
     ) -> dict:
         # websiteId is a separate field from pageId on TestScript — the UI's "Application" column
         # and its filtering key off websiteId, NOT pageId. A script with pageId but no websiteId
         # was invisible in the Table View despite existing and being correctly branch-scoped
-        # (confirmed live, 2026-07-08).
-        payload = {"name": name, "testSteps": steps or []}
+        # (confirmed live, 2026-07-08). Likewise storyId: a script with no story attached was
+        # excluded from the Table View's default "Test Scripts" listing even though the user-guide
+        # documents that view as a flat list of ALL scripts — confirmed by diffing against every
+        # other script in the same project, which all had a storyId.
+        # status/type are plain String fields with no server-side default — sending them as JSON
+        # null (i.e. omitting them) trips the UI's editor validation ("Expected string, received
+        # null") when the script is opened. "Not Started"/"WEB" match real scripts in this project.
+        payload = {"name": name, "testSteps": steps or [], "status": status, "type": script_type}
         if page_id:
             payload["pageId"] = page_id
         if website_id:

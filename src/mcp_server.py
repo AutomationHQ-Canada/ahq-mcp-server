@@ -138,7 +138,9 @@ TOOLS = [
                 "name": {"type": "string"},
                 "page_id": {"type": "string"},
                 "website_id": {"type": "string", "description": "Strongly recommended — a script created with only page_id and no website_id is invisible in the UI's Table View and Application filter, even though it's created correctly. Get this from create_website/list_websites."},
-                "story_id": {"type": "string", "description": "Optional — attaches the script under an Epic/Story instead of the standalone flat list"},
+                "story_id": {"type": "string", "description": "Strongly recommended — a script with no story_id was excluded from the UI's default Table View listing entirely in live testing, even though every other field was correct. Get this from list_epics -> list_stories."},
+                "status": {"type": "string", "default": "Not Started", "description": "One of: Not Started, In Progress, Ready, To Be Repaired, On Hold. Sending this as null/absent triggers a UI validation error when the script is opened."},
+                "script_type": {"type": "string", "default": "WEB", "description": "e.g. 'WEB'. Sending this as null/absent triggers a UI validation error when the script is opened."},
                 "steps": {
                     "type": "array",
                     "items": {
@@ -374,8 +376,13 @@ async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: boo
     if name == "get_test_script":
         return await clients.test_mgmt.get_test_script(args["script_id"])
     if name == "create_test_script":
+        kwargs = {}
+        if "status" in args:
+            kwargs["status"] = args["status"]
+        if "script_type" in args:
+            kwargs["script_type"] = args["script_type"]
         return await clients.test_mgmt.create_test_script(
-            args["name"], args["steps"], args.get("page_id"), args.get("website_id"), args.get("story_id")
+            args["name"], args["steps"], args.get("page_id"), args.get("website_id"), args.get("story_id"), **kwargs
         )
     if name == "list_step_templates":
         return await clients.test_mgmt.list_templates(args.get("offset", 0))

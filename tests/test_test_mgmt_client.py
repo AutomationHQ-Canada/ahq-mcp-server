@@ -20,7 +20,13 @@ async def test_create_test_script_sends_testSteps_field():
     steps = [{"templateId": "tmpl-1", "testStepTitle": "Click login"}]
     await client.create_test_script("Login Happy Path", steps, "page-1")
 
-    assert captured["json"] == {"name": "Login Happy Path", "testSteps": steps, "pageId": "page-1"}
+    assert captured["json"] == {
+        "name": "Login Happy Path",
+        "testSteps": steps,
+        "status": "Not Started",
+        "type": "WEB",
+        "pageId": "page-1",
+    }
 
 
 async def test_create_test_script_includes_website_id_when_given():
@@ -39,6 +45,8 @@ async def test_create_test_script_includes_website_id_when_given():
     assert captured["json"] == {
         "name": "Login Happy Path",
         "testSteps": steps,
+        "status": "Not Started",
+        "type": "WEB",
         "pageId": "page-1",
         "websiteId": "site-1",
         "storyId": "story-1",
