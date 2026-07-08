@@ -19,11 +19,11 @@ class LocalExecClient(BaseAhqClient):
         self._local_url = self.LOCAL_AGENT_URL
 
     async def get_agent_status(self) -> dict:
-        """Check if local agent is running on this machine."""
+        """Check if the local agent is running on this machine (TestExecutorController's /ping)."""
         try:
             async with httpx.AsyncClient() as client:
                 r = await client.get(
-                    f"{self._local_url}/rest/api/agent/status",
+                    f"{self._local_url}/rest/api/execute/ping",
                     timeout=5,
                 )
                 r.raise_for_status()
@@ -32,8 +32,8 @@ class LocalExecClient(BaseAhqClient):
             return {"online": False, "error": "Local agent not running at localhost:9202"}
 
     async def list_registered_agents(self) -> list:
-        """List all registered local agents in the project (via standalone service through gateway)."""
-        result = await self.get("/resources/local-agent/get-all")
+        """List all registered local agents in the project (via standalone-local-v2 service through gateway)."""
+        result = await self.get("/rest/api/local/agent/getAllAgents", extra_headers={"orgId": settings.ahq_org_id})
         return result if isinstance(result, list) else result.get("content", result)
 
     async def get_test_bot_definition(self, bot_id: str) -> dict:
@@ -44,6 +44,15 @@ class LocalExecClient(BaseAhqClient):
         """Fetch execution environments via standalone service."""
         result = await self.get("/executor/rest/api/environments")
         return result if isinstance(result, list) else result.get("content", result)
+
+    # --- Fake Data (colocated here since it's the same underlying STANDALONE_SVC, not because
+    # it's related to local execution) ---
+    async def list_fake_data_types(self) -> list:
+        """Display names of available fake-data generators (e.g. 'Email', 'SIN', 'Full Name')."""
+        return await self.get("/rest/api/fake-data/display-name")
+
+    async def generate_fake_data(self, display_name: str) -> str:
+        return await self.post("/rest/api/fake-data/generate", json={"displayName": display_name})
 
 
 local_exec_client = LocalExecClient()

@@ -13,7 +13,11 @@ from src.clients.config_client import config_client
 from src.clients.generic_client import generic_client, SERVICE_MAP
 from src.clients.user_client import user_client
 from src.clients.executor_client import executor_client
+from src.clients.local_exec_client import local_exec_client
 from src.clients.managed_testing_client import managed_testing_client
+from src.clients.email_client import email_client
+from src.clients.cdct_client import cdct_client
+from src.clients.virtualization_client import virtualization_client
 from src.tools.crawl_url import crawl_url as _crawl_url
 from src.tools.extract_requirements import extract_requirements as _extract_requirements
 
@@ -176,6 +180,32 @@ TOOLS = [
     Tool(name="stop_performance_bot", description="Stop a running performance bot.", inputSchema={"type": "object", "properties": {"bot_id": {"type": "string"}}, "required": ["bot_id"]}),
     Tool(name="get_performance_results", description="Poll dashboard results (throughput, response times, errors) for a performance run by metrics ID.", inputSchema={"type": "object", "properties": {"metrics_id": {"type": "string"}, "polling": {"type": "boolean", "default": True}}, "required": ["metrics_id"]}),
     Tool(name="list_vault_secrets", description="List vault secret names/keys (metadata only — never returns decrypted values; ask the user to check the UI if the raw value is needed).", inputSchema={"type": "object", "properties": {}}),
+
+    # Local execution agent — for TestBots configured to run on the user's own machine
+    # (gridUrlForExecution contains "localhost"), not the cloud grid.
+    Tool(name="check_local_agent_status", description="Check whether the local execution agent is running on this machine. Call this before execute_bot if the bot's environment targets localhost.", inputSchema={"type": "object", "properties": {}}),
+    Tool(name="list_local_agents", description="List machines in this project that have the local execution agent installed/registered.", inputSchema={"type": "object", "properties": {}}),
+    Tool(name="list_fake_data_types", description="List available fake/synthetic test-data generator types (e.g. Email, SIN, Full Name) usable with generate_fake_data.", inputSchema={"type": "object", "properties": {}}),
+    Tool(name="generate_fake_data", description="Generate one synthetic value of a given fake-data type, for populating test data.", inputSchema={"type": "object", "properties": {"display_name": {"type": "string", "description": "Must be one of the names returned by list_fake_data_types"}}, "required": ["display_name"]}),
+
+    # Email
+    Tool(name="send_email", description="Send a transactional email through AHQ (e.g. a test run summary).", inputSchema={"type": "object", "properties": {"to": {"type": "string"}, "subject": {"type": "string"}, "message": {"type": "string"}, "multiple_tos": {"type": "array", "items": {"type": "string"}}, "from_address": {"type": "string"}}, "required": ["to", "subject", "message"]}),
+
+    # Consumer-Driven Contract Testing (Pact) — niche capability for API contract verification
+    Tool(name="list_consumers", description="List Pact contract-testing consumers (API clients).", inputSchema={"type": "object", "properties": {}}),
+    Tool(name="create_consumer", description="Create a Pact consumer.", inputSchema={"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}),
+    Tool(name="list_providers", description="List Pact contract-testing providers (API servers).", inputSchema={"type": "object", "properties": {}}),
+    Tool(name="create_provider", description="Create a Pact provider.", inputSchema={"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}),
+    Tool(name="list_contracts", description="List Pact contracts (consumer-provider agreements).", inputSchema={"type": "object", "properties": {}}),
+    Tool(name="create_contract", description="Create a Pact contract between a consumer and provider for one API interaction.", inputSchema={"type": "object", "properties": {"consumer_id": {"type": "string"}, "provider_id": {"type": "string"}, "method": {"type": "string"}, "contract_description": {"type": "string"}, "request_body": {"type": "string"}, "response_body": {"type": "string"}}, "required": ["consumer_id", "provider_id", "method"]}),
+    Tool(name="run_pact_tests", description="Run both consumer and provider Pact verification tests for a contract.", inputSchema={"type": "object", "properties": {"contract_id": {"type": "string"}}, "required": ["contract_id"]}),
+
+    # Service Virtualization (WireMock-backed API mocking)
+    Tool(name="list_mock_mappings", description="List service-virtualization mock API mappings, optionally filtered.", inputSchema={"type": "object", "properties": {"method": {"type": "string"}, "search": {"type": "string"}}}),
+    Tool(name="get_mock_mapping", description="Get a mock mapping by ID.", inputSchema={"type": "object", "properties": {"mapping_id": {"type": "string"}}, "required": ["mapping_id"]}),
+    Tool(name="get_mock_mapping_template", description="Get an example mock-mapping JSON template to use as a starting point for create_mock_mapping.", inputSchema={"type": "object", "properties": {}}),
+    Tool(name="create_mock_mapping", description="Create a mock API mapping (request matcher + canned response) for service virtualization. Call get_mock_mapping_template first if the shape is unclear.", inputSchema={"type": "object", "properties": {"mapping": {"type": "object", "description": "WireMock-style mapping: {request: {method, url, headers}, response: {status, body, headers}}"}}, "required": ["mapping"]}),
+    Tool(name="delete_mock_mapping", description="Delete a mock API mapping by ID.", inputSchema={"type": "object", "properties": {"mapping_id": {"type": "string"}}, "required": ["mapping_id"]}),
 
     # Auto-discovery — future-proof API access
     Tool(
@@ -364,6 +394,53 @@ async def _dispatch(name: str, args: dict):
         return await managed_testing_client.get_performance_results(args["metrics_id"], args.get("polling", True))
     if name == "list_vault_secrets":
         return await managed_testing_client.list_vault_secrets()
+
+    # Local execution agent
+    if name == "check_local_agent_status":
+        return await local_exec_client.get_agent_status()
+    if name == "list_local_agents":
+        return await local_exec_client.list_registered_agents()
+    if name == "list_fake_data_types":
+        return await local_exec_client.list_fake_data_types()
+    if name == "generate_fake_data":
+        return await local_exec_client.generate_fake_data(args["display_name"])
+
+    # Email
+    if name == "send_email":
+        return await email_client.send_email(
+            args["to"], args["subject"], args["message"], args.get("multiple_tos"), args.get("from_address")
+        )
+
+    # Pact contract testing
+    if name == "list_consumers":
+        return await cdct_client.list_consumers()
+    if name == "create_consumer":
+        return await cdct_client.create_consumer(args["name"])
+    if name == "list_providers":
+        return await cdct_client.list_providers()
+    if name == "create_provider":
+        return await cdct_client.create_provider(args["name"])
+    if name == "list_contracts":
+        return await cdct_client.list_contracts()
+    if name == "create_contract":
+        return await cdct_client.create_contract(
+            args["consumer_id"], args["provider_id"], args["method"],
+            args.get("contract_description"), args.get("request_body"), args.get("response_body"),
+        )
+    if name == "run_pact_tests":
+        return await cdct_client.run_both_tests(args["contract_id"])
+
+    # Service Virtualization
+    if name == "list_mock_mappings":
+        return await virtualization_client.list_mock_mappings(args.get("method"), args.get("search"))
+    if name == "get_mock_mapping":
+        return await virtualization_client.get_mock_mapping(args["mapping_id"])
+    if name == "get_mock_mapping_template":
+        return await virtualization_client.get_mock_mapping_template()
+    if name == "create_mock_mapping":
+        return await virtualization_client.create_mock_mapping(args["mapping"])
+    if name == "delete_mock_mapping":
+        return await virtualization_client.delete_mock_mapping(args["mapping_id"])
 
     # Auto-discovery
     if name == "get_service_spec":

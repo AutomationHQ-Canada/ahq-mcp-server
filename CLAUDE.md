@@ -172,6 +172,25 @@ asking to "test my API" or "run a load test" means the mtaf-core tools below, no
   `/resolve/{key}` endpoint that returns decrypted plaintext, to keep secrets out of the conversation
   transcript by default
 
+## Other niche tool groups (2026-07-08)
+
+- **Local execution agent** (`test-local-execution-services`, runs on the user's own machine, no
+  gateway route): `check_local_agent_status` (hits `TestExecutorController`'s `/ping` directly on
+  localhost:9202 — NOT `/rest/api/agent/status`, which doesn't exist), `list_local_agents` (via
+  `ahq-standalone-local-v2-services`' real path `/rest/api/local/agent/getAllAgents` — note the
+  `orgId` header here, no hyphen, unlike every other service's `org-id`)
+- **Fake/synthetic test data**: `list_fake_data_types` / `generate_fake_data` (also
+  `ahq-standalone-local-v2-services`)
+- **Email**: `send_email` (`ahq-email-v2-services`)
+- **Pact contract testing** (`mtaf-cdct-core`, niche): `list_consumers`/`create_consumer`,
+  `list_providers`/`create_provider`, `list_contracts`/`create_contract`, `run_pact_tests`. Uses
+  lowercase `organizationid`/`projectid` headers — a THIRD header-naming convention alongside
+  `org-id`/`projectId` (most services) and `orgId` (standalone-local).
+- **Service virtualization / API mocking** (`mtaf-sv-server` only, not the near-duplicate
+  `mtaf-sv-client`): `list_mock_mappings`, `get_mock_mapping`, `get_mock_mapping_template`,
+  `create_mock_mapping`, `delete_mock_mapping`. The mapping body is a raw JSON string, not a typed
+  object — sent as `text/plain` like `import_curl`, not `application/json`.
+
 ## MCP Tool Quick Reference
 
 | Tool | When to use |
