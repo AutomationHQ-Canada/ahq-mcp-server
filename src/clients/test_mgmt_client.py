@@ -17,10 +17,20 @@ class TestMgmtClient(BaseAhqClient):
     async def get_test_script(self, script_id: str) -> dict:
         return await self.get(f"/rest/api/stories/scripts/{script_id}")
 
-    async def create_test_script(self, name: str, steps: list = None, page_id: str = None) -> dict:
+    async def create_test_script(
+        self, name: str, steps: list = None, page_id: str = None, website_id: str = None, story_id: str = None
+    ) -> dict:
+        # websiteId is a separate field from pageId on TestScript — the UI's "Application" column
+        # and its filtering key off websiteId, NOT pageId. A script with pageId but no websiteId
+        # was invisible in the Table View despite existing and being correctly branch-scoped
+        # (confirmed live, 2026-07-08).
         payload = {"name": name, "testSteps": steps or []}
         if page_id:
             payload["pageId"] = page_id
+        if website_id:
+            payload["websiteId"] = website_id
+        if story_id:
+            payload["storyId"] = story_id
         return await self.post("/rest/api/stories/scripts", json=payload)
 
     # --- Epics ---

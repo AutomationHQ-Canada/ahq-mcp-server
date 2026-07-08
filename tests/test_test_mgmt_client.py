@@ -23,6 +23,28 @@ async def test_create_test_script_sends_testSteps_field():
     assert captured["json"] == {"name": "Login Happy Path", "testSteps": steps, "pageId": "page-1"}
 
 
+async def test_create_test_script_includes_website_id_when_given():
+    # websiteId drives the UI's "Application" column/filtering and is separate from pageId —
+    # a script created without it was invisible in the Table View despite existing correctly.
+    captured = {}
+
+    async def fake_request(method, url, **kwargs):
+        captured["json"] = kwargs["json"]
+        return httpx.Response(200, json={"id": "s1"}, request=httpx.Request(method, url))
+
+    client = _client_with_fake_transport(fake_request)
+    steps = [{"templateId": "tmpl-1"}]
+    await client.create_test_script("Login Happy Path", steps, page_id="page-1", website_id="site-1", story_id="story-1")
+
+    assert captured["json"] == {
+        "name": "Login Happy Path",
+        "testSteps": steps,
+        "pageId": "page-1",
+        "websiteId": "site-1",
+        "storyId": "story-1",
+    }
+
+
 async def test_list_templates_uses_project_scoped_path():
     async def fake_request(method, url, **kwargs):
         assert method == "GET"

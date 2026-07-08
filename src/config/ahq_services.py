@@ -10,7 +10,10 @@ class Settings(BaseSettings):
 
     ahq_base_url: str = "https://app.automationhq.ai"
     ahq_api_token: str
-    ahq_org_id: str
+    # No ahq_org_id here on purpose — org_id is always derived from the token's own
+    # organizationId claim (see AhqCredentials.from_settings), never independently configured.
+    # A stale/mismatched org_id here would silently write real data into the wrong organization,
+    # since the gateway doesn't validate that a request's org-id header matches the token's claim.
     ahq_project_id: str
     llm_api_key: str = ""
 

@@ -1,5 +1,6 @@
 from src.clients.base_client import BaseAhqClient
 from src.config.ahq_services import ASSET_SVC
+from src.config.credentials import decode_ahq_token
 
 
 class AssetClient(BaseAhqClient):
@@ -7,10 +8,7 @@ class AssetClient(BaseAhqClient):
         super().__init__(ASSET_SVC, credentials, http_client)
 
     async def validate_token(self) -> dict:
-        import base64, json
-        payload = self._credentials.api_token.split(".")[1]
-        payload += "=" * (-len(payload) % 4)
-        claims = json.loads(base64.urlsafe_b64decode(payload))
+        claims = decode_ahq_token(self._credentials.api_token)
         org_name = claims.get("organizationName", "unknown org")
         created_by = claims.get("createdByUserId", "unknown")
         return {"name": org_name, "userId": created_by, "tokenType": claims.get("tokenType", "UNKNOWN")}
