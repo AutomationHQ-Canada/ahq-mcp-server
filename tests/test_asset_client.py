@@ -128,6 +128,37 @@ async def test_add_locators_backfills_deprecated_locateBy_locatorValue_from_stra
     assert sent_locator["locatorValue"] == "input#email"
 
 
+async def test_update_locator_sends_correct_path_and_body():
+    # The only way to fix an already-created locator — add_locators/pushSpyElements silently
+    # no-ops for anything matching an existing locationStrategies value, it never updates.
+    captured = {}
+
+    async def fake_request(method, url, **kwargs):
+        captured["method"] = method
+        captured["url"] = url
+        captured["json"] = kwargs["json"]
+        return httpx.Response(200, json={"message": "Locator updated successfully"}, request=httpx.Request(method, url))
+
+    client = _client_with_fake_transport(fake_request)
+    result = await client.update_locator(
+        website_id="site-1", page_id="page-1", locator_id="loc-1",
+        locator_name="Email input", locator_type="input",
+        locate_by="css", locator_value="input#email",
+    )
+
+    assert captured["method"] == "PUT"
+    assert captured["url"] == "https://api-dev.automationhq.ai/ahq-asset-services/rest/api/websites/site-1/pages/page-1/locator/loc-1"
+    assert captured["json"] == {
+        "locatorId": "loc-1",
+        "locatorName": "Email input",
+        "locatorType": "input",
+        "locateBy": "css",
+        "locatorValue": "input#email",
+        "locationStrategies": [{"locateBy": "css", "locatorValue": "input#email", "selected": True}],
+    }
+    assert result == {"message": "Locator updated successfully"}
+
+
 async def test_add_locators_does_not_override_explicit_locateBy():
     captured = {}
 

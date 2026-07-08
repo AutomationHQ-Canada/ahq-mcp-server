@@ -116,6 +116,27 @@ TOOLS = [
             "required": ["page_id", "website_id", "page_url", "locators"]
         }
     ),
+    Tool(
+        name="update_locator",
+        description=(
+            "Fix an already-created locator's locateBy/locatorValue. add_locators only ADDS new "
+            "locators — it silently no-ops for anything that already matches an existing one by "
+            "locationStrategies value, never updating it. Use this to correct a locator instead."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "website_id": {"type": "string"},
+                "page_id": {"type": "string"},
+                "locator_id": {"type": "string"},
+                "locator_name": {"type": "string"},
+                "locator_type": {"type": "string"},
+                "locate_by": {"type": "string", "description": "css, xpath, id, ..."},
+                "locator_value": {"type": "string"},
+            },
+            "required": ["website_id", "page_id", "locator_id", "locator_name", "locator_type", "locate_by", "locator_value"]
+        }
+    ),
 
     # Test scripts
     Tool(name="list_test_scripts", description="List or search test scripts by name.", inputSchema={"type": "object", "properties": {"name": {"type": "string", "description": "Optional name filter"}}}),
@@ -369,6 +390,11 @@ async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: boo
     if name == "add_locators":
         return await clients.asset.add_locators(
             args["page_id"], args["website_id"], args["page_url"], args.get("page_name", ""), args["locators"]
+        )
+    if name == "update_locator":
+        return await clients.asset.update_locator(
+            args["website_id"], args["page_id"], args["locator_id"],
+            args["locator_name"], args["locator_type"], args["locate_by"], args["locator_value"],
         )
 
     # Test scripts

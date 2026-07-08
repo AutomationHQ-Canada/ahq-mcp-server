@@ -87,3 +87,21 @@ class AssetClient(BaseAhqClient):
             extra_headers={"websiteId": website_id},
             timeout=60,
         )
+
+    async def update_locator(
+        self, website_id: str, page_id: str, locator_id: str, locator_name: str, locator_type: str, locate_by: str, locator_value: str
+    ) -> dict:
+        # add_locators (pushSpyElements) only ADDS locators that don't already match an existing
+        # one by locationStrategies value (LocatorController.mergeLocators/strategiesMatch) — it
+        # silently no-ops for anything that already exists, never updating fields on it. This is
+        # the only way to actually fix an already-created locator (e.g. backfilling
+        # locateBy/locatorValue on one created before that fix existed).
+        body = {
+            "locatorId": locator_id,
+            "locatorName": locator_name,
+            "locatorType": locator_type,
+            "locateBy": locate_by,
+            "locatorValue": locator_value,
+            "locationStrategies": [{"locateBy": locate_by, "locatorValue": locator_value, "selected": True}],
+        }
+        return await self.put(f"/rest/api/websites/{website_id}/pages/{page_id}/locator/{locator_id}", json=body)
