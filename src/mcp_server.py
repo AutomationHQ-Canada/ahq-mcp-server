@@ -13,6 +13,7 @@ from src.clients.config_client import config_client
 from src.clients.generic_client import generic_client, SERVICE_MAP
 from src.clients.user_client import user_client
 from src.clients.executor_client import executor_client
+from src.clients.managed_testing_client import managed_testing_client
 from src.tools.crawl_url import crawl_url as _crawl_url
 from src.tools.extract_requirements import extract_requirements as _extract_requirements
 
@@ -154,6 +155,28 @@ TOOLS = [
         },
     ),
 
+    # API / Performance Testing (mtaf-core) — a separate flow from UI bot testing, for
+    # REST/GraphQL request validation, chained-workflow testing, and JMeter-backed load testing.
+    Tool(name="list_api_collections", description="List API test collections (Postman-style, for REST/GraphQL testing — separate from UI test scripts).", inputSchema={"type": "object", "properties": {}}),
+    Tool(name="get_api_collection", description="Get full details of an API collection by ID.", inputSchema={"type": "object", "properties": {"collection_id": {"type": "string"}}, "required": ["collection_id"]}),
+    Tool(name="create_api_collection", description="Create a new API collection to group related API requests.", inputSchema={"type": "object", "properties": {"name": {"type": "string"}, "description": {"type": "string"}, "variables": {"type": "array", "items": {"type": "object", "properties": {"name": {"type": "string"}, "initialValue": {"type": "string"}}}, "description": "Collection-scoped variables, e.g. base_url"}}, "required": ["name"]}),
+    Tool(name="list_api_requests", description="List all saved API requests.", inputSchema={"type": "object", "properties": {}}),
+    Tool(name="get_api_request", description="Get full details of an API request by ID.", inputSchema={"type": "object", "properties": {"request_id": {"type": "string"}}, "required": ["request_id"]}),
+    Tool(name="create_api_request", description="Create and save a new API request (REST/GraphQL).", inputSchema={"type": "object", "properties": {"name": {"type": "string"}, "method": {"type": "string", "enum": ["GET", "POST", "PUT", "DELETE", "PATCH"]}, "url": {"type": "string", "description": "May contain {{varName:defaultValue}} placeholders"}, "collection_id": {"type": "string"}, "query_params": {"type": "array", "items": {"type": "object"}}, "header_params": {"type": "array", "items": {"type": "object"}}, "body_params": {"description": "Request body, shape depends on contentType"}}, "required": ["name", "method", "url"]}),
+    Tool(name="test_api_request", description="Execute a saved (or ad-hoc) API request once and get the response, without needing a full workflow.", inputSchema={"type": "object", "properties": {"request": {"type": "object", "description": "Full ApiRequestV2 object: name, method, url, headerParams, queryParams, bodyParams, ..."}, "variables": {"type": "object", "description": "Pre-seeded {{var}} overrides, e.g. {\"token\": \"abc123\"}"}, "data_row": {"type": "object", "description": "Test-data row: column name -> value"}, "environment": {"type": "string", "description": "Name of the collection environment to activate"}}, "required": ["request"]}),
+    Tool(name="import_curl", description="Import one or more curl commands as API requests (splits on lines starting with 'curl'). Set save=false to preview without persisting.", inputSchema={"type": "object", "properties": {"commands": {"type": "string"}, "save": {"type": "boolean", "default": True}, "collection_name": {"type": "string", "default": "cURL Import"}, "collection_id": {"type": "string", "description": "Add to an existing collection instead of creating a new one"}}, "required": ["commands"]}),
+    Tool(name="import_postman_collection", description="Import a Postman Collection (v2.0/v2.1 JSON) as API requests. Set save=false to preview without persisting.", inputSchema={"type": "object", "properties": {"collection": {"type": "object", "description": "Raw Postman collection JSON"}, "save": {"type": "boolean", "default": True}}, "required": ["collection"]}),
+    Tool(name="list_workflows", description="List chained API-request workflows.", inputSchema={"type": "object", "properties": {}}),
+    Tool(name="get_workflow", description="Get full details of a workflow by ID.", inputSchema={"type": "object", "properties": {"workflow_id": {"type": "string"}}, "required": ["workflow_id"]}),
+    Tool(name="create_workflow", description="Create a chained-API-request workflow (multiple requests run in sequence, e.g. for a user journey).", inputSchema={"type": "object", "properties": {"name": {"type": "string"}, "description": {"type": "string"}, "workflow_list": {"type": "array", "items": {"type": "object"}, "description": "Ordered list of chained requests — if the shape is unclear, use get_service_spec first"}}, "required": ["name"]}),
+    Tool(name="test_workflow", description="Run a one-off chained API workflow test (does not need to be saved first).", inputSchema={"type": "object", "properties": {"name": {"type": "string"}, "api_requests": {"type": "array", "items": {"type": "object", "properties": {"id": {"type": "integer"}, "method": {"type": "string"}, "name": {"type": "string"}, "url": {"type": "string"}, "headers": {"type": "object"}, "body": {}}}, "description": "Max 50 requests"}, "description": {"type": "string"}, "load_ratio": {"type": "number"}}, "required": ["name", "api_requests"]}),
+    Tool(name="list_performance_bots", description="List performance/load test bots (JMeter-backed).", inputSchema={"type": "object", "properties": {}}),
+    Tool(name="get_performance_bot", description="Get full details of a performance bot by ID.", inputSchema={"type": "object", "properties": {"bot_id": {"type": "string"}}, "required": ["bot_id"]}),
+    Tool(name="run_performance_bot", description="Run an existing performance bot by ID. Runs async in the background (can take hours) — returns a metrics ID immediately for polling via get_performance_results.", inputSchema={"type": "object", "properties": {"bot_id": {"type": "string"}}, "required": ["bot_id"]}),
+    Tool(name="stop_performance_bot", description="Stop a running performance bot.", inputSchema={"type": "object", "properties": {"bot_id": {"type": "string"}}, "required": ["bot_id"]}),
+    Tool(name="get_performance_results", description="Poll dashboard results (throughput, response times, errors) for a performance run by metrics ID.", inputSchema={"type": "object", "properties": {"metrics_id": {"type": "string"}, "polling": {"type": "boolean", "default": True}}, "required": ["metrics_id"]}),
+    Tool(name="list_vault_secrets", description="List vault secret names/keys (metadata only — never returns decrypted values; ask the user to check the UI if the raw value is needed).", inputSchema={"type": "object", "properties": {}}),
+
     # Auto-discovery — future-proof API access
     Tool(
         name="get_service_spec",
@@ -292,6 +315,55 @@ async def _dispatch(name: str, args: dict):
         )
     if name == "extract_requirements":
         return _extract_requirements(args["file_path"])
+
+    # API / Performance Testing (mtaf-core)
+    if name == "list_api_collections":
+        return await managed_testing_client.list_api_collections()
+    if name == "get_api_collection":
+        return await managed_testing_client.get_api_collection(args["collection_id"])
+    if name == "create_api_collection":
+        return await managed_testing_client.create_api_collection(args["name"], args.get("description"), args.get("variables"))
+    if name == "list_api_requests":
+        return await managed_testing_client.list_api_requests()
+    if name == "get_api_request":
+        return await managed_testing_client.get_api_request(args["request_id"])
+    if name == "create_api_request":
+        return await managed_testing_client.create_api_request(
+            args["name"], args["method"], args["url"], args.get("collection_id"),
+            args.get("query_params"), args.get("header_params"), args.get("body_params"),
+        )
+    if name == "test_api_request":
+        return await managed_testing_client.test_api_request(
+            args["request"], args.get("variables"), args.get("data_row"), args.get("environment")
+        )
+    if name == "import_curl":
+        return await managed_testing_client.import_curl(
+            args["commands"], args.get("save", True), args.get("collection_name", "cURL Import"), args.get("collection_id")
+        )
+    if name == "import_postman_collection":
+        return await managed_testing_client.import_postman(args["collection"], args.get("save", True))
+    if name == "list_workflows":
+        return await managed_testing_client.list_workflows()
+    if name == "get_workflow":
+        return await managed_testing_client.get_workflow(args["workflow_id"])
+    if name == "create_workflow":
+        return await managed_testing_client.create_workflow(args["name"], args.get("description"), args.get("workflow_list"))
+    if name == "test_workflow":
+        return await managed_testing_client.test_workflow(
+            args["name"], args["api_requests"], args.get("description"), args.get("load_ratio")
+        )
+    if name == "list_performance_bots":
+        return await managed_testing_client.list_performance_bots()
+    if name == "get_performance_bot":
+        return await managed_testing_client.get_performance_bot(args["bot_id"])
+    if name == "run_performance_bot":
+        return await managed_testing_client.run_performance_bot(args["bot_id"])
+    if name == "stop_performance_bot":
+        return await managed_testing_client.stop_performance_bot(args["bot_id"])
+    if name == "get_performance_results":
+        return await managed_testing_client.get_performance_results(args["metrics_id"], args.get("polling", True))
+    if name == "list_vault_secrets":
+        return await managed_testing_client.list_vault_secrets()
 
     # Auto-discovery
     if name == "get_service_spec":

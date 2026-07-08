@@ -152,6 +152,26 @@ treat their absence as a gap to "rediscover":
   (exceptions: `FakeDataController.generate` and token validation have standalone user-facing value)
 - Ops-only endpoints in any service: job queues, log-migration/cleanup/admin endpoints, SSE log streams
 
+## API / Performance Testing (mtaf-core) — a separate flow from UI test scripts
+
+`ahq-test-management-services`' TestBots run UI test scripts (browser automation). `mtaf-core`
+(`managed-testing-service-core`) is a completely separate product surface for REST/GraphQL request
+testing, chained-workflow testing, and JMeter-backed load testing. Don't conflate the two — a user
+asking to "test my API" or "run a load test" means the mtaf-core tools below, not `create_test_script`.
+
+- `list_api_collections` / `get_api_collection` / `create_api_collection` — Postman-style groupings
+- `list_api_requests` / `get_api_request` / `create_api_request` / `test_api_request` — individual
+  REST/GraphQL requests; `test_api_request` runs one immediately without saving it first
+- `import_curl` / `import_postman_collection` — bulk-import existing requests instead of hand-building them
+- `list_workflows` / `get_workflow` / `create_workflow` / `test_workflow` — chained multi-request flows
+  (e.g. a full user journey); `test_workflow` runs a one-off test without saving
+- `list_performance_bots` / `get_performance_bot` / `run_performance_bot` / `stop_performance_bot` /
+  `get_performance_results` — JMeter load tests; `run_performance_bot` returns immediately with a
+  metrics ID, poll `get_performance_results` for progress (test can run for hours)
+- `list_vault_secrets` — metadata only (names/keys); deliberately does NOT expose the
+  `/resolve/{key}` endpoint that returns decrypted plaintext, to keep secrets out of the conversation
+  transcript by default
+
 ## MCP Tool Quick Reference
 
 | Tool | When to use |
@@ -164,4 +184,5 @@ treat their absence as a gap to "rediscover":
 | `list_bots` / `execute_bot` | Run a TestBot by name |
 | `get_execution_report` | View pass/fail results |
 | `schedule_bot_recurring` | Set up a cron schedule |
+| `test_api_request` / `test_workflow` / `run_performance_bot` | API/load testing — see mtaf-core section above |
 | `get_service_spec` / `call_api` | Discover and call any AHQ endpoint not covered by a hand-written tool |
