@@ -99,3 +99,52 @@ async def test_add_locators_sends_raw_page_array_not_wrapped_object():
         "locators": locators,
     }]
     assert captured["headers"]["websiteId"] == "site-1"
+
+
+async def test_add_locators_backfills_deprecated_locateBy_locatorValue_from_strategy():
+    # ActionLibraryServices.getLocatorBy()/getLocatorValue() (ahq-actions-commons) crashes with an
+    # NPE at execution time if the deprecated singular locateBy is null, even though
+    # locationStrategies is populated (confirmed live) - a real backend bug, worked around here by
+    # mirroring what the UI's own locator-creation flow does: always double-write both.
+    captured = {}
+
+    async def fake_request(method, url, **kwargs):
+        captured["json"] = kwargs["json"]
+        return httpx.Response(200, json={"message": "ok"}, request=httpx.Request(method, url))
+
+    client = _client_with_fake_transport(fake_request)
+    locators = [{
+        "locatorName": "Email input",
+        "locatorType": "input",
+        "locationStrategies": [
+            {"locateBy": "xpath", "locatorValue": "//input[@id='old']", "selected": False},
+            {"locateBy": "css", "locatorValue": "input#email", "selected": True},
+        ],
+    }]
+    await client.add_locators("page-1", "site-1", "https://acme.example.com/login", "Login Page", locators)
+
+    sent_locator = captured["json"][0]["locators"][0]
+    assert sent_locator["locateBy"] == "css"
+    assert sent_locator["locatorValue"] == "input#email"
+
+
+async def test_add_locators_does_not_override_explicit_locateBy():
+    captured = {}
+
+    async def fake_request(method, url, **kwargs):
+        captured["json"] = kwargs["json"]
+        return httpx.Response(200, json={"message": "ok"}, request=httpx.Request(method, url))
+
+    client = _client_with_fake_transport(fake_request)
+    locators = [{
+        "locatorName": "Email input",
+        "locatorType": "input",
+        "locateBy": "id",
+        "locatorValue": "email-field",
+        "locationStrategies": [{"locateBy": "css", "locatorValue": "input#email", "selected": True}],
+    }]
+    await client.add_locators("page-1", "site-1", "https://acme.example.com/login", "Login Page", locators)
+
+    sent_locator = captured["json"][0]["locators"][0]
+    assert sent_locator["locateBy"] == "id"
+    assert sent_locator["locatorValue"] == "email-field"

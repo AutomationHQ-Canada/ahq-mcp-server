@@ -57,6 +57,23 @@ class AssetClient(BaseAhqClient):
         # LocatorController.pushSpyElements(@RequestBody List<Page> pages). It upserts by
         # pageUrl match (findBy...PageUrl...), so page_url must be included or this creates a
         # duplicate page instead of merging into the one just created via create_page.
+        #
+        # ActionLibraryServices.getLocatorBy()/getLocatorValue() (ahq-actions-commons) has a real
+        # bug: two separate `if` statements instead of `if/else if`, so it calls .isEmpty() on
+        # locator.getLocateBy() even after already detecting it's null, throwing an NPE at
+        # execution time - confirmed live, execution failed on step 2 with exactly this NPE.
+        # This only bites locators created via locationStrategies alone (the modern, correct way,
+        # which is all pushSpyElements needs) - the UI's own recorder/manual-entry flow apparently
+        # always double-writes the deprecated singular locateBy/locatorValue fields too, so it
+        # never trips this. Mirror that behavior here as a defensive workaround until the real bug
+        # is fixed upstream: populate locateBy/locatorValue from the selected (or first) strategy.
+        for loc in locators:
+            strategies = loc.get("locationStrategies") or []
+            if strategies and not loc.get("locateBy"):
+                chosen = next((s for s in strategies if s.get("selected")), strategies[0])
+                loc["locateBy"] = chosen.get("locateBy", "")
+                loc["locatorValue"] = chosen.get("locatorValue", "")
+
         page_payload = {
             "pageId": page_id,
             "pageName": page_name,
