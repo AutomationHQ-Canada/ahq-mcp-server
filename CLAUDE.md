@@ -165,6 +165,28 @@ shape (this exact payload produced correct, human-readable step titles against a
   use "Go to"/"Open" for URL navigation; "Enter Text" matches nothing, use "Enter"; "Assert Text"
   matches nothing, this platform's verb is "Verify".
 
+### create_test_script — fields that silently break UI visibility if omitted
+
+Confirmed live (2026-07-08): a script can be 100% correctly created, correctly branch-scoped
+(real `ScriptBranch` record on `main`), and STILL be completely invisible in the UI's Table View, or
+open with a validation error, if these are missing:
+
+- **`website_id`** — separate field from `page_id`. Drives the UI's "Application" column.
+- **`story_id`** — a script with no story attached was excluded from the Table View's default
+  listing entirely, even though the user-guide documents that view as "flat list of all scripts."
+  Get a real one via `list_epics` → `list_stories`, don't invent one.
+- **`status`** and **`type`** — plain `String` fields with no server-side default. Omitting them
+  (Jackson treats an absent JSON key the same as an explicit `null` for a String field) trips the
+  UI editor's validation (`"Expected string, received null"`) the moment the script is opened, even
+  though creation itself succeeds. Use `status="Not Started"`, `type="WEB"` (both are now the
+  `create_test_script` tool's defaults) unless you have a real reason to use a different value —
+  valid `status` values per the user-guide: Not Started, In Progress, Ready, To Be Repaired, On Hold.
+
+Also: **`main` can be a protected branch** — direct `PUT` edits to an existing script on `main` may
+403 (`"Direct edits to protected branch 'main' are not allowed. Create a working branch and use a
+Pull Request."`). If you need to fix a mistake on a script that's already on `main`, delete and
+recreate rather than editing, unless a PR flow is explicitly wanted.
+
 ## Gateway routing gotcha — mtaf-* services
 
 The gateway routes the `managed-testing-*`/`mtaf-cdct-core` family on SHORT route ids, not the repo

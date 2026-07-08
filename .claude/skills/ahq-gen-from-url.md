@@ -73,6 +73,16 @@ The user has a deployed web application and wants test scripts generated automat
      e.g. `"Enter {{text}} for the {{ui-locator}}"`). The server does not look this up itself for
      built-ins — omitting it causes a 500 error. Not needed for Common-Function templateIds (real
      UUIDs), which the server resolves on its own.
+   - **Always pass `website_id`** (from `create_website`'s result) — a script created with only
+     `page_id` and no `website_id` is invisible in the UI's Table View/Application filter, confirmed
+     live, even though it's created correctly.
+   - **Pass `story_id` too if the user has an epic/story context** (get one via `list_epics` →
+     `list_stories`, or ask the user) — a script with no story attached was excluded from the UI's
+     default Table View listing entirely in live testing, contradicting the documented "flat list of
+     all scripts" behavior. If there's no relevant epic/story, tell the user the script may not
+     appear in the default Test Scripts view and suggest checking the standalone/unassigned filter.
+   - `status`/`type` default to `"Not Started"`/`"WEB"` in `create_test_script` — leave them unless
+     you have a real reason to change them (never send them as null/omit them entirely).
 
 9. Return a summary to the user:
    - Pages crawled (total, skipped)
@@ -85,6 +95,7 @@ The user has a deployed web application and wants test scripts generated automat
 - Never omit `templateTitle` on a step whose templateId is a built-in (`"template-id-N"`) — causes a 500
 - Never put step values in `params` — use `parameters` (a list); `params` does not drive step titles or execution
 - Never fabricate `locateBy`/`locatorValue` on a `ui-locator` parameter — pass only `{"locatorId": "..."}` and let the server enrich it
+- Never call `create_test_script` without `website_id` — invisible in the UI even though correctly created
 - Never create a script with 0 steps
 - Script names must be unique — append " (2)", " (3)" if duplicates arise
 - If crawl returns an error for a page, skip it silently and note it in the summary

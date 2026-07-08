@@ -74,7 +74,15 @@ generated from it — no live app/URL involved.
      string verbatim into the step's `templateTitle` field** (placeholders intact) — the server
      does not look this up itself for built-ins and omitting it causes a 500 error. Not needed for
      Common-Function templateIds (real UUIDs).
-   - Attach to an epic/story only if the user specified one.
+   - **Always pass `website_id`** if the requirement maps to a known application — a script created
+     with only `page_id` and no `website_id` is invisible in the UI's Table View, confirmed live.
+   - Attach to an epic/story (`story_id`) if the user specified one, or if there's an obviously
+     matching one from `get_ahq_context`/`list_epics` — a script with no story was excluded from the
+     UI's default Table View listing entirely in live testing, contradicting the documented
+     "flat list of all scripts" behavior. Flag to the user if no epic/story fits and the script may
+     not appear in the default view as a result.
+   - `status`/`type` default to `"Not Started"`/`"WEB"` in `create_test_script` — leave them unless
+     you have a real reason to change them.
 
 8. If more than a few scripts were created, call `create_suite` and `add_scripts_to_suite` to group
    them under one suite named after the source file.
@@ -91,6 +99,7 @@ generated from it — no live app/URL involved.
 - Never omit `templateTitle` on a step whose templateId is a built-in (`"template-id-N"`) — causes a 500
 - Never put step values in `params` — use `parameters` (a list); `params` does not drive step titles or execution
 - Never fabricate `locateBy`/`locatorValue` on a `ui-locator` parameter — pass only `{"locatorId": "..."}` and let the server enrich it
+- Never call `create_test_script` without `website_id` when a website exists for this — invisible in the UI even though correctly created
 - Never create a script with 0 steps
 - Script names must be unique — append " (2)", " (3)" if duplicates arise
 - Always show the traceability matrix before writing scripts, not just in the final summary
