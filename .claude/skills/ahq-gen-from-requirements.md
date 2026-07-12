@@ -5,6 +5,9 @@ tools:
   - mcp__ahq-mcp-server__extract_requirements
   - mcp__ahq-mcp-server__get_ahq_context
   - mcp__ahq-mcp-server__list_epics
+  - mcp__ahq-mcp-server__create_epic
+  - mcp__ahq-mcp-server__list_stories
+  - mcp__ahq-mcp-server__create_story
   - mcp__ahq-mcp-server__search_step_templates
   - mcp__ahq-mcp-server__get_step_template
   - mcp__ahq-mcp-server__create_test_script
@@ -74,15 +77,17 @@ generated from it — no live app/URL involved.
      string verbatim into the step's `templateTitle` field** (placeholders intact) — the server
      does not look this up itself for built-ins and omitting it causes a 500 error. Not needed for
      Common-Function templateIds (real UUIDs).
-   - **Always pass `website_id`** if the requirement maps to a known application — a script created
-     with only `page_id` and no `website_id` is invisible in the UI's Table View, confirmed live.
+   - **`website_id` and `story_id` are both REQUIRED** — `create_test_script` validates this locally
+     and rejects the call with a clean error if either is missing, matching
+     `automationhq-frontend-v2`'s own create-script form (this is a hard requirement now, not a
+     "recommended" field). Pass `website_id` if the requirement maps to a known application.
    - Attach to an epic/story (`story_id`) if the user specified one, or if there's an obviously
-     matching one from `get_ahq_context`/`list_epics` — a script with no story was excluded from the
-     UI's default Table View listing entirely in live testing, contradicting the documented
-     "flat list of all scripts" behavior. Flag to the user if no epic/story fits and the script may
-     not appear in the default view as a result.
+     matching one from `get_ahq_context`/`list_epics`/`list_stories`. If nothing fits, call
+     `create_epic` then `create_story` rather than skipping the field — there is always a way to
+     satisfy this now, so don't flag-and-move-on the way this skill used to.
    - `status`/`type` default to `"Not Started"`/`"WEB"` in `create_test_script` — leave them unless
-     you have a real reason to change them.
+     you have a real reason to change them. If `status` is set to `"To Be Repaired"`, also pass
+     `repair_comment` — required in that case only.
 
 8. If more than a few scripts were created, call `create_suite` and `add_scripts_to_suite` to group
    them under one suite named after the source file.
@@ -99,7 +104,7 @@ generated from it — no live app/URL involved.
 - Never omit `templateTitle` on a step whose templateId is a built-in (`"template-id-N"`) — causes a 500
 - Never put step values in `params` — use `parameters` (a list); `params` does not drive step titles or execution
 - Never fabricate `locateBy`/`locatorValue` on a `ui-locator` parameter — pass only `{"locatorId": "..."}` and let the server enrich it
-- Never call `create_test_script` without `website_id` when a website exists for this — invisible in the UI even though correctly created
+- Never call `create_test_script` without `website_id` and `story_id` — both are validated locally and rejected if missing; resolve or create an epic/story rather than omitting it
 - Never create a script with 0 steps
 - Script names must be unique — append " (2)", " (3)" if duplicates arise
 - Always show the traceability matrix before writing scripts, not just in the final summary

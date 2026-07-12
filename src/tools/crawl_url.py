@@ -93,12 +93,19 @@ async def crawl_url(url: str, credentials: dict = None, max_pages: int = MAX_PAG
             login_page = await context.new_page()
             await login_page.goto(url, wait_until="networkidle", timeout=30_000)
             try:
-                await login_page.fill(
-                    'input[type="email"], input[name*="user"], input[name*="email"]',
-                    credentials.get("username", ""),
-                )
-                await login_page.fill('input[type="password"]', credentials.get("password", ""))
-                await login_page.click('button[type="submit"], input[type="submit"]')
+                # Scope username/submit lookups to the <form> containing the password field,
+                # not the whole page. A login page commonly also has a nearby "Sign Up" button
+                # (confirmed live against app.automationhq.ai: both "SIGN IN" and "Sign Up" are
+                # button[type="submit"]) — an unscoped selector matches both, Playwright's
+                # strict-mode click throws on the ambiguity, and the bare except below swallowed
+                # it silently, so the form was never actually submitted despite no visible error.
+                password_field = login_page.locator('input[type="password"]').first
+                form = password_field.locator("xpath=ancestor::form[1]")
+                await form.locator(
+                    'input[type="email"], input[name*="user"], input[name*="email"]'
+                ).first.fill(credentials.get("username", ""))
+                await password_field.fill(credentials.get("password", ""))
+                await form.locator('button[type="submit"], input[type="submit"]').first.click()
                 await login_page.wait_for_load_state("networkidle", timeout=15_000)
             except Exception:
                 pass
