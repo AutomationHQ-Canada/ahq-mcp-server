@@ -26,6 +26,11 @@ The user has a deployed web application and wants test scripts generated automat
 
 1. Call `get_ahq_context` — load full project snapshot (websites, envs, epics, bots, queue)
 2. Call `crawl_url` with the provided URL and credentials (if any)
+   - If it returns an error about a missing Playwright browser: relay the fix to the user
+     verbatim (run `playwright install chromium` once, then retry — a one-time setup step),
+     and OFFER the no-crawl fallback: if the user can paste the page's selectors (or you
+     already know this page's structure), build the locators directly via
+     `create_page` + `add_locators` and skip crawling entirely. Do not silently give up.
 
 3. Review the crawl result:
    - If any page has `passes_threshold: false` (resolution_rate < 0.80), skip it and note it in the final summary
