@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "ahq-mcp-server": {
+      "command": "python",
+      "args": ["-m", "src.mcp_server"],
+      "cwd": "${CLAUDE_PLUGIN_ROOT}"
+    }
+  }
+}

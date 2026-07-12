@@ -1,0 +1,13 @@
+{
+  "name": "automationhq",
+  "owner": {
+    "name": "AutomationHQ"
+  },
+  "plugins": [
+    {
+      "name": "ahq-skills",
+      "source": "./",
+      "description": "AutomationHQ test-automation workflows: script generation, bot execution/scheduling, and reporting via ahq-mcp-server."
+    }
+  ]
+}

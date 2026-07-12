@@ -1,0 +1,105 @@
+---
+name: ahq-gen-from-url
+description: Generate AHQ test scripts by crawling a live web application URL
+tools:
+  - mcp__ahq-mcp-server__crawl_url
+  - mcp__ahq-mcp-server__create_website
+  - mcp__ahq-mcp-server__create_page
+  - mcp__ahq-mcp-server__add_locators
+  - mcp__ahq-mcp-server__search_step_templates
+  - mcp__ahq-mcp-server__get_step_template
+  - mcp__ahq-mcp-server__list_epics
+  - mcp__ahq-mcp-server__create_epic
+  - mcp__ahq-mcp-server__list_stories
+  - mcp__ahq-mcp-server__create_story
+  - mcp__ahq-mcp-server__create_test_script
+---
+
+## When to use this skill
+The user has a deployed web application and wants test scripts generated automatically from a live URL.
+
+## What to collect before starting
+- Target URL (required)
+- Login credentials: username + password (optional — ask only if the app requires login to reach testable content)
+
+## Workflow
+
+1. Call `get_ahq_context` — load full project snapshot (websites, envs, epics, bots, queue)
+2. Call `crawl_url` with the provided URL and credentials (if any)
+
+3. Review the crawl result:
+   - If any page has `passes_threshold: false` (resolution_rate < 0.80), skip it and note it in the final summary
+   - If ALL pages fail the threshold, stop and report to the user
+
+4. For the first valid page, call `create_website` using the root domain as the name and the root URL
+
+5. For each valid page:
+   a. Call `create_page` with the page URL and title as the name, linked to the website
+   b. Call `add_locators` with `page_url` set to that same page URL (locators are upserted by URL
+      match, not by page_id — omitting it or getting it wrong creates a duplicate page instead of
+      attaching locators to the one just created). Transform each crawled element into
+      `{locatorName, locatorType, locationStrategies: [{locateBy, locatorValue, selected: true}]}` —
+      `locateBy`/`locatorValue` come from the crawl result's `css` or `xpath` field (prefer `css`
+      when present), `locatorType` from the crawl result's `tag`.
+
+6. Analyze all pages together and identify testable flows:
+   - Login / logout
+   - Navigation flows between pages
+   - Form submissions (create, update, search)
+   - Validation (empty fields, invalid input, required fields)
+   - Any visible CRUD operations
+
+7. For each flow, before writing any steps, call `search_step_templates` for each action you need
+   to get the real `templateId` AND `templateTitle` — there is no fixed/static list of action
+   types, templates are live per-project data (built-ins plus org-defined Common Functions).
+   Single-word searches work much better than full phrases — e.g. "Navigate" only matches
+   back/forward history templates, use "Go to" or "Open" to find
+   "Open Web Browser and go to page {{text}}"; "Enter Text" matches nothing, use "Enter" to find
+   "Enter {{text}} for the {{ui-locator}}"; "Click" matches directly
+   ("Click {{ui-locator}}"); "Assert" matches nothing, this platform uses "Verify" (e.g.
+   "Verify current URL contains path {{expected}}"). Call `get_step_template` on the result if
+   it's unclear which placeholder names (`{{...}}` in `templateTitle`) that template expects.
+   **Never invent a templateId.**
+
+8. For each flow, call `create_test_script` with:
+   - Name format: "<PageName> — <FlowType>" (e.g. "Login Page — Happy Path")
+   - Steps built from the locators captured and the resolved templateIds — see CLAUDE.md's
+     "TestStep shape" section for the exact, proven-working `parameters` shape. In short: each
+     step needs `templateId` + `templateTitle` (built-ins only) + a `parameters` array (NOT
+     `params`) with one entry per `{{placeholder}}` in `templateTitle` — `{"key": "ui-locator",
+     "value": {"locatorId": "<real id from add_locators>"}, "paramClass":
+     "ai.automationhq.commons.entities.assets.UILocator"}` for element targets (never fabricate
+     locateBy/locatorValue here, the server enriches from the saved locator), and
+     `{"key": "text", "value": {"type": 0, "value": "<literal>"}, "paramClass":
+     "ai.automationhq.commons.entities.assets.TypeValuePair"}` for scalar values.
+   - **For every built-in templateId (looks like `"template-id-N"`), copy that template's
+     `templateTitle` string verbatim into the step's `templateTitle` field** (placeholders intact,
+     e.g. `"Enter {{text}} for the {{ui-locator}}"`). The server does not look this up itself for
+     built-ins — omitting it causes a 500 error. Not needed for Common-Function templateIds (real
+     UUIDs), which the server resolves on its own.
+   - **`website_id` and `story_id` are both REQUIRED** — `create_test_script` now validates this
+     locally and rejects the call with a clean error if either is missing, matching
+     `automationhq-frontend-v2`'s own create-script form. Pass `website_id` from `create_website`'s
+     result. For `story_id`: resolve one via `list_epics` → `list_stories`; if nothing fits, call
+     `create_epic` then `create_story` rather than skipping the field or asking the user to accept
+     an invisible script — there is always a way to satisfy this now.
+   - `status`/`type` default to `"Not Started"`/`"WEB"` in `create_test_script` — leave them unless
+     you have a real reason to change them (never send them as null/omit them entirely). If you do
+     set `status` to `"To Be Repaired"`, also pass `repair_comment` — required in that case only.
+
+9. Return a summary to the user:
+   - Pages crawled (total, skipped)
+   - Total locators captured
+   - Scripts created (list each by name)
+
+## Rules
+- Maximum 20 pages per invocation
+- Never fabricate a templateId — always resolve it via `search_step_templates`/`get_step_template` first
+- Never omit `templateTitle` on a step whose templateId is a built-in (`"template-id-N"`) — causes a 500
+- Never put step values in `params` — use `parameters` (a list); `params` does not drive step titles or execution
+- Never fabricate `locateBy`/`locatorValue` on a `ui-locator` parameter — pass only `{"locatorId": "..."}` and let the server enrich it
+- Never call `create_test_script` without `website_id` and `story_id` — both are validated locally and rejected if missing; resolve or create a story rather than omitting it
+- Never create a script with 0 steps
+- Script names must be unique — append " (2)", " (3)" if duplicates arise
+- If crawl returns an error for a page, skip it silently and note it in the summary
+- Do not call `create_website` more than once per invocation — reuse the websiteId for all pages
