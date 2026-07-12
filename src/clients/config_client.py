@@ -20,3 +20,75 @@ class ConfigClient(BaseAhqClient):
     async def list_profiles(self) -> list:
         result = await self.get("/rest/api/profiles")
         return result if isinstance(result, list) else result.get("content", result)
+
+    # --- Global Parameters ---
+    # GlobalParametersController stores a project's parameters as ONE document
+    # (GlobalParameter.customProperties: List<KeyValuePair>), not one row per parameter.
+    async def list_global_parameters(self) -> dict:
+        return await self.get("/rest/api/globalParameters")
+
+    async def search_global_parameters(self, name: str = None) -> list:
+        # Always includes the 3 default system params (baseUrl/timeout/waitForElementTimeout)
+        # plus any custom properties, per GlobalParametersController.searchByName(). The `name`
+        # query param is a REQUIRED @RequestParam server-side (no `required=false`) — omitting it
+        # entirely 400s, even though an empty string is treated as "match everything." Confirmed
+        # live: calling with no params returned "Invalid request parameters."
+        return await self.get("/rest/api/globalParameters/search", params={"name": name or ""})
+
+    async def add_global_parameter(self, name: str, value: str, description: str = None) -> dict:
+        # SAFETY-CRITICAL: PUT/POST replaces the ENTIRE customProperties list server-side — it is
+        # not a per-item patch (confirmed by reading GlobalParametersController.java directly: the
+        # handler assigns whatever list the caller sends, it never merges). Sending only the new
+        # property would silently wipe every other existing global parameter. This method GETs the
+        # current document, appends the new property to customProperties in memory, then POSTs the
+        # whole merged document back — the same defensive pattern as
+        # AssetClient/update_common_function for the identical trap found in that entity.
+        current = await self.list_global_parameters()
+        properties = current.get("customProperties") or []
+        properties.append({"name": name, "value": value, "description": description})
+        current["customProperties"] = properties
+        return await self.post("/rest/api/globalParameters", json=current)
+
+    async def check_global_parameter_usage(self, custom_property_id: str) -> dict:
+        return await self.get(f"/rest/api/globalParameters/custom/{custom_property_id}/usage")
+
+    async def flatten_and_delete_global_parameter(self, custom_property_id: str) -> dict:
+        # This is the ONLY deletion path — there is no plain DELETE endpoint. It converts every
+        # test-step reference (type=2) to a literal value first, then removes the property.
+        return await self.post(f"/rest/api/globalParameters/custom/{custom_property_id}/flatten")
+
+    # --- Vault (config-services' own vault — separate from managed_testing_client's mtaf-core vault) ---
+    # VaultSecretController reads "organizationId"/"projectId" headers, NOT the "org-id" this
+    # client sends by default — a header-naming inconsistency within ahq-config-services itself,
+    # confirmed by reading GlobalParametersController (uses "org-id") and VaultSecretController
+    # (uses "organizationId") side by side. Every vault call below must pass the override.
+    def _vault_headers(self) -> dict:
+        return {"organizationId": self._credentials.org_id}
+
+    async def list_config_vault_secrets(self) -> list:
+        return await self.get("/rest/api/vault/list", extra_headers=self._vault_headers())
+
+    async def get_config_vault_secret(self, secret_id: str) -> dict:
+        return await self.get(f"/rest/api/vault/{secret_id}", extra_headers=self._vault_headers())
+
+    async def create_config_vault_secret(self, name: str, value: str, description: str = None) -> dict:
+        payload = {"name": name, "value": value}
+        if description:
+            payload["description"] = description
+        return await self.post("/rest/api/vault", json=payload, extra_headers=self._vault_headers())
+
+    async def update_config_vault_secret(self, secret_id: str, value: str = None, description: str = None) -> dict:
+        payload = {}
+        if value is not None:
+            payload["value"] = value
+        if description is not None:
+            payload["description"] = description
+        return await self.put(f"/rest/api/vault/{secret_id}", json=payload, extra_headers=self._vault_headers())
+
+    async def delete_config_vault_secret(self, secret_id: str) -> dict:
+        return await self.delete(f"/rest/api/vault/{secret_id}", extra_headers=self._vault_headers())
+
+    # Deliberately NOT wrapped: GET /rest/api/vault/getByName/{name} and GET /rest/api/vault/getById/{id}
+    # both return the DECRYPTED PLAINTEXT secret value directly. Exposing either as an MCP tool would
+    # put real credentials into the conversation transcript — the same policy already established for
+    # mtaf-core's vault (see managed_testing_client.py's list_vault_secrets docstring).

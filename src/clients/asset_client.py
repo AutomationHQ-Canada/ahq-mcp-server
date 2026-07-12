@@ -1,6 +1,17 @@
+import re
+
 from src.clients.base_client import BaseAhqClient
 from src.config.ahq_services import ASSET_SVC
 from src.config.credentials import decode_ahq_token
+
+# CommonFunctionController masks these templates' sensitive param (type-0 literal values become
+# all-asterisks) on every GET — mirrored here so update_common_function can refuse to write a
+# mask back over the real stored value. Keep in sync with ENCRYPTED_SENSITIVE_PARAM_KEY there.
+_ENCRYPTED_SENSITIVE_PARAM_KEY = {
+    "template-id-105": "password",
+    "template-id-98": "text",
+}
+_MASK_RE = re.compile(r"^\*+$")
 
 
 class AssetClient(BaseAhqClient):
@@ -87,6 +98,80 @@ class AssetClient(BaseAhqClient):
             extra_headers={"websiteId": website_id},
             timeout=60,
         )
+
+    # --- Common Functions (User Test Steps) ---
+    async def list_common_functions(self, name: str = None) -> list:
+        # The list handler only routes when "offset" is present in the query string —
+        # @RequestMapping(method = GET, params = "offset") on CommonFunctionController.list().
+        # Omitting offset doesn't page differently, it 404s/405s because NO handler matches.
+        params = {"offset": 0, "size": 1000}
+        if name:
+            params["name"] = name
+        result = await self.get("/rest/api/commonFunctions", params=params)
+        return result.get("content", result) if isinstance(result, dict) else result
+
+    async def get_common_function(self, common_function_id: str) -> dict:
+        return await self.get(f"/rest/api/commonFunctions/{common_function_id}")
+
+    async def create_common_function(
+        self,
+        name: str,
+        website_id: str,
+        status: str,
+        return_type: dict,
+        steps: list = None,
+        parameters: list = None,
+        description: str = None,
+    ) -> dict:
+        payload = {
+            "name": name,
+            "websiteId": website_id,
+            "status": status,
+            "returnType": return_type,
+            "testSteps": steps or [],
+            "parameters": parameters or [],
+            "description": description or "",
+        }
+        return await self.post("/rest/api/commonFunctions", json=payload)
+
+    async def update_common_function(self, common_function_id: str, **changes) -> dict:
+        # SAFETY-CRITICAL: PUT /rest/api/commonFunctions/{id} is a full-document replace
+        # (commonFunctionRepo.save(requestBody) — the server only forces commonFunctionId back
+        # onto the body; it does NOT preserve organizationId/projectId/createdBy/testSteps/
+        # parameters/returnType from the existing document). A partial body silently wipes every
+        # omitted field AND orphans the function from its org. So: GET the full document first,
+        # shallow-merge the requested changes on top, PUT the merged whole back. This is the fix
+        # for the wipe-on-rename incident (project_user_test_step_rename_fix), baked in so it
+        # cannot be bypassed.
+        current = await self.get_common_function(common_function_id)
+        merged_steps = changes.get("testSteps", current.get("testSteps"))
+        if "testSteps" not in changes and self._has_masked_encrypted_value(merged_steps):
+            raise ValueError(
+                "This User Test Step contains an encrypted-text step whose literal value the "
+                "server masks (returns '****') on every read — writing the fetched document back "
+                "would permanently overwrite the real stored value with asterisks. Pass new "
+                "testSteps (re-supplying the real encrypted value, or a vault/type-7 reference) "
+                "to update this function, or leave it unchanged."
+            )
+        current.update(changes)
+        return await self.put(f"/rest/api/commonFunctions/{common_function_id}", json=current)
+
+    @staticmethod
+    def _has_masked_encrypted_value(test_steps) -> bool:
+        for step in test_steps or []:
+            sensitive_key = _ENCRYPTED_SENSITIVE_PARAM_KEY.get(step.get("templateId"))
+            if not sensitive_key:
+                continue
+            for param in step.get("parameters") or []:
+                if param.get("key") != sensitive_key:
+                    continue
+                value = param.get("value")
+                if not isinstance(value, dict):
+                    continue
+                tvp_value = value.get("value")
+                if value.get("type") == 0 and isinstance(tvp_value, str) and _MASK_RE.match(tvp_value):
+                    return True
+        return False
 
     async def update_locator(
         self, website_id: str, page_id: str, locator_id: str, locator_name: str, locator_type: str, locate_by: str, locator_value: str

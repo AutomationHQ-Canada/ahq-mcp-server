@@ -12,9 +12,15 @@ def decode_ahq_token(token: str) -> dict:
     `tokens` collection). Used to derive organizationId directly from the token instead of trusting
     a separately-configured value that can drift out of sync with it.
     """
-    payload = token.split(".")[1]
+    parts = token.split(".")
+    if len(parts) < 2:
+        return {}
+    payload = parts[1]
     payload += "=" * (-len(payload) % 4)
-    return json.loads(base64.urlsafe_b64decode(payload))
+    try:
+        return json.loads(base64.urlsafe_b64decode(payload))
+    except (ValueError, UnicodeDecodeError):
+        return {}
 
 
 @dataclass(frozen=True)
@@ -44,7 +50,7 @@ class AhqCredentials:
         return cls(
             base_url=settings.ahq_base_url,
             api_token=settings.ahq_api_token,
-            org_id=claims["organizationId"],
+            org_id=claims.get("organizationId", ""),
             project_id=settings.ahq_project_id,
         )
 

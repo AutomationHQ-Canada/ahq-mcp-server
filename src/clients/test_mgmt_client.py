@@ -27,6 +27,7 @@ class TestMgmtClient(BaseAhqClient):
         status: str = "Not Started",
         script_type: str = "WEB",
         branch_name: str = "main",
+        repair_comment: str = None,
     ) -> dict:
         # websiteId is a separate field from pageId on TestScript — the UI's "Application" column
         # and its filtering key off websiteId, NOT pageId. A script with pageId but no websiteId
@@ -56,6 +57,8 @@ class TestMgmtClient(BaseAhqClient):
             payload["websiteId"] = website_id
         if story_id:
             payload["storyId"] = story_id
+        if repair_comment:
+            payload["repairComment"] = repair_comment
         return await self.post("/rest/api/stories/scripts", json=payload)
 
     # --- Epics ---
@@ -97,6 +100,248 @@ class TestMgmtClient(BaseAhqClient):
 
     async def add_scripts_to_suite(self, suite_id: str, script_ids: list) -> dict:
         return await self.post(f"/rest/api/suites/{suite_id}/scripts", json={"scriptIds": script_ids})
+
+    # --- Recorded Scripts ---
+    # RecordedScriptController reads @RequestHeader("organizationId") — NOT the "org-id" header
+    # every OTHER controller in this same service uses (TestScriptController, EpicController, ...).
+    # A recorded-script call sent with only the default headers 400s with a missing-header error.
+    def _recorded_headers(self) -> dict:
+        return {"organizationId": self._credentials.org_id}
+
+    async def list_recorded_scripts(self, name: str = None, branch_name: str = None) -> dict:
+        params = {"offset": 0, "size": 100}
+        if name:
+            params["name"] = name
+        if branch_name:
+            params["branchName"] = branch_name
+        return await self.get(
+            "/rest/api/recorded-scripts", params=params, extra_headers=self._recorded_headers()
+        )
+
+    async def get_recorded_script(self, recorded_script_id: str) -> dict:
+        return await self.get(
+            f"/rest/api/recorded-scripts/{recorded_script_id}",
+            extra_headers=self._recorded_headers(),
+        )
+
+    async def promote_recorded_script(
+        self,
+        recorded_script_id: str,
+        story_id: str,
+        name: str = None,
+        website_id: str = None,
+        status: str = None,
+        description: str = None,
+        tags: list = None,
+        reusable: bool = None,
+        steps: list = None,
+        keep_step_ids: list = None,
+        branch_name: str = "main",
+    ) -> dict:
+        # storyId travels as a QUERY PARAM, not in the body — the body is the optional
+        # PromoteRecordedScript overrides object. The server requires storyId for a first-time
+        # promotion (repeat promotions update the already-linked TestScript and ignore it).
+        # branch_name defaults to "main" explicitly for the same reason create_test_script always
+        # sends currentBranchName: a null/blank branch makes the server auto-commit against this
+        # API token's ambient "checked out branch" ProjectState, which is not reliably "main".
+        body = {"currentBranchName": branch_name}
+        if name:
+            body["name"] = name
+        if website_id:
+            body["websiteId"] = website_id
+        if status:
+            body["status"] = status
+        if description:
+            body["description"] = description
+        if tags:
+            body["tags"] = tags
+        if reusable is not None:
+            body["reusable"] = reusable
+        if steps:
+            body["steps"] = steps
+        if keep_step_ids:
+            body["keepStepIds"] = keep_step_ids
+        return await self.post(
+            f"/rest/api/recorded-scripts/{recorded_script_id}/promote",
+            json=body,
+            params={"storyId": story_id},
+            extra_headers=self._recorded_headers(),
+        )
+
+    # Recorded-script archive endpoints live HERE (RecordedScriptController), not in
+    # ahq-user-management-services like every other entity's Archive Manager endpoints —
+    # the dispatcher routes entity_type="recorded_script" to these.
+    async def list_archived_recorded_scripts(self, name: str = None, page: int = 0, size: int = 50) -> dict:
+        # This controller pages with "offset", unlike the generic ArchiveController's "page".
+        params = {"offset": page, "size": size}
+        if name:
+            params["name"] = name
+        return await self.get(
+            "/rest/api/recorded-scripts/archived", params=params, extra_headers=self._recorded_headers()
+        )
+
+    async def restore_recorded_script(self, recorded_script_id: str) -> dict:
+        return await self.post(
+            f"/rest/api/recorded-scripts/{recorded_script_id}/restore",
+            extra_headers=self._recorded_headers(),
+        )
+
+    async def permanently_delete_recorded_script(self, recorded_script_id: str) -> dict:
+        return await self.delete(
+            f"/rest/api/recorded-scripts/{recorded_script_id}/permanent",
+            extra_headers=self._recorded_headers(),
+        )
+
+    # --- Version Control: branches & commits ---
+    # ProjectBranchController, base /rest/api/projects/{projectId}/branches, standard org-id
+    # header. Branch names travel as QUERY params (never path segments) so names with slashes
+    # (feature/login) work.
+    def _branches_base(self) -> str:
+        return f"/rest/api/projects/{self._credentials.project_id}/branches"
+
+    async def list_branches(self, query: str = None) -> list:
+        params = {"q": query} if query else None
+        return await self.get(self._branches_base(), params=params)
+
+    async def get_scripts_for_branch(self, branch_name: str) -> list:
+        # THE correct way to answer "which scripts are on branch X" — real membership lives in
+        # per-script branch records, NOT in TestScript.currentBranchName (filtering on that field
+        # undercounted 1 vs the UI's 7 in live testing, 2026-07-11).
+        return await self.get(f"{self._branches_base()}/scripts", params={"branchName": branch_name})
+
+    async def create_branch(
+        self,
+        branch_name: str,
+        from_branch: str = "main",
+        strategy: str = None,
+        confirmed: bool = False,
+        script_ids: list = None,
+        is_protected: bool = False,
+    ) -> dict:
+        # Two-phase server-side: the first call runs a preflight conflict check and may return
+        # status NEEDS_CONFIRMATION instead of creating anything — the caller must resend with
+        # confirmed=true (surfaced to the tool caller, never auto-retried here).
+        body = {
+            "branchName": branch_name,
+            "fromBranch": from_branch,
+            "confirmed": confirmed,
+            # Lombok `boolean isProtected` -> Jackson property "protected"; send both spellings
+            # (same trap as CreateRoleRequest.isDefault).
+            "protected": is_protected,
+            "isProtected": is_protected,
+        }
+        if strategy:
+            body["strategy"] = strategy
+        if script_ids:
+            body["scriptIds"] = script_ids
+        return await self.post(self._branches_base(), json=body)
+
+    async def commit_branch(self, branch_name: str, message: str, tag: str = None) -> dict:
+        body = {"message": message}
+        if tag:
+            body["tag"] = tag
+        return await self.post(
+            f"{self._branches_base()}/commit", params={"branchName": branch_name}, json=body
+        )
+
+    async def list_commits(self, branch_name: str, page: int = 0, size: int = 20) -> dict:
+        return await self.get(
+            f"{self._branches_base()}/commits",
+            params={"branchName": branch_name, "page": page, "size": size},
+        )
+
+    # --- Version Control: pull requests ---
+    # PullRequestController, base /rest/api/projects/{projectId}/pull-requests. The lifecycle
+    # endpoints (approve/merge/close/rebase/ready-for-review) take NO request body at all —
+    # state lives server-side; do not invent one.
+    def _prs_base(self) -> str:
+        return f"/rest/api/projects/{self._credentials.project_id}/pull-requests"
+
+    async def create_pull_request(
+        self,
+        source_branch: str,
+        target_branch: str,
+        title: str,
+        description: str = None,
+        reviewer_ids: list = None,
+        script_ids: list = None,
+        delete_source_branch_after_merge: bool = False,
+    ) -> dict:
+        body = {
+            "sourceBranch": source_branch,
+            "targetBranch": target_branch,
+            "title": title,
+            "deleteSourceBranchAfterMerge": delete_source_branch_after_merge,
+        }
+        if description:
+            body["description"] = description
+        if reviewer_ids:
+            body["reviewerIds"] = reviewer_ids
+        if script_ids:
+            body["scriptIds"] = script_ids
+        return await self.post(self._prs_base(), json=body)
+
+    async def list_pull_requests(self, status: list = None, query: str = None, page: int = 0, size: int = 20) -> dict:
+        params = {"page": page, "size": size}
+        if status:
+            params["status"] = status
+        if query:
+            params["q"] = query
+        return await self.get(self._prs_base(), params=params)
+
+    async def get_pull_request(self, pr_id: str) -> dict:
+        return await self.get(f"{self._prs_base()}/{pr_id}")
+
+    async def get_pull_request_diff(self, pr_id: str, script_id: str = None) -> dict:
+        params = {"scriptId": script_id} if script_id else None
+        return await self.get(f"{self._prs_base()}/{pr_id}/diff", params=params)
+
+    async def approve_pull_request(self, pr_id: str) -> dict:
+        return await self.post(f"{self._prs_base()}/{pr_id}/approve")
+
+    async def request_pr_changes(self, pr_id: str, comment: str = None) -> dict:
+        body = {"comment": comment} if comment else None
+        return await self.post(f"{self._prs_base()}/{pr_id}/request-changes", json=body)
+
+    async def merge_pull_request(self, pr_id: str) -> dict:
+        return await self.post(f"{self._prs_base()}/{pr_id}/merge")
+
+    async def close_pull_request(self, pr_id: str) -> dict:
+        # Closing does NOT delete the source branch.
+        return await self.post(f"{self._prs_base()}/{pr_id}/close")
+
+    # --- Project Roles ---
+    # ProjectRoleController, base /rest/api/projects/{projectId}/roles — standard org-id header,
+    # projectId in the PATH (also still sent as the usual header; harmless).
+    def _roles_base(self) -> str:
+        return f"/rest/api/projects/{self._credentials.project_id}/roles"
+
+    async def list_project_roles(self) -> list:
+        return await self.get(self._roles_base())
+
+    async def create_project_role(self, role_name: str, permissions: list, is_default: bool = False) -> dict:
+        # CreateRoleRequest declares `private boolean isDefault` with Lombok @Data — the generated
+        # getter is isDefault(), so Jackson's property name is "default", not "isDefault". Send
+        # both spellings; Spring Boot ignores the unknown one (FAIL_ON_UNKNOWN_PROPERTIES off).
+        return await self.post(
+            self._roles_base(),
+            json={"roleName": role_name, "permissions": permissions, "default": is_default, "isDefault": is_default},
+        )
+
+    async def update_project_role_permissions(self, role_id: str, permissions: list) -> dict:
+        # Role name is immutable server-side — the update endpoint only reads permissions, which
+        # is why no name parameter exists on this method or its tool at all.
+        return await self.put(f"{self._roles_base()}/{role_id}", json={"permissions": permissions})
+
+    async def delete_project_role(self, role_id: str) -> dict:
+        # System roles cannot be deleted (server-enforced); only custom roles.
+        return await self.delete(f"{self._roles_base()}/{role_id}")
+
+    async def assign_project_role(self, role_id: str, user_id: str) -> dict:
+        return await self.post(f"{self._roles_base()}/{role_id}/users", json={"userId": user_id})
+
+    async def list_project_members(self) -> list:
+        return await self.get(f"{self._roles_base()}/members")
 
     # --- Step Templates ---
     # A TestStep's `templateId` must reference one of these — there is no static/hardcodable

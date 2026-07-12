@@ -15,6 +15,7 @@ from src.clients.managed_testing_client import ManagedTestingClient
 from src.clients.email_client import EmailClient
 from src.clients.cdct_client import CdctClient
 from src.clients.virtualization_client import VirtualizationClient
+from src.clients.tunnel_client import TunnelClient
 
 
 @dataclass
@@ -37,6 +38,7 @@ class ClientBundle:
     email: EmailClient
     cdct: CdctClient
     virtualization: VirtualizationClient
+    tunnel: TunnelClient
 
     @classmethod
     def build(cls, credentials: AhqCredentials = None, http_client: httpx.AsyncClient = None) -> "ClientBundle":
@@ -54,6 +56,7 @@ class ClientBundle:
             email=EmailClient(**kw),
             cdct=CdctClient(**kw),
             virtualization=VirtualizationClient(**kw),
+            tunnel=TunnelClient(**kw),
         )
 
 

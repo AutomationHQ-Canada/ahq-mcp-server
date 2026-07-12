@@ -5,11 +5,13 @@ import sys
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
+from pydantic import ValidationError
 
 from src.config.ahq_services import settings
 from src.config.credentials import AhqCredentials
 from src.clients.bundle import ClientBundle, DEFAULT_BUNDLE
 from src.clients.generic_client import SERVICE_MAP
+from src.schema.asset_kinds import VALIDATORS, format_validation_error
 from src.tools.crawl_url import crawl_url as _crawl_url
 from src.tools.extract_requirements import extract_requirements as _extract_requirements
 
@@ -55,9 +57,18 @@ async def _get_ahq_context(clients: ClientBundle) -> dict:
         clients.test_mgmt.list_bots(),
         clients.test_mgmt.list_suites(),
         clients.background.get_queue_status(),
+        # mtaf-core (API/performance testing) — a separate flow from UI test scripts, previously
+        # missing from this snapshot entirely: an agent working on API/load-testing tasks had no
+        # context-loading path here and had to call list_* blind.
+        clients.managed_testing.list_api_collections(),
+        clients.managed_testing.list_workflows(),
+        clients.managed_testing.list_performance_bots(),
         return_exceptions=True,
     )
-    keys = ["user", "projects", "websites", "environments", "epics", "bots", "suites", "queue"]
+    keys = [
+        "user", "projects", "websites", "environments", "epics", "bots", "suites", "queue",
+        "api_collections", "workflows", "performance_bots",
+    ]
     return {
         k: (str(v) if isinstance(v, Exception) else v)
         for k, v in zip(keys, results)
@@ -158,9 +169,10 @@ TOOLS = [
             "properties": {
                 "name": {"type": "string"},
                 "page_id": {"type": "string"},
-                "website_id": {"type": "string", "description": "Strongly recommended — a script created with only page_id and no website_id is invisible in the UI's Table View and Application filter, even though it's created correctly. Get this from create_website/list_websites."},
-                "story_id": {"type": "string", "description": "Strongly recommended — a script with no story_id was excluded from the UI's default Table View listing entirely in live testing, even though every other field was correct. Get this from list_epics -> list_stories."},
+                "website_id": {"type": "string", "description": "REQUIRED (validated before the API call) — matches automationhq-frontend-v2's own create-script form. A script created with only page_id and no website_id is invisible in the UI's Table View and Application filter, even though it's created correctly. Get this from create_website/list_websites."},
+                "story_id": {"type": "string", "description": "REQUIRED (validated before the API call) — matches automationhq-frontend-v2's own create-script form. A script with no story_id was excluded from the UI's default Table View listing entirely in live testing. Get this from list_epics -> list_stories, or use create_epic/create_story if nothing fits."},
                 "status": {"type": "string", "default": "Not Started", "description": "One of: Not Started, In Progress, Ready, To Be Repaired, On Hold. Sending this as null/absent triggers a UI validation error when the script is opened."},
+                "repair_comment": {"type": "string", "description": "REQUIRED only when status is 'To Be Repaired' (matches the frontend form's conditional rule) — otherwise omit."},
                 "script_type": {"type": "string", "default": "WEB", "description": "e.g. 'WEB'. Sending this as null/absent triggers a UI validation error when the script is opened."},
                 "branch_name": {"type": "string", "default": "main", "description": "Always defaults to 'main' and should stay that way unless the user explicitly asked for a working branch — omitting this field entirely falls back to an unreliable per-session ambient branch that is NOT guaranteed to be main, confirmed live."},
                 "steps": {
@@ -193,7 +205,7 @@ TOOLS = [
                     }
                 }
             },
-            "required": ["name", "steps"]
+            "required": ["name", "steps", "website_id", "story_id"]
         }
     ),
 
@@ -202,13 +214,84 @@ TOOLS = [
     Tool(name="search_step_templates", description="Search step templates by title (e.g. 'Click', 'Navigate', 'Assert Text') to find the real templateId for an action.", inputSchema={"type": "object", "properties": {"title": {"type": "string"}}, "required": ["title"]}),
     Tool(name="get_step_template", description="Get full detail of a step template by ID, including which params sub-fields it expects.", inputSchema={"type": "object", "properties": {"template_id": {"type": "string"}}, "required": ["template_id"]}),
 
+    # Recorded Scripts — browser sessions captured by the TestBot Recorder Chrome Extension.
+    # Read + promote only; recordings themselves are created by the extension, not by tools.
+    Tool(name="list_recorded_scripts", description="List recorded scripts (browser sessions captured by the TestBot Recorder extension), optionally filtered by name or branch.", inputSchema={"type": "object", "properties": {"name": {"type": "string", "description": "Optional name filter"}, "branch_name": {"type": "string", "description": "Optional branch filter"}}}),
+    Tool(name="get_recorded_script", description="Get a recorded script by ID, including its captured steps and whether it was already promoted (promotedTestScriptId).", inputSchema={"type": "object", "properties": {"recorded_script_id": {"type": "string"}}, "required": ["recorded_script_id"]}),
+    Tool(name="promote_recorded_script", description="Promote a recorded script into a real Test Script. story_id is REQUIRED for a first-time promotion (the server rejects it otherwise, and a script without a story is invisible in the UI's Table View) — resolve via list_epics/list_stories or create_epic/create_story. Re-promoting an already-promoted recording updates the linked Test Script instead.", inputSchema={"type": "object", "properties": {"recorded_script_id": {"type": "string"}, "story_id": {"type": "string"}, "name": {"type": "string", "description": "Optional name override for the resulting Test Script"}, "website_id": {"type": "string", "description": "Optional application override"}, "status": {"type": "string", "description": "Optional status for the resulting Test Script"}, "description": {"type": "string"}, "branch_name": {"type": "string", "default": "main", "description": "Branch for the resulting Test Script — always sent explicitly (defaults to main) because omitting it falls back to the API token's ambient checked-out branch, which is unstable"}}, "required": ["recorded_script_id", "story_id"]}),
+
+    # Common Functions (aka User Test Steps) — reusable multi-step components usable as a single
+    # step inside test scripts.
+    Tool(name="list_common_functions", description="List Common Functions / User Test Steps (reusable step components), optionally filtered by name.", inputSchema={"type": "object", "properties": {"name": {"type": "string", "description": "Optional name filter"}}}),
+    Tool(name="get_common_function", description="Get a Common Function by ID including its testSteps, parameters, and returnType. Note: encrypted-text step values are masked (asterisks) by the server on read.", inputSchema={"type": "object", "properties": {"common_function_id": {"type": "string"}}, "required": ["common_function_id"]}),
+    Tool(name="create_common_function", description="Create a Common Function / User Test Step. Steps use the same TestStep shape as create_test_script (templateId + verbatim templateTitle + parameters). Nesting is rejected server-side: a step's templateId must not be another Common Function's ID.", inputSchema={"type": "object", "properties": {"name": {"type": "string", "description": "1-120 chars; letters, digits, spaces, hyphens only"}, "website_id": {"type": "string"}, "status": {"type": "string", "description": "e.g. 'READY'"}, "return_type": {"type": "object", "properties": {"type": {"type": "string", "description": "e.g. 'String'"}, "name": {"type": "string"}, "array": {"type": "boolean"}}, "required": ["type"]}, "steps": {"type": "array", "items": {"type": "object"}, "description": "TestStep objects — same shape as create_test_script's steps"}, "parameters": {"type": "array", "items": {"type": "object", "properties": {"name": {"type": "string"}, "type": {"type": "string"}, "array": {"type": "boolean"}}}, "description": "Input parameters the function exposes to calling scripts"}, "description": {"type": "string", "description": "Max 600 chars"}}, "required": ["name", "website_id", "status", "return_type"]}),
+    Tool(name="update_common_function", description="Update a Common Function — including a safe rename: update_common_function(common_function_id, name='new name'). Internally does GET-merge-PUT because the server's PUT is a full-document replace that would otherwise wipe every omitted field (testSteps, parameters, returnType, even org/project linkage). Never update a Common Function via call_api with a partial PUT body.", inputSchema={"type": "object", "properties": {"common_function_id": {"type": "string"}, "name": {"type": "string"}, "description": {"type": "string"}, "status": {"type": "string"}, "website_id": {"type": "string"}, "steps": {"type": "array", "items": {"type": "object"}, "description": "Full replacement testSteps list (omit to keep existing steps)"}, "parameters": {"type": "array", "items": {"type": "object"}, "description": "Full replacement parameters list (omit to keep existing)"}, "return_type": {"type": "object"}}, "required": ["common_function_id"]}),
+
     # Organization
     Tool(name="list_epics", description="List all epics in the project.", inputSchema={"type": "object", "properties": {}}),
+    Tool(name="create_epic", description="Create a new epic. Use this when no existing epic fits a test script you're about to create — create_test_script requires a story_id, which requires a parent epic.", inputSchema={"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}),
+    Tool(name="list_stories", description="List all stories under an epic.", inputSchema={"type": "object", "properties": {"epic_id": {"type": "string"}}, "required": ["epic_id"]}),
+    Tool(name="create_story", description="Create a new story under an epic. Use this when no existing story fits a test script you're about to create.", inputSchema={"type": "object", "properties": {"epic_id": {"type": "string"}, "name": {"type": "string"}}, "required": ["epic_id", "name"]}),
     Tool(name="list_bots", description="List all test bots in the project.", inputSchema={"type": "object", "properties": {"name": {"type": "string", "description": "Optional name filter"}}}),
     Tool(name="list_suites", description="List all test suites in the project.", inputSchema={"type": "object", "properties": {}}),
     Tool(name="list_environments", description="List all configured environments.", inputSchema={"type": "object", "properties": {}}),
     Tool(name="create_suite", description="Create a new test suite.", inputSchema={"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}),
     Tool(name="add_scripts_to_suite", description="Add test scripts to a test suite.", inputSchema={"type": "object", "properties": {"suite_id": {"type": "string"}, "script_ids": {"type": "array", "items": {"type": "string"}}}, "required": ["suite_id", "script_ids"]}),
+
+    # Version Control — branches, commits, and Pull Requests over test scripts.
+    Tool(name="list_branches", description="List version-control branches in the project, optionally filtered by name.", inputSchema={"type": "object", "properties": {"query": {"type": "string", "description": "Optional name filter"}}}),
+    Tool(name="get_scripts_for_branch", description="List the test scripts that are members of a branch. This is the ONLY correct way to answer 'which scripts are on branch X' — TestScript.currentBranchName does NOT reflect real branch membership.", inputSchema={"type": "object", "properties": {"branch_name": {"type": "string"}}, "required": ["branch_name"]}),
+    Tool(name="create_branch", description="Create a branch (fork from from_branch, default main). TWO-PHASE: the server runs a preflight conflict check and may return status NEEDS_CONFIRMATION with details instead of creating — relay that to the user and only resend with confirmed=true after they agree. strategy: FROM_BRANCH (default, fork from from_branch HEAD) or FROM_CURRENT (include scripts' individual branch work).", inputSchema={"type": "object", "properties": {"branch_name": {"type": "string"}, "from_branch": {"type": "string", "default": "main"}, "strategy": {"type": "string", "enum": ["FROM_BRANCH", "FROM_CURRENT"]}, "confirmed": {"type": "boolean", "default": False, "description": "Set true ONLY to confirm a NEEDS_CONFIRMATION response"}, "script_ids": {"type": "array", "items": {"type": "string"}, "description": "Optional — branch only these scripts (default: all)"}, "is_protected": {"type": "boolean", "default": False, "description": "Require an approved PR to merge into this branch; also blocks deletion"}}, "required": ["branch_name"]}),
+    Tool(name="commit_branch", description="Commit all current work on a branch with a message (and optional tag like 'v2.0').", inputSchema={"type": "object", "properties": {"branch_name": {"type": "string"}, "message": {"type": "string"}, "tag": {"type": "string"}}, "required": ["branch_name", "message"]}),
+    Tool(name="list_commits", description="List commit history for a branch (paged).", inputSchema={"type": "object", "properties": {"branch_name": {"type": "string"}, "page": {"type": "integer", "default": 0}, "size": {"type": "integer", "default": 20}}, "required": ["branch_name"]}),
+    Tool(name="create_pull_request", description="Open a Pull Request from source_branch into target_branch. Optional: reviewer_ids (from list_users), script_ids (single-script PR), delete_source_branch_after_merge.", inputSchema={"type": "object", "properties": {"source_branch": {"type": "string"}, "target_branch": {"type": "string"}, "title": {"type": "string"}, "description": {"type": "string"}, "reviewer_ids": {"type": "array", "items": {"type": "string"}}, "script_ids": {"type": "array", "items": {"type": "string"}}, "delete_source_branch_after_merge": {"type": "boolean", "default": False}}, "required": ["source_branch", "target_branch", "title"]}),
+    Tool(name="list_pull_requests", description="List Pull Requests (paged, newest first), optionally filtered by status (e.g. OPEN, MERGED, CLOSED) and/or a search string.", inputSchema={"type": "object", "properties": {"status": {"type": "array", "items": {"type": "string"}}, "query": {"type": "string"}, "page": {"type": "integer", "default": 0}, "size": {"type": "integer", "default": 20}}}),
+    Tool(name="get_pull_request", description="Get a Pull Request by ID (status, branches, reviewers, comments).", inputSchema={"type": "object", "properties": {"pr_id": {"type": "string"}}, "required": ["pr_id"]}),
+    Tool(name="get_pull_request_diff", description="Get a Pull Request's diff (added/removed/modified steps per script). Optionally scope to one script.", inputSchema={"type": "object", "properties": {"pr_id": {"type": "string"}, "script_id": {"type": "string"}}, "required": ["pr_id"]}),
+    Tool(name="approve_pull_request", description="Approve a Pull Request (review action; does not merge).", inputSchema={"type": "object", "properties": {"pr_id": {"type": "string"}}, "required": ["pr_id"]}),
+    Tool(name="request_pr_changes", description="Request changes on a Pull Request, with an optional review comment.", inputSchema={"type": "object", "properties": {"pr_id": {"type": "string"}, "comment": {"type": "string"}}, "required": ["pr_id"]}),
+    Tool(name="merge_pull_request", description="Merge an approved Pull Request into its target branch. May return a CONFLICTS status — conflict resolution is not yet supported through MCP tools; direct the user to the UI's Resolve Conflicts flow in that case.", inputSchema={"type": "object", "properties": {"pr_id": {"type": "string"}}, "required": ["pr_id"]}),
+    Tool(name="close_pull_request", description="Close a Pull Request WITHOUT merging. The source branch is NOT deleted.", inputSchema={"type": "object", "properties": {"pr_id": {"type": "string"}}, "required": ["pr_id"]}),
+
+    # Project Roles (Administration → Global Settings → Project Roles) — role definitions and
+    # user-role assignments for the current project.
+    Tool(name="list_project_roles", description="List all roles defined for the current project (system roles like Site Admin/Tester plus custom ones), with each role's permission set.", inputSchema={"type": "object", "properties": {}}),
+    Tool(name="create_project_role", description="Create a custom project role. permissions must be a subset of VIEW/EXECUTE/EDIT/DELETE/SHARE. VIEW is independent — never add it implicitly just because other permissions are granted; include it only when the user asked for it.", inputSchema={"type": "object", "properties": {"role_name": {"type": "string"}, "permissions": {"type": "array", "items": {"type": "string", "enum": ["VIEW", "EXECUTE", "EDIT", "DELETE", "SHARE"]}}, "is_default": {"type": "boolean", "default": False, "description": "Make this the project's default role for new members"}}, "required": ["role_name", "permissions"]}),
+    Tool(name="update_project_role_permissions", description="Replace a role's permission set. Role NAME is immutable server-side — there is deliberately no rename parameter; to rename, create a new role and delete the old one. VIEW is independent — never add it implicitly.", inputSchema={"type": "object", "properties": {"role_id": {"type": "string"}, "permissions": {"type": "array", "items": {"type": "string", "enum": ["VIEW", "EXECUTE", "EDIT", "DELETE", "SHARE"]}}}, "required": ["role_id", "permissions"]}),
+    Tool(name="delete_project_role", description="Delete a custom project role. System roles cannot be deleted (server rejects it).", inputSchema={"type": "object", "properties": {"role_id": {"type": "string"}}, "required": ["role_id"]}),
+    Tool(name="assign_project_role", description="Assign a role to a user in the current project. Get user IDs from list_users, role IDs from list_project_roles.", inputSchema={"type": "object", "properties": {"role_id": {"type": "string"}, "user_id": {"type": "string"}}, "required": ["role_id", "user_id"]}),
+    Tool(name="list_project_members", description="List all user-role assignments for the current project.", inputSchema={"type": "object", "properties": {}}),
+
+    # Archive Manager (Administration → Archive) — soft-deleted assets across all modules.
+    # One generic tool set instead of 10 per-entity ones; entity_type picks the route.
+    Tool(name="list_archived_assets", description="List soft-deleted (archived) assets of one type — what the UI shows under Administration → Archive. Deleting an asset in any module archives it rather than destroying it.", inputSchema={"type": "object", "properties": {"entity_type": {"type": "string", "enum": ["epic", "story", "website", "page", "locator", "test_script", "test_suite", "test_bot", "test_bot_folder", "recorded_script"]}, "search": {"type": "string", "description": "Optional name filter"}, "page": {"type": "integer", "default": 0}, "size": {"type": "integer", "default": 50}}, "required": ["entity_type"]}),
+    Tool(name="restore_asset", description="Restore an archived asset back to its module (un-delete). Find the asset_id via list_archived_assets first.", inputSchema={"type": "object", "properties": {"entity_type": {"type": "string", "enum": ["epic", "story", "website", "page", "locator", "test_script", "test_suite", "test_bot", "test_bot_folder", "recorded_script"]}, "asset_id": {"type": "string"}}, "required": ["entity_type", "asset_id"]}),
+    Tool(name="permanently_delete_asset", description="PERMANENTLY delete an archived asset — irreversible, the 'Delete forever' action in the Archive Manager. Only works on assets that are already archived. Confirm with the user before calling this unless they explicitly asked for permanent deletion.", inputSchema={"type": "object", "properties": {"entity_type": {"type": "string", "enum": ["epic", "story", "website", "page", "locator", "test_script", "test_suite", "test_bot", "test_bot_folder", "recorded_script"]}, "asset_id": {"type": "string"}}, "required": ["entity_type", "asset_id"]}),
+
+    # Tunnel (Administration → Tunnel) — secure bridge exposing a private/local app to the cloud
+    # execution grid. Only these 4 operations exist server-side.
+    Tool(name="get_tunnel_status", description="Get the tunnel process status (Administration → Tunnel). The tunnel bridges a private/local application to the cloud execution grid.", inputSchema={"type": "object", "properties": {}}),
+    Tool(name="start_tunnel", description="Start the tunnel process on the gateway.", inputSchema={"type": "object", "properties": {}}),
+    Tool(name="stop_tunnel", description="Stop the running tunnel process.", inputSchema={"type": "object", "properties": {}}),
+    Tool(name="execute_tunnel_command", description="Execute a command through the tunnel into the client network (raw string payload).", inputSchema={"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}),
+
+    # Global Parameters — project-wide named values usable as a test step's "Configuration" value
+    # type. NOT for secrets — passwords/API keys belong in the vault tools below instead.
+    Tool(name="list_global_parameters", description="Get the project's Global Parameters (name/value pairs usable as a test step's 'Configuration' value type). Use this before referencing one by name in a step, and before add_global_parameter to avoid duplicate names.", inputSchema={"type": "object", "properties": {}}),
+    Tool(name="search_global_parameters", description="Search Global Parameters by name (also returns the 3 built-in system defaults: baseUrl, timeout, waitForElementTimeout).", inputSchema={"type": "object", "properties": {"name": {"type": "string"}}}),
+    Tool(name="add_global_parameter", description="Add a new Global Parameter. Never use this for passwords/API keys/secrets — use create_config_vault_secret instead, since Global Parameters are stored in plain text and visible in the UI.", inputSchema={"type": "object", "properties": {"name": {"type": "string"}, "value": {"type": "string"}, "description": {"type": "string"}}, "required": ["name", "value"]}),
+    Tool(name="check_global_parameter_usage", description="Check whether a Global Parameter (by its customPropertyId) is referenced in any test script, before deleting it.", inputSchema={"type": "object", "properties": {"custom_property_id": {"type": "string"}}, "required": ["custom_property_id"]}),
+    Tool(name="flatten_and_delete_global_parameter", description="Delete a Global Parameter. This first converts every test step that references it into a literal value (matching its current value), then removes the parameter — call check_global_parameter_usage first so the caller/user knows how many scripts will be affected.", inputSchema={"type": "object", "properties": {"custom_property_id": {"type": "string"}}, "required": ["custom_property_id"]}),
+
+    # Vault (config-services) — for secrets referenced by a test step's 'From Secrets' value type.
+    # This is a DIFFERENT vault from list_vault_secrets (that one is mtaf-core's, for API/performance
+    # testing only). Values are write-only from here — there is no tool to read a decrypted value
+    # back, by design, so a real secret never appears in this conversation.
+    Tool(name="list_config_vault_secrets", description="List vault secret names/metadata for ordinary test-script credentials (never returns decrypted values). Use before create_config_vault_secret to avoid duplicates, and to find the right secret to reference in a test step's 'From Secrets' value type.", inputSchema={"type": "object", "properties": {}}),
+    Tool(name="get_config_vault_secret", description="Get vault secret metadata by ID (never returns the decrypted value).", inputSchema={"type": "object", "properties": {"secret_id": {"type": "string"}}, "required": ["secret_id"]}),
+    Tool(name="create_config_vault_secret", description="Store a new secret (e.g. a real login password) for use in test steps via the 'From Secrets' value type. Use this instead of a literal text value for any real credential — never hardcode a real password into a test step.", inputSchema={"type": "object", "properties": {"name": {"type": "string"}, "value": {"type": "string"}, "description": {"type": "string"}}, "required": ["name", "value"]}),
+    Tool(name="update_config_vault_secret", description="Update an existing vault secret's value and/or description (e.g. after a password rotation) — existing test steps referencing it by name pick up the new value automatically, no script changes needed.", inputSchema={"type": "object", "properties": {"secret_id": {"type": "string"}, "value": {"type": "string"}, "description": {"type": "string"}}, "required": ["secret_id"]}),
+    Tool(name="delete_config_vault_secret", description="Permanently delete a vault secret.", inputSchema={"type": "object", "properties": {"secret_id": {"type": "string"}}, "required": ["secret_id"]}),
 
     # Execution
     Tool(name="execute_bot", description="Run a test bot immediately. execution_configuration must include gridUrlForExecution and browser — get these from list_environments().", inputSchema={"type": "object", "properties": {"bot_id": {"type": "string"}, "execution_configuration": {"type": "object", "description": "Must include gridUrlForExecution, browser. Get from list_environments().", "properties": {"gridUrlForExecution": {"type": "string"}, "browser": {"type": "string"}, "profileId": {"type": "string"}}}, "partial_execution": {"type": "boolean", "default": False}}, "required": ["bot_id", "execution_configuration"]}),
@@ -219,7 +302,7 @@ TOOLS = [
     Tool(name="list_recent_runs", description="List recent execution runs, optionally filtered by bot.", inputSchema={"type": "object", "properties": {"bot_id": {"type": "string"}, "limit": {"type": "integer", "default": 10}}}),
 
     # Reporting
-    Tool(name="get_execution_report", description="Get full pass/fail execution report for a job.", inputSchema={"type": "object", "properties": {"job_id": {"type": "string"}}, "required": ["job_id"]}),
+    Tool(name="get_execution_report", description="Get full pass/fail execution report for an execution (bug fix 2026-07-10: previously called a nonexistent background-service method and always threw AttributeError; now calls the executor service's results endpoint — takes execution_id, like get_execution_screenshots/get_performance_report, not job_id).", inputSchema={"type": "object", "properties": {"execution_id": {"type": "string"}}, "required": ["execution_id"]}),
     Tool(name="get_execution_screenshots", description="Get screenshots from a test execution (useful for failures).", inputSchema={"type": "object", "properties": {"execution_id": {"type": "string"}}, "required": ["execution_id"]}),
     Tool(name="get_performance_report", description="Get performance/ROI metrics from an execution.", inputSchema={"type": "object", "properties": {"execution_id": {"type": "string"}}, "required": ["execution_id"]}),
 
@@ -372,6 +455,12 @@ async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: boo
     if is_hosted and name in _HOSTED_UNSUPPORTED:
         return {"error": f"{name} is not available over the hosted MCP server yet — run ahq-mcp-server locally via stdio for this tool."}
 
+    if name in VALIDATORS:
+        try:
+            VALIDATORS[name](**args)
+        except ValidationError as e:
+            return {"error": format_validation_error(name, e)}
+
     # Context
     if name == "get_ahq_context":
         return await _get_ahq_context(clients)
@@ -410,6 +499,8 @@ async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: boo
             kwargs["script_type"] = args["script_type"]
         if "branch_name" in args:
             kwargs["branch_name"] = args["branch_name"]
+        if "repair_comment" in args:
+            kwargs["repair_comment"] = args["repair_comment"]
         return await clients.test_mgmt.create_test_script(
             args["name"], args["steps"], args.get("page_id"), args.get("website_id"), args.get("story_id"), **kwargs
         )
@@ -420,9 +511,56 @@ async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: boo
     if name == "get_step_template":
         return await clients.test_mgmt.get_template(args["template_id"])
 
+    # Recorded scripts
+    if name == "list_recorded_scripts":
+        return await clients.test_mgmt.list_recorded_scripts(args.get("name"), args.get("branch_name"))
+    if name == "get_recorded_script":
+        return await clients.test_mgmt.get_recorded_script(args["recorded_script_id"])
+    if name == "promote_recorded_script":
+        return await clients.test_mgmt.promote_recorded_script(
+            args["recorded_script_id"],
+            args["story_id"],
+            name=args.get("name"),
+            website_id=args.get("website_id"),
+            status=args.get("status"),
+            description=args.get("description"),
+            branch_name=args.get("branch_name", "main"),
+        )
+
+    # Common Functions (User Test Steps)
+    if name == "list_common_functions":
+        return await clients.asset.list_common_functions(args.get("name"))
+    if name == "get_common_function":
+        return await clients.asset.get_common_function(args["common_function_id"])
+    if name == "create_common_function":
+        return await clients.asset.create_common_function(
+            args["name"], args["website_id"], args["status"], args["return_type"],
+            steps=args.get("steps"), parameters=args.get("parameters"),
+            description=args.get("description"),
+        )
+    if name == "update_common_function":
+        # Tool args are snake_case; the CommonFunction document is camelCase. Only fields the
+        # caller actually sent become part of the merge — everything else survives via the
+        # client's GET-merge-PUT.
+        field_map = {
+            "name": "name", "description": "description", "status": "status",
+            "website_id": "websiteId", "steps": "testSteps",
+            "parameters": "parameters", "return_type": "returnType",
+        }
+        changes = {doc_key: args[arg_key] for arg_key, doc_key in field_map.items() if arg_key in args}
+        if not changes:
+            return {"error": "update_common_function needs at least one field to change (name, description, status, website_id, steps, parameters, return_type)"}
+        return await clients.asset.update_common_function(args["common_function_id"], **changes)
+
     # Organization
     if name == "list_epics":
         return await clients.test_mgmt.list_epics()
+    if name == "create_epic":
+        return await clients.test_mgmt.create_epic(args["name"])
+    if name == "list_stories":
+        return await clients.test_mgmt.list_stories(args["epic_id"])
+    if name == "create_story":
+        return await clients.test_mgmt.create_story(args["epic_id"], args["name"])
     if name == "list_bots":
         return await clients.test_mgmt.list_bots(args.get("name"))
     if name == "list_suites":
@@ -433,6 +571,117 @@ async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: boo
         return await clients.test_mgmt.create_suite(args["name"])
     if name == "add_scripts_to_suite":
         return await clients.test_mgmt.add_scripts_to_suite(args["suite_id"], args["script_ids"])
+
+    # Version Control
+    if name == "list_branches":
+        return await clients.test_mgmt.list_branches(args.get("query"))
+    if name == "get_scripts_for_branch":
+        return await clients.test_mgmt.get_scripts_for_branch(args["branch_name"])
+    if name == "create_branch":
+        return await clients.test_mgmt.create_branch(
+            args["branch_name"],
+            from_branch=args.get("from_branch", "main"),
+            strategy=args.get("strategy"),
+            confirmed=args.get("confirmed", False),
+            script_ids=args.get("script_ids"),
+            is_protected=args.get("is_protected", False),
+        )
+    if name == "commit_branch":
+        return await clients.test_mgmt.commit_branch(args["branch_name"], args["message"], args.get("tag"))
+    if name == "list_commits":
+        return await clients.test_mgmt.list_commits(args["branch_name"], args.get("page", 0), args.get("size", 20))
+    if name == "create_pull_request":
+        return await clients.test_mgmt.create_pull_request(
+            args["source_branch"], args["target_branch"], args["title"],
+            description=args.get("description"),
+            reviewer_ids=args.get("reviewer_ids"),
+            script_ids=args.get("script_ids"),
+            delete_source_branch_after_merge=args.get("delete_source_branch_after_merge", False),
+        )
+    if name == "list_pull_requests":
+        return await clients.test_mgmt.list_pull_requests(
+            args.get("status"), args.get("query"), args.get("page", 0), args.get("size", 20)
+        )
+    if name == "get_pull_request":
+        return await clients.test_mgmt.get_pull_request(args["pr_id"])
+    if name == "get_pull_request_diff":
+        return await clients.test_mgmt.get_pull_request_diff(args["pr_id"], args.get("script_id"))
+    if name == "approve_pull_request":
+        return await clients.test_mgmt.approve_pull_request(args["pr_id"])
+    if name == "request_pr_changes":
+        return await clients.test_mgmt.request_pr_changes(args["pr_id"], args.get("comment"))
+    if name == "merge_pull_request":
+        return await clients.test_mgmt.merge_pull_request(args["pr_id"])
+    if name == "close_pull_request":
+        return await clients.test_mgmt.close_pull_request(args["pr_id"])
+
+    # Project Roles
+    if name == "list_project_roles":
+        return await clients.test_mgmt.list_project_roles()
+    if name == "create_project_role":
+        return await clients.test_mgmt.create_project_role(
+            args["role_name"], args["permissions"], args.get("is_default", False)
+        )
+    if name == "update_project_role_permissions":
+        return await clients.test_mgmt.update_project_role_permissions(args["role_id"], args["permissions"])
+    if name == "delete_project_role":
+        return await clients.test_mgmt.delete_project_role(args["role_id"])
+    if name == "assign_project_role":
+        return await clients.test_mgmt.assign_project_role(args["role_id"], args["user_id"])
+    if name == "list_project_members":
+        return await clients.test_mgmt.list_project_members()
+
+    # Archive Manager
+    if name == "list_archived_assets":
+        if args["entity_type"] == "recorded_script":
+            return await clients.test_mgmt.list_archived_recorded_scripts(
+                args.get("search"), args.get("page", 0), args.get("size", 50)
+            )
+        return await clients.user.list_archived(
+            args["entity_type"], args.get("search"), args.get("page", 0), args.get("size", 50)
+        )
+    if name == "restore_asset":
+        if args["entity_type"] == "recorded_script":
+            return await clients.test_mgmt.restore_recorded_script(args["asset_id"])
+        return await clients.user.restore_archived(args["entity_type"], args["asset_id"])
+    if name == "permanently_delete_asset":
+        if args["entity_type"] == "recorded_script":
+            return await clients.test_mgmt.permanently_delete_recorded_script(args["asset_id"])
+        return await clients.user.permanently_delete_archived(args["entity_type"], args["asset_id"])
+
+    # Tunnel
+    if name == "get_tunnel_status":
+        return await clients.tunnel.get_tunnel_status()
+    if name == "start_tunnel":
+        return await clients.tunnel.start_tunnel()
+    if name == "stop_tunnel":
+        return await clients.tunnel.stop_tunnel()
+    if name == "execute_tunnel_command":
+        return await clients.tunnel.execute_tunnel_command(args["command"])
+
+    # Global Parameters
+    if name == "list_global_parameters":
+        return await clients.config.list_global_parameters()
+    if name == "search_global_parameters":
+        return await clients.config.search_global_parameters(args.get("name"))
+    if name == "add_global_parameter":
+        return await clients.config.add_global_parameter(args["name"], args["value"], args.get("description"))
+    if name == "check_global_parameter_usage":
+        return await clients.config.check_global_parameter_usage(args["custom_property_id"])
+    if name == "flatten_and_delete_global_parameter":
+        return await clients.config.flatten_and_delete_global_parameter(args["custom_property_id"])
+
+    # Vault (config-services)
+    if name == "list_config_vault_secrets":
+        return await clients.config.list_config_vault_secrets()
+    if name == "get_config_vault_secret":
+        return await clients.config.get_config_vault_secret(args["secret_id"])
+    if name == "create_config_vault_secret":
+        return await clients.config.create_config_vault_secret(args["name"], args["value"], args.get("description"))
+    if name == "update_config_vault_secret":
+        return await clients.config.update_config_vault_secret(args["secret_id"], args.get("value"), args.get("description"))
+    if name == "delete_config_vault_secret":
+        return await clients.config.delete_config_vault_secret(args["secret_id"])
 
     # Execution
     if name == "execute_bot":
@@ -451,7 +700,11 @@ async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: boo
 
     # Reporting
     if name == "get_execution_report":
-        return await clients.background.get_execution_report(args["job_id"])
+        # NOTE: this used to call clients.background.get_execution_report, a method that never
+        # existed on BackgroundClient (only get_job_status/get_queue_status/list_recent_runs/
+        # schedule_*/cancel_schedule do) — every call threw AttributeError. get_execution_results
+        # on ExecutorClient (previously unwired to any Tool) is the real pass/fail report endpoint.
+        return await clients.executor.get_execution_results(args["execution_id"])
     if name == "get_execution_screenshots":
         return await clients.executor.get_execution_screenshots(args["execution_id"])
     if name == "get_performance_report":

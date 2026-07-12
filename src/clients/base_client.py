@@ -87,11 +87,11 @@ class BaseAhqClient:
     async def get(self, path: str, params: dict = None, extra_headers: dict = None, timeout: int = 30) -> dict:
         return await self._request("GET", f"{self._base}{path}", params=params, extra_headers=extra_headers, timeout=timeout)
 
-    async def post(self, path: str, json: dict = None, params: dict = None, extra_headers: dict = None, timeout: int = 30) -> dict:
-        return await self._request("POST", f"{self._base}{path}", json=json or {}, params=params, extra_headers=extra_headers, timeout=timeout)
+    async def post(self, path: str, json: dict = None, params: dict = None, content: str = None, extra_headers: dict = None, timeout: int = 30) -> dict:
+        return await self._request("POST", f"{self._base}{path}", json=json or {}, params=params, content=content, extra_headers=extra_headers, timeout=timeout)
 
-    async def delete(self, path: str, timeout: int = 30) -> dict:
-        return await self._request("DELETE", f"{self._base}{path}", timeout=timeout)
+    async def delete(self, path: str, extra_headers: dict = None, timeout: int = 30) -> dict:
+        return await self._request("DELETE", f"{self._base}{path}", extra_headers=extra_headers, timeout=timeout)
 
-    async def put(self, path: str, json: dict = None, params: dict = None, timeout: int = 30) -> dict:
-        return await self._request("PUT", f"{self._base}{path}", json=json or {}, params=params, timeout=timeout)
+    async def put(self, path: str, json: dict = None, params: dict = None, extra_headers: dict = None, timeout: int = 30) -> dict:
+        return await self._request("PUT", f"{self._base}{path}", json=json or {}, params=params, extra_headers=extra_headers, timeout=timeout)
