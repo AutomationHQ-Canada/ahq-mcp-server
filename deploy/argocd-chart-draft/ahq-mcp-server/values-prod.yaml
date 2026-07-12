@@ -1,0 +1,34 @@
+name: ahq-mcp-server
+tier: backend
+parent: ahq-backend
+# CONFIRM with DevOps: prod service-account name (dev uses ahq-dev-service-account)
+serviceAccountName: ahq-prod-service-account
+component: api
+image: 501429054313.dkr.ecr.us-east-2.amazonaws.com/ahq-mcp-server
+imageTag: 1
+imagePullPolicy: Always
+containerPort: 8000
+configname: ahq-mcp-server-prod-configmap
+replicas: 2
+environment: prod
+resources:
+  requests:
+    cpu: "200m"
+    memory: "300Mi"
+  limits:
+    cpu: "1000m"
+    memory: "800Mi"
+
+hpa:
+  enabled: false
+
+vpa:
+  enabled: false
+
+#####################
+# No `secrets:` block — this service holds no tenant credentials server-side. Each caller supplies
+# their own AHQ token/projectId as request headers (see src/config/credentials.py), so the only
+# thing this ConfigMap needs is the platform's own base URL.
+# CONFIRM with DevOps: the prod gateway URL.
+data:
+  AHQ_BASE_URL: "https://api.automationhq.ai"

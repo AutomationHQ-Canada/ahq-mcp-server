@@ -49,6 +49,14 @@ from container config — see `src/config/credentials.py`).
    wrong.
 5. **HPA/VPA** — left disabled (`enabled: false`) for v1, matching `ahq-background-v2-services`'
    dev defaults, since there's no load data yet to size autoscaling against.
+6. **Two environments confirmed (2026-07-12): dev and prod.** `values-dev.yaml` is ready;
+   `values-prod.yaml` is a stub with two CONFIRM markers — the prod service-account name and the
+   prod gateway URL (guessed as `https://api.automationhq.ai`). CI currently dispatches only
+   `update-image-tag-dev`; the prod promotion trigger (tag? manual dispatch?) is DevOps' call.
+   Related ask: the eval suite (`evals/`, runs nightly/post-deploy against DEV only) should get
+   its own dedicated eval organization + API token so its create/delete churn never touches a
+   real org — org-level, not just a project, because Global Parameters and the vault are
+   org-scoped.
 
 ## How this is meant to be used
 
