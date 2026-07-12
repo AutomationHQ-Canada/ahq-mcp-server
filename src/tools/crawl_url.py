@@ -86,7 +86,22 @@ async def crawl_url(url: str, credentials: dict = None, max_pages: int = MAX_PAG
     pages_data = []
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+        try:
+            browser = await p.chromium.launch(headless=True)
+        except Exception as e:
+            # The classic playwright pip-vs-browser mismatch: the installed playwright package
+            # expects a specific chromium build (e.g. chromium-1228) that `playwright install`
+            # hasn't downloaded yet — happens after any playwright version bump. Return an
+            # actionable error instead of a raw "Executable doesn't exist" traceback.
+            if "Executable doesn't exist" in str(e) or "playwright install" in str(e):
+                return {
+                    "error": (
+                        "Playwright's browser binary is missing or out of date for the installed "
+                        "playwright package. Fix: run `playwright install chromium` in this "
+                        "environment (required once after every playwright version bump), then retry."
+                    )
+                }
+            raise
         context = await browser.new_context()
 
         if credentials:
