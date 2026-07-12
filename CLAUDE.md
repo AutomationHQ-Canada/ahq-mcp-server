@@ -318,6 +318,21 @@ class behind the real User Test Step rename incident (2026-07-09).
   `type` required) are all required; `description` max 600. Nesting is rejected server-side: a
   step's `templateId` must not be another Common Function's ID.
 
+## Eval harness (`evals/`, slice 9i, 2026-07-12)
+
+Golden-task suite proving END-TO-END behavior against the live dev API — the runtime twin of the
+planned 9h spec-drift CI. Run `./.venv/Scripts/python.exe -m evals.runner` after any CLAUDE.md/
+skill/validator/client change or backend deploy; results append to `evals/results.jsonl` (the
+trend history is the deliverable — a dropped check or a jump in calls/seconds vs earlier lines is
+a regression). 5 tasks: login_script (full generation path), archive_restore, vc_pr_flow,
+uts_rename (the destructive-PUT regression test), global_param. Tasks create `EVAL-9i …`-named
+throwaways and clean up best-effort (`d.try_call`). NOT part of pytest — it hits the live API.
+
+Trap found by the harness itself: **`DELETE /rest/api/epics/{id}` on an epic WITH stories returns
+202 and silently deletes NOTHING** ("This Epic is associated with…") — pass `?force=true` (or use
+`/deleteAnyway`) to actually cascade-archive. An empty epic deletes fine without force, which is
+why the 9b live test never hit this.
+
 ## Gateway routing gotcha — mtaf-* services
 
 The gateway routes the `managed-testing-*`/`mtaf-cdct-core` family on SHORT route ids, not the repo
