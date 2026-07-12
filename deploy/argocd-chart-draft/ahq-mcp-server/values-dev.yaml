@@ -1,0 +1,32 @@
+name: ahq-mcp-server
+tier: backend
+parent: ahq-backend
+serviceAccountName: ahq-dev-service-account
+component: api
+image: 501429054313.dkr.ecr.us-east-2.amazonaws.com/ahq-mcp-server
+imageTag: 1
+imagePullPolicy: Always
+containerPort: 8000
+configname: ahq-mcp-server-dev-configmap
+replicas: 1
+environment: dev
+resources:
+  requests:
+    cpu: "200m"
+    memory: "300Mi"
+  limits:
+    cpu: "1000m"
+    memory: "800Mi"
+
+hpa:
+  enabled: false
+
+vpa:
+  enabled: false
+
+#####################
+# No `secrets:` block — this service holds no tenant credentials server-side. Each caller supplies
+# their own AHQ token/projectId as request headers (see src/config/credentials.py), so the only
+# thing this ConfigMap needs is the platform's own base URL.
+data:
+  AHQ_BASE_URL: "https://api-dev.automationhq.ai"

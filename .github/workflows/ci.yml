@@ -1,0 +1,100 @@
+name: Build and Push to ECR
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-2
+  ECR_REPOSITORY: ahq-mcp-server
+  ECR_REGISTRY: 501429054313.dkr.ecr.us-east-2.amazonaws.com
+
+jobs:
+  test:
+    name: Run test suite
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install --no-cache-dir ".[dev]"
+
+      - name: Run tests
+        run: pytest -q
+
+  build-and-push:
+    name: Build and Push Docker Image to ECR
+    needs: test
+    runs-on: ubuntu-latest
+
+    concurrency:
+      group: ecr-push-${{ github.ref_name }}
+      cancel-in-progress: true
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_GITHUB_ACTION }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_GITHUB_ACTION }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            -t ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ github.run_number }} \
+            -t ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:latest \
+            .
+
+      - name: Push Docker image to ECR
+        run: |
+          docker push ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ github.run_number }}
+          docker push ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:latest
+
+      - name: Output image details
+        run: |
+          echo "Docker image pushed successfully!"
+          echo "Build Number: ${{ github.run_number }}"
+          echo "Image Tag: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ github.run_number }}"
+
+      - name: Trigger GitOps workflow
+        env:
+          GH_TOKEN: ${{ secrets.AHQ_GITOPS_PAT }}
+        run: |
+          # Trim commit message to 50 characters and escape it for JSON
+          CLEAN_COMMIT_MSG=$(echo "${{ github.event.head_commit.message }}" | tr -d '\n' | cut -c1-50)
+          ESCAPED_COMMIT_MSG=$(jq -Rn --arg msg "$CLEAN_COMMIT_MSG" '$msg')
+
+          gh api \
+            repos/AutomationHQ-Canada/kubernetes-argocd-apps/dispatches \
+            --method POST \
+            --input - <<EOF
+          {
+            "event_type": "update-image-tag-dev",
+            "client_payload": {
+              "app_name": "${{ env.ECR_REPOSITORY }}",
+              "image_tag": "${{ github.run_number }}",
+              "source_commit_url": "${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}",
+              "source_repository": "${{ github.repository }}",
+              "source_branch": "${{ github.ref_name }}",
+              "source_commit_sha": "${{ github.sha }}",
+              "source_commit_message": $ESCAPED_COMMIT_MSG,
+              "source_actor": "${{ github.actor }}"
+            }
+          }
+          EOF

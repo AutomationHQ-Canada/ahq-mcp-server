@@ -1,0 +1,28 @@
+name: ahq-mcp-server-test
+tier: backend
+parent: ahq-backend
+component: api
+image: 501429054313.dkr.ecr.us-east-2.amazonaws.com/ahq-mcp-server
+imageTag: latest
+imagePullPolicy: IfNotPresent
+containerPort: 8000
+configname: ahq-mcp-server-config
+replicas: 1
+resources:
+  requests:
+    memory: "300Mi"
+    cpu: "200m"
+  limits:
+    memory: "800Mi"
+    cpu: "1000m"
+
+hpa:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 1
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+vpa:
+  enabled: false
+  updateMode: "Off"

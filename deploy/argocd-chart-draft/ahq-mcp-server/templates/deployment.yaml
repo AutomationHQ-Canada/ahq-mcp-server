@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.name }}
+  labels:
+    app.kubernetes.io/name: {{ .Values.name }}
+    app.kubernetes.io/version: 1.0.0
+    app.kubernetes.io/component: {{ .Values.component }}
+    app.kubernetes.io/part-of: {{ .Values.parent }}
+spec:
+  {{- if not .Values.hpa.enabled }}
+  replicas: {{ .Values.replicas }}
+  {{- end }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: {{ .Values.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.name }}
+        tier: {{ .Values.tier }}
+    spec:
+      {{- if .Values.serviceAccountName }}
+      serviceAccountName: {{ .Values.serviceAccountName }}
+      {{- end }}
+      containers:
+      - name: {{ .Values.name }}
+        image: "{{ .Values.image }}:{{ .Values.imageTag }}"
+        imagePullPolicy: {{ .Values.imagePullPolicy | default "IfNotPresent" }}
+        envFrom:
+          - configMapRef:
+              name: {{ .Values.configname }}
+        resources:
+          {{ .Values.resources | toYaml | nindent 10 | trim }}
+        ports:
+        - containerPort: {{ .Values.containerPort }}
+        readinessProbe:
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          httpGet:
+            scheme: HTTP
+            path: /healthz
+            port: {{ .Values.containerPort }}
