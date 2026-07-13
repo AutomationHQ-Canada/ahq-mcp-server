@@ -331,12 +331,19 @@ script, 9/9 steps PASSED on the AHQ Premium Grid.
   document; there is NO `POST /suites/{id}/scripts` endpoint (the old client called one — it
   never existed). `add_scripts_to_suite` is a GET-merge-PUT on the whole suite document.
 - **execute_bot contract** (POST `/rest/api/bots/{botId}/execute`, executor service; body is a
-  `BotExecution`): `baseUrl`, `browser`, `browserVersion`, `gridId` all required —
-  `browserVersion` is enforced server-side ("Browser Version is required in browser
-  configuration at index 0") even though the UI's zod schema allows empty. Valid values come
-  from the grid provider endpoints: `/rest/api/grids/provider/{gridId}/platforms?testingType=Web`,
-  `.../browsers?platform=`, `.../browserVersions?browser=&platform=`, `.../resolutions?platform=`
-  (config-services). Plain Selenium grids report platform `"Grid OS"` and version `"latest"`.
+  `BotExecution`): `baseUrl`, `browser`, `browserVersion`, `osType`, `gridId` all required —
+  `browserVersion` and `osType` are enforced server-side even though the UI's zod schema allows
+  them empty. Valid values come from `get_grid_capabilities` (wraps the config-services
+  `/rest/api/grids/provider/{gridId}/*` endpoints — they exist ONLY on config-services; calling
+  them on other services 404s). Plain Selenium grids report platform `"Grid OS"` and version
+  `"latest"`; TestingBot/BrowserStack report real OS/version lists.
+- **`baseUrl` is an ENVIRONMENT ID, not a URL — the field name lies.** The backend resolves it
+  via `environmentRepository.findById(baseUrl)`; the value-resolution path has a raw-URL
+  fallback (so a URL sometimes appears to work) but `getBaseUrlName()` has none and kills the
+  run at report time with "Environment not found for this id" — found live: the run enqueued
+  fine, ran 6 minutes, then died. The validator now rejects raw URLs upfront. Get an ID from
+  `list_environments` or create one with `create_environment(name, url)` (URL lives in the
+  Environment's `value` field).
 - **Config-services lookup lists route on `params = "offset"`** with offset/size/sortBy
   REQUIRED (grids, browsers, environments — same routing-key trap as CommonFunctions). This was
   the root cause of the long-standing "list_environments hits the wrong endpoint" gap: the bare
@@ -344,6 +351,17 @@ script, 9/9 steps PASSED on the AHQ Premium Grid.
 - **Results endpoints** (executor): `GET /rest/api/bots/execution/{id}/status` (lightweight
   poll) and `/detailed-results` (full per-suite/script/iteration/step report —
   `get_execution_report`). The previously-used `/execution/{id}/results` path never existed.
+  The lightweight status reports `UNKNOWN` once the run leaves the queue — the
+  `get_execution_status` tool auto-falls-back to the detailed report's overall status; for
+  queue progress use `get_job_status` with the jobId from execute_bot's response. Runs can sit
+  ENQUEUED ~2-3 minutes before a browser starts.
+- **`list_recent_runs` rewired (2026-07-13)**: `GET /background-jobs/execution-jobs` never
+  existed (404 since day one — ExecutionJobController is POST-only). Recent runs come from
+  test-management's `TestReportController`: `/rest/api/testreports/{botId}` (one bot's history)
+  or `/rest/api/testreports/bots/list` (paged, across bots).
+- **`get_ahq_context` is a slimmed discovery snapshot** (id/name/status per entity, lists
+  capped at 100): the raw documents came back at ~137K characters in a real org. Fetch full
+  documents with the dedicated get_* tools.
 - **Duplicate-name guard + retry trap**: TestBot and TestSuite creates reject duplicate names.
   The base client retries timeouts, but POST create is not idempotent — a timed-out create that
   actually persisted resurfaces as a confusing "This name already exists" on the retry

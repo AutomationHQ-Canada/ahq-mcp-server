@@ -53,33 +53,36 @@ the plugin version; check which one exists and use that in the commands below**)
 
 The server launches via `uv run`, which **installs all Python dependencies automatically on the
 first launch** (pinned by `uv.lock`, isolated from your system Python) — there is nothing to
-`pip install`. The only setup is your credentials file:
+`pip install`. The only setup is your credentials file, and the recommended place for it is the
+**stable, version-independent** `~/.ahq/.env` — the server checks it on every start, and it
+**survives plugin upgrades** (a `.env` placed inside a plugin version folder dies with that
+folder on the next update):
 
 **Windows (PowerShell):**
 
 ```powershell
-cd $env:USERPROFILE\.claude\plugins\cache\automationhq\ahq-skills\0.2.1   # adjust to your version
-
-# Create your .env (never committed, personal to you)
-copy .env.example .env
-notepad .env   # fill in the three values below
+mkdir $env:USERPROFILE\.ahq -Force
+notepad $env:USERPROFILE\.ahq\.env   # fill in the three values below
 
 # OPTIONAL — only if you'll use crawl_url (generate scripts by crawling a live URL)
+cd $env:USERPROFILE\.claude\plugins\cache\automationhq\ahq-skills\0.2.1   # adjust to your version
 uv run playwright install chromium
 ```
 
 **macOS / Linux:**
 
 ```bash
-cd ~/.claude/plugins/cache/automationhq/ahq-skills/0.2.1   # adjust to your version
-
-# Create your .env (never committed, personal to you)
-cp .env.example .env
-nano .env   # fill in the three values below
+mkdir -p ~/.ahq
+nano ~/.ahq/.env   # fill in the three values below
 
 # OPTIONAL — only if you'll use crawl_url (generate scripts by crawling a live URL)
+cd ~/.claude/plugins/cache/automationhq/ahq-skills/0.2.1   # adjust to your version
 uv run playwright install chromium
 ```
+
+> A `.env` inside the plugin version folder (or real environment variables `AHQ_API_TOKEN` etc.)
+> also works and overrides `~/.ahq/.env` — precedence: env vars > plugin-folder `.env` >
+> `~/.ahq/.env`. Use those only when you deliberately want a per-version or per-shell override.
 
 > The very first session start after installing/updating takes a little longer while `uv`
 > resolves and installs dependencies; every start after that is instant (cached).
@@ -121,18 +124,13 @@ In Claude Code (or a terminal with `claude plugin ...`):
 /plugin update ahq-skills@automationhq
 ```
 
-A new version lands in a **new folder** (e.g. `...\ahq-skills\0.2.2\`), so copy your `.env`
-over — dependencies install themselves on the next launch:
+Then restart the session (or `/reload-plugins`) — that's it. If your credentials live in
+`~/.ahq/.env` (the recommended setup), **nothing else is needed**: the new version finds them
+automatically. Only if you keep a `.env` inside the plugin version folder do you have to copy it
+into the new folder yourself.
 
-```bash
-# macOS/Linux (Windows: same idea in PowerShell with copy)
-cd ~/.claude/plugins/cache/automationhq/ahq-skills/<new-version>
-cp ../<old-version>/.env .env
-```
-
-Then restart the session (or `/reload-plugins`). If the playwright version changed (see
-`pyproject.toml`), run `uv run playwright install chromium` again — the package and browser
-build must match.
+If the playwright version changed (see `pyproject.toml`), run `uv run playwright install
+chromium` again from the new plugin folder — the package and browser build must match.
 
 ## Troubleshooting
 

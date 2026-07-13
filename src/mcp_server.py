@@ -47,6 +47,36 @@ _HOSTED_UNSUPPORTED = {"check_local_agent_status", "crawl_url", "extract_require
 # Context
 # ---------------------------------------------------------------------------
 
+# Per-collection field allowlists for the context snapshot. The raw documents are huge (a bot
+# embeds its suites which embed script views; scripts embed steps) — an unslimmed snapshot came
+# back at ~137K characters in a real org and overflowed the tool-result budget. The snapshot is
+# for DISCOVERY (what exists + ids to use); fetch full documents with the dedicated get_* tools.
+_CONTEXT_FIELDS = {
+    "projects": ("projectId", "id", "name"),
+    "websites": ("websiteId", "id", "name", "websiteUrl"),
+    "environments": ("environmentId", "name", "value", "type", "isDefault"),
+    "epics": ("epicId", "id", "name"),
+    "bots": ("testBotId", "name", "lastExecutionStatus"),
+    "suites": ("testSuiteId", "name", "numberOfTestScripts"),
+    "api_collections": ("apiCollectionId", "id", "name"),
+    "workflows": ("workflowId", "id", "name"),
+    "performance_bots": ("performanceBotId", "id", "name"),
+}
+_CONTEXT_LIST_CAP = 100
+
+
+def _slim_context_list(items, fields):
+    if not isinstance(items, list):
+        return items
+    slimmed = [
+        {f: it[f] for f in fields if isinstance(it, dict) and it.get(f) is not None}
+        for it in items[:_CONTEXT_LIST_CAP]
+    ]
+    if len(items) > _CONTEXT_LIST_CAP:
+        return {"total": len(items), "showing_first": _CONTEXT_LIST_CAP, "items": slimmed}
+    return slimmed
+
+
 async def _get_ahq_context(clients: ClientBundle) -> dict:
     results = await asyncio.gather(
         clients.user.get_current_user(),
@@ -69,10 +99,15 @@ async def _get_ahq_context(clients: ClientBundle) -> dict:
         "user", "projects", "websites", "environments", "epics", "bots", "suites", "queue",
         "api_collections", "workflows", "performance_bots",
     ]
-    return {
-        k: (str(v) if isinstance(v, Exception) else v)
-        for k, v in zip(keys, results)
-    }
+    out = {}
+    for k, v in zip(keys, results):
+        if isinstance(v, Exception):
+            out[k] = str(v)
+        elif k in _CONTEXT_FIELDS:
+            out[k] = _slim_context_list(v, _CONTEXT_FIELDS[k])
+        else:
+            out[k] = v
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -299,13 +334,15 @@ TOOLS = [
     Tool(name="list_grids", description="List execution grids (gridId + url). An execute_bot execution_configuration's gridId MUST come from here.", inputSchema={"type": "object", "properties": {}}),
     Tool(name="list_browsers", description="List available browsers for execution. An execute_bot execution_configuration's browser MUST come from here.", inputSchema={"type": "object", "properties": {}}),
     Tool(name="list_execution_types", description="List execution types (e.g. Web/Mobile) and platform options.", inputSchema={"type": "object", "properties": {}}),
-    Tool(name="execute_bot", description="Run a TestBot in the cloud. execution_configuration is validated locally against the same contract as the UI's Run dialog: baseUrl (the app-under-test URL), browser, browserVersion, and gridId are ALL required. Get gridId from list_grids, then valid osType/browser/browserVersion/resolution values from the grid's provider endpoints (call_api GET /rest/api/grids/provider/{gridId}/platforms?testingType=Web, .../browserVersions?browser=X&platform=Y) — 'latest' works on plain Selenium grids. Returns an executionId — poll get_execution_status, then get_execution_report for per-step results.", inputSchema={"type": "object", "properties": {"bot_id": {"type": "string"}, "execution_configuration": {"type": "object", "description": "Required: baseUrl, browser, browserVersion, gridId. Optional: osType, resolution, type ('Web'), timeout (1-300, default 60), waitForElementTimeout (1-300, default 30), delayBetweenSteps (0-30), numberOfRetries (0-3), screenshot flags, targetBranchName, profileId.", "properties": {"baseUrl": {"type": "string"}, "browser": {"type": "string"}, "browserVersion": {"type": "string"}, "gridId": {"type": "string"}, "osType": {"type": "string"}, "resolution": {"type": "string"}, "timeout": {"type": "integer"}, "targetBranchName": {"type": "string"}}, "required": ["baseUrl", "browser", "browserVersion", "gridId"]}, "name": {"type": "string", "description": "Execution display name (defaults to the bot's name)"}, "profile_id": {"type": "string"}, "partial_execution": {"type": "boolean", "default": False}}, "required": ["bot_id", "execution_configuration"]}),
-    Tool(name="get_execution_status", description="Lightweight progress/status poll for a running execution (by executionId from execute_bot).", inputSchema={"type": "object", "properties": {"execution_id": {"type": "string"}}, "required": ["execution_id"]}),
+    Tool(name="create_environment", description="Create an execution Environment (name + app-under-test URL). execute_bot's executionConfiguration.baseUrl must reference an Environment ID — if list_environments has nothing for the target app, create one here first.", inputSchema={"type": "object", "properties": {"name": {"type": "string"}, "url": {"type": "string", "description": "The app-under-test URL this environment points at"}, "env_type": {"type": "string", "default": "Web"}, "description": {"type": "string"}}, "required": ["name", "url"]}),
+    Tool(name="get_grid_capabilities", description="One call returns everything an execute_bot config needs for a grid: valid platforms (osType values), browsers, resolutions, and browser versions (pass browser to get its versions). Use this instead of guessing — values differ per grid ('Grid OS'/'latest' on plain Selenium, real OS/version lists on TestingBot/BrowserStack).", inputSchema={"type": "object", "properties": {"grid_id": {"type": "string"}, "testing_type": {"type": "string", "default": "Web"}, "browser": {"type": "string", "description": "Optional — include to also get this browser's valid versions"}}, "required": ["grid_id"]}),
+    Tool(name="execute_bot", description="Run a TestBot in the cloud. execution_configuration is validated locally before submission. REQUIRED: baseUrl (an ENVIRONMENT ID from list_environments/create_environment — NOT a URL, despite the name; the backend resolves it via environment lookup and a raw URL kills the run at report time), browser + browserVersion + osType (from get_grid_capabilities), gridId (from list_grids). Returns executionId AND jobId — poll get_execution_status (which falls back to the detailed report when the lightweight status is UNKNOWN), then get_execution_report for per-step results.", inputSchema={"type": "object", "properties": {"bot_id": {"type": "string"}, "execution_configuration": {"type": "object", "description": "Required: baseUrl (Environment ID), browser, browserVersion, osType, gridId. Optional: resolution, type ('Web'), timeout (1-300, default 60), waitForElementTimeout (1-300, default 30), delayBetweenSteps (0-30), numberOfRetries (0-3), screenshot flags, targetBranchName, profileId.", "properties": {"baseUrl": {"type": "string", "description": "Environment ID (NOT a URL)"}, "browser": {"type": "string"}, "browserVersion": {"type": "string"}, "osType": {"type": "string"}, "gridId": {"type": "string"}, "resolution": {"type": "string"}, "timeout": {"type": "integer"}, "targetBranchName": {"type": "string"}}, "required": ["baseUrl", "browser", "browserVersion", "osType", "gridId"]}, "name": {"type": "string", "description": "Execution display name (defaults to the bot's name)"}, "profile_id": {"type": "string"}, "partial_execution": {"type": "boolean", "default": False}}, "required": ["bot_id", "execution_configuration"]}),
+    Tool(name="get_execution_status", description="Progress/status poll for a running execution (by executionId from execute_bot). The lightweight endpoint reports UNKNOWN for finished runs — this tool automatically falls back to the detailed report's overall status in that case. For queue-position detail, use get_job_status with the jobId from execute_bot's response.", inputSchema={"type": "object", "properties": {"execution_id": {"type": "string"}}, "required": ["execution_id"]}),
     Tool(name="schedule_bot_recurring", description="Schedule a bot on a cron expression. execution_configuration from list_environments().", inputSchema={"type": "object", "properties": {"bot_id": {"type": "string"}, "execution_configuration": {"type": "object"}, "cron": {"type": "string", "description": "Cron expression e.g. '0 0 * * *'"}}, "required": ["bot_id", "execution_configuration", "cron"]}),
     Tool(name="schedule_bot_once", description="Schedule a bot to run once at a specific epoch millisecond timestamp.", inputSchema={"type": "object", "properties": {"bot_id": {"type": "string"}, "execution_configuration": {"type": "object"}, "epoch_ms": {"type": "integer"}}, "required": ["bot_id", "execution_configuration", "epoch_ms"]}),
     Tool(name="cancel_schedule", description="Cancel a recurring scheduled bot.", inputSchema={"type": "object", "properties": {"schedule_id": {"type": "string"}}, "required": ["schedule_id"]}),
     Tool(name="get_job_status", description="Get the status and details of an execution job.", inputSchema={"type": "object", "properties": {"job_id": {"type": "string"}}, "required": ["job_id"]}),
-    Tool(name="list_recent_runs", description="List recent execution runs, optionally filtered by bot.", inputSchema={"type": "object", "properties": {"bot_id": {"type": "string"}, "limit": {"type": "integer", "default": 10}}}),
+    Tool(name="list_recent_runs", description="List recent execution reports. With bot_id: that bot's execution history; without: the report list across bots. (Rewired 2026-07-13 — the old background-jobs path never existed and always 404'd.)", inputSchema={"type": "object", "properties": {"bot_id": {"type": "string"}, "limit": {"type": "integer", "default": 10}}}),
 
     # Reporting
     Tool(name="get_execution_report", description="Get full pass/fail execution report for an execution (bug fix 2026-07-10: previously called a nonexistent background-service method and always threw AttributeError; now calls the executor service's results endpoint — takes execution_id, like get_execution_screenshots/get_performance_report, not job_id).", inputSchema={"type": "object", "properties": {"execution_id": {"type": "string"}}, "required": ["execution_id"]}),
@@ -442,10 +479,14 @@ def _require_stdio_config() -> None:
         ("AHQ_PROJECT_ID", settings.ahq_project_id),
     ) if not v]
     if missing:
+        from pathlib import Path
+
+        stable = Path.home() / ".ahq" / ".env"
         raise RuntimeError(
             f"ahq-mcp-server is not configured: {', '.join(missing)} is empty. "
-            f"Create {REPO_ROOT / '.env'} (copy .env.example and fill in the values — see "
-            f"INSTALL.md), then run /reload-plugins (or restart the session)."
+            f"Create {stable} (recommended — survives plugin upgrades) or {REPO_ROOT / '.env'} "
+            f"(copy .env.example and fill in the values — see INSTALL.md), then run "
+            f"/reload-plugins (or restart the session)."
         )
 
 
@@ -732,6 +773,12 @@ async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: boo
         return await clients.test_mgmt.list_bot_types()
     if name == "list_grids":
         return await clients.config.list_grids()
+    if name == "create_environment":
+        return await clients.config.create_environment(
+            args["name"], args["url"], args.get("env_type", "Web"), args.get("description", ""))
+    if name == "get_grid_capabilities":
+        return await clients.config.get_grid_capabilities(
+            args["grid_id"], args.get("testing_type", "Web"), args.get("browser"))
     if name == "list_browsers":
         return await clients.config.list_browsers()
     if name == "list_execution_types":
@@ -744,7 +791,19 @@ async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: boo
             partial_execution=args.get("partial_execution", False),
         )
     if name == "get_execution_status":
-        return await clients.executor.get_bot_execution_status(args["execution_id"])
+        status = await clients.executor.get_bot_execution_status(args["execution_id"])
+        # The lightweight status endpoint reports UNKNOWN once the run leaves the queue (and for
+        # finished runs) — confirmed live. Resolve the real overall status from the detailed
+        # report so callers aren't forced to know about the second endpoint.
+        if isinstance(status, dict) and status.get("status") in (None, "UNKNOWN"):
+            try:
+                detailed = await clients.executor.get_execution_results(args["execution_id"])
+                if isinstance(detailed, dict) and detailed.get("status"):
+                    status["status"] = detailed["status"]
+                    status["statusSource"] = "detailed-results"
+            except Exception:
+                pass  # keep the lightweight answer — a poll must not fail because the report isn't ready
+        return status
     if name == "schedule_bot_recurring":
         return await clients.background.schedule_bot_recurring(args["bot_id"], args["execution_configuration"], args["cron"])
     if name == "schedule_bot_once":
@@ -754,7 +813,7 @@ async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: boo
     if name == "get_job_status":
         return await clients.background.get_job_status(args["job_id"])
     if name == "list_recent_runs":
-        return await clients.background.list_recent_runs(args.get("bot_id"), args.get("limit", 10))
+        return await clients.test_mgmt.list_recent_reports(args.get("bot_id"), args.get("limit", 10))
 
     # Reporting
     if name == "get_execution_report":

@@ -125,10 +125,27 @@ class RunExecutionConfiguration(_Args):
     browser: str = Field(min_length=1)
     gridId: str = Field(min_length=1)
     # Server-required (confirmed live: 400 "Browser Version is required in browser configuration
-    # at index 0" when empty) — valid values come from the grid provider endpoint; "latest" works
-    # on plain Selenium grids.
+    # at index 0" when empty) — valid values come from get_grid_capabilities; "latest" works on
+    # plain Selenium grids.
     browserVersion: str = Field(min_length=1)
-    osType: str = ""
+    # Server-required too (400 "OS Type is required") — from get_grid_capabilities' platforms.
+    osType: str = Field(min_length=1)
+
+    @field_validator("baseUrl")
+    @classmethod
+    def _base_url_is_environment_id(cls, v):
+        # Despite the name, the backend treats baseUrl as an ENVIRONMENT ID
+        # (TestRemoteExecutionRepository.getBaseUrlName does environmentRepository.findById and
+        # hard-throws "Environment not found for this id" for anything else). A raw URL passes
+        # some code paths via fallback and then kills the run minutes later in reporting —
+        # confirmed live 2026-07-13. Reject it upfront instead.
+        if v.startswith(("http://", "https://")):
+            raise ValueError(
+                "baseUrl must be an Environment ID, not a URL — the backend resolves it via "
+                "environment lookup. Pick one from list_environments, or create one for this "
+                "app with create_environment(name, url) and pass its environmentId."
+            )
+        return v
     gridUrl: str | None = None
     gridUrlForExecution: str | None = None
     resolution: str | None = None

@@ -16,6 +16,15 @@ class ConfigClient(BaseAhqClient):
     async def get_environment(self, env_id: str) -> dict:
         return await self.get(f"/rest/api/environments/{env_id}")
 
+    async def create_environment(self, name: str, url: str, env_type: str = "Web",
+                                 description: str = "") -> dict:
+        # POST /rest/api/environments (LookupEnvironmentController). The URL lives in `value` —
+        # an Environment is what execute_bot's executionConfiguration.baseUrl must reference (by
+        # environmentId), so this is the missing piece when the app-under-test has no env yet.
+        return await self.post("/rest/api/environments", json={
+            "name": name, "value": url, "type": env_type, "description": description,
+        })
+
     async def list_parameters(self) -> list:
         result = await self.get("/rest/api/parameters")
         return result if isinstance(result, list) else result.get("content", result)
@@ -47,6 +56,29 @@ class ConfigClient(BaseAhqClient):
     async def list_execution_types(self) -> list:
         result = await self.get("/rest/api/execution-types")
         return result if isinstance(result, list) else result.get("content", result)
+
+    async def get_grid_capabilities(self, grid_id: str, testing_type: str = "Web",
+                                    browser: str = None) -> dict:
+        """
+        One-shot lookup of everything execute_bot's config needs for a grid: valid platforms
+        (osType), browsers, resolutions, and (if a browser is given) its versions. Wraps the
+        LookupGridController /provider/{gridId}/* endpoints — these live on config-services
+        ONLY; guessing them via call_api on other services 404s.
+        """
+        platforms = await self.get(f"/rest/api/grids/provider/{grid_id}/platforms",
+                                   params={"testingType": testing_type})
+        platform = platforms[0] if isinstance(platforms, list) and platforms else None
+        out = {"platforms": platforms}
+        if platform:
+            out["browsers"] = await self.get(f"/rest/api/grids/provider/{grid_id}/browsers",
+                                             params={"platform": platform})
+            out["resolutions"] = await self.get(f"/rest/api/grids/provider/{grid_id}/resolutions",
+                                                params={"platform": platform})
+            if browser:
+                out["browserVersions"] = await self.get(
+                    f"/rest/api/grids/provider/{grid_id}/browserVersions",
+                    params={"browser": browser, "platform": platform})
+        return out
 
     # --- Global Parameters ---
     # GlobalParametersController stores a project's parameters as ONE document

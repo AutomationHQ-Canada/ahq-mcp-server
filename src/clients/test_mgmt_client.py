@@ -118,6 +118,15 @@ class TestMgmtClient(BaseAhqClient):
     async def list_bot_types(self) -> list:
         return await self.get("/rest/api/testbots/getAllTestBotTypes")
 
+    async def list_recent_reports(self, bot_id: str = None, limit: int = 10):
+        # TestReportController (test-management). The old list_recent_runs hit
+        # GET /background-jobs/execution-jobs, which never existed (404 forever).
+        if bot_id:
+            return await self.get(f"/rest/api/testreports/{bot_id}")
+        result = await self.get("/rest/api/testreports/bots/list",
+                                params={"offset": 0, "size": limit, "sortBy": "name"})
+        return result.get("content", result) if isinstance(result, dict) else result
+
     # --- Test Suites (Test Sets) ---
     async def list_suites(self) -> list:
         result = await self.get("/rest/api/suites/list", params={"offset": -1, "size": -1})

@@ -60,6 +60,15 @@ def test_env_file_is_resolved_from_repo_root_not_cwd():
     assert (REPO_ROOT / "pyproject.toml").exists()  # sanity: parents[2] really is the repo root
 
 
+def test_stable_home_env_is_lowest_precedence_candidate():
+    # ~/.ahq/.env survives plugin upgrades (each version = fresh folder); it must be FIRST in
+    # the tuple so any version-local .env still overrides it (pydantic: later files win).
+    from pathlib import Path
+
+    env_files = Settings.model_config["env_file"]
+    assert env_files[0] == str(Path.home() / ".ahq" / ".env")
+
+
 def test_base_url_has_no_default(monkeypatch):
     # The old default (the web frontend URL) was never a working value; absence must mean empty.
     for var in ("AHQ_BASE_URL", "AHQ_API_TOKEN", "AHQ_PROJECT_ID"):

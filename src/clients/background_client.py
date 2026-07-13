@@ -44,9 +44,6 @@ class BackgroundClient(BaseAhqClient):
     async def get_queue_status(self) -> dict:
         return await self.get("/background-jobs/queue-status")
 
-    async def list_recent_runs(self, bot_id: str = None, limit: int = 10) -> list:
-        params = {"size": limit}
-        if bot_id:
-            params["botId"] = bot_id
-        result = await self.get("/background-jobs/execution-jobs", params=params)
-        return result.get("content", result) if isinstance(result, dict) else result
+    # NOTE: there is deliberately no list_recent_runs here — GET /background-jobs/execution-jobs
+    # does not exist (ExecutionJobController only has POST run/schedule endpoints). Recent runs
+    # come from test-management's TestReportController: see TestMgmtClient.list_recent_reports.

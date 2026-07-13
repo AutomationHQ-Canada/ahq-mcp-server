@@ -13,12 +13,16 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _env_file_candidates() -> tuple[str, ...]:
-    # Ordered lowest→highest precedence (pydantic-settings: later files win):
-    #   1. next to this package (repo checkout, or the plugin root when run via `-m` from there)
-    #   2. AHQ_MCP_HOME — set by the plugin's .mcp.json to ${CLAUDE_PLUGIN_ROOT}; covers the
-    #      pip-installed case where this file lives in site-packages and (1) points nowhere useful
-    #   3. process cwd, as a manual override
-    candidates = [str(REPO_ROOT / ".env")]
+    # Ordered lowest→highest precedence (pydantic-settings: later files win); real environment
+    # variables (AHQ_API_TOKEN etc.) beat every file:
+    #   1. ~/.ahq/.env — stable, version-INDEPENDENT credentials home. Each plugin version
+    #      installs into a fresh folder with no .env, so credentials placed only inside a plugin
+    #      folder die on every upgrade (bit a user live, 2026-07-13). This path survives.
+    #   2. next to this package (repo checkout, or the plugin root when run via `-m` from there)
+    #   3. AHQ_MCP_HOME — set by the plugin's .mcp.json to ${CLAUDE_PLUGIN_ROOT}; covers the
+    #      pip-installed case where this file lives in site-packages and (2) points nowhere useful
+    #   4. process cwd, as a manual override
+    candidates = [str(Path.home() / ".ahq" / ".env"), str(REPO_ROOT / ".env")]
     mcp_home = os.environ.get("AHQ_MCP_HOME")
     if mcp_home:
         candidates.append(str(Path(mcp_home) / ".env"))

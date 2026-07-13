@@ -15,8 +15,8 @@ from src.schema.asset_kinds import ExecuteBotArgs, TestBotCreateArgs
 # --- validators ---
 
 def _valid_exec_config(**overrides):
-    cfg = {"baseUrl": "https://app.example.com", "browser": "Chrome", "gridId": "grid-1",
-           "browserVersion": "latest"}
+    cfg = {"baseUrl": "env-uuid-1", "browser": "Chrome", "gridId": "grid-1",
+           "browserVersion": "latest", "osType": "Grid OS"}
     cfg.update(overrides)
     return cfg
 
@@ -28,12 +28,21 @@ def test_execute_bot_args_accepts_minimal_valid_config():
     assert args.execution_configuration.screenshotOnError is True
 
 
-@pytest.mark.parametrize("missing", ["baseUrl", "browser", "gridId", "browserVersion"])
+@pytest.mark.parametrize("missing", ["baseUrl", "browser", "gridId", "browserVersion", "osType"])
 def test_execute_bot_args_rejects_missing_required(missing):
     cfg = _valid_exec_config()
     del cfg[missing]
     with pytest.raises(ValidationError):
         ExecuteBotArgs(bot_id="b1", execution_configuration=cfg)
+
+
+def test_execute_bot_args_rejects_raw_url_as_base_url():
+    # baseUrl is an ENVIRONMENT ID server-side; a raw URL survives enqueue and then kills the
+    # run at report time with "Environment not found for this id" (found live 2026-07-13).
+    with pytest.raises(ValidationError) as exc_info:
+        ExecuteBotArgs(bot_id="b1",
+                       execution_configuration=_valid_exec_config(baseUrl="https://app.example.com"))
+    assert "Environment ID" in str(exc_info.value)
 
 
 @pytest.mark.parametrize("field,value", [
