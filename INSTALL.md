@@ -115,14 +115,26 @@ AHQ_PROJECT_ID=<the UUID of the project to work in>
 
 ## Updating to a newer version
 
+In Claude Code (or a terminal with `claude plugin ...`):
+
 ```
 /plugin marketplace update automationhq
+/plugin update ahq-skills@automationhq
 ```
 
-then reinstall/update the plugin from `/plugin`. After an update, repeat Step 3 in the **new**
-version folder (new version = new folder under `...\ahq-skills\`), including re-copying your
-`.env`. If the playwright version changed (see `pyproject.toml`), run
-`playwright install chromium` again — the pip package and browser build must match.
+A new version lands in a **new folder** (e.g. `...\ahq-skills\0.1.2\`), so repeat the Step 3
+setup there — reusing your existing `.env` from the previous version's folder:
+
+```bash
+# macOS/Linux (Windows: same idea in PowerShell with copy)
+cd ~/.claude/plugins/cache/automationhq/ahq-skills/<new-version>
+python3 -m pip install .
+cp ../<old-version>/.env .env
+```
+
+Then restart the session (or `/reload-plugins`). If the playwright version changed (see
+`pyproject.toml`), run `playwright install chromium` again — the pip package and browser build
+must match.
 
 ## Troubleshooting
 
