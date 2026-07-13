@@ -48,7 +48,8 @@ The plugin clones itself to a fixed location:
 %USERPROFILE%\.claude\plugins\cache\automationhq\ahq-skills\<version>\
 ```
 
-(e.g. `C:\Users\<you>\.claude\plugins\cache\automationhq\ahq-skills\0.1.0`). The MCP server is a
+(e.g. `C:\Users\<you>\.claude\plugins\cache\automationhq\ahq-skills\0.1.1` — **the last folder is
+the plugin version; check which one exists and use that in the commands below**). The MCP server is a
 Python process launched from that folder with your system `python`, so it needs its dependencies
 installed and your credentials placed there — once per machine. Day-to-day use after this needs
 nothing; you only repeat it (in the new version folder) after a plugin version update.
@@ -56,7 +57,7 @@ nothing; you only repeat it (in the new version folder) after a plugin version u
 **Windows (PowerShell):**
 
 ```powershell
-cd $env:USERPROFILE\.claude\plugins\cache\automationhq\ahq-skills\0.1.0
+cd $env:USERPROFILE\.claude\plugins\cache\automationhq\ahq-skills\0.1.1   # adjust to your version
 
 # 1. Install Python dependencies
 python -m pip install .
@@ -72,7 +73,7 @@ playwright install chromium
 **macOS / Linux:**
 
 ```bash
-cd ~/.claude/plugins/cache/automationhq/ahq-skills/0.1.0
+cd ~/.claude/plugins/cache/automationhq/ahq-skills/0.1.1   # adjust to your version
 
 # 1. Install Python dependencies
 python3 -m pip install .
@@ -125,11 +126,17 @@ version folder (new version = new folder under `...\ahq-skills\`), including re-
 
 ## Troubleshooting
 
+Since v0.1.1 the server fails **loudly** on misconfiguration: a tool call with a missing/empty
+`.env` returns an error naming the exact variable and the exact path where `.env` is expected —
+read that message first, it usually IS the fix.
+
 | Symptom | Cause / fix |
 |---|---|
 | `marketplace add` fails with auth/clone error | `gh auth setup-git`, then retry. Your GitHub account must have access to the private repo. |
-| `/mcp` shows `ahq-mcp-server` **failed** | Step 3 was skipped or done in the wrong folder — deps and `.env` must be in the plugin's cache folder shown above, NOT a dev checkout. Verify with: `cd <plugin folder>` then `python -c "from src.mcp_server import TOOLS; print(len(TOOLS))"` → must print `115`. |
-| Tools work but `/ahq` skills don't appear | Restart the Claude Code session — skills register at startup. |
+| Tool errors say `ahq-mcp-server is not configured: ... is empty` | The `.env` is missing, in the wrong folder, or missing a value — the message names the variable and the expected file path. Fix, then `/reload-plugins`. |
+| Tool errors say `Got the web frontend's HTML instead of an API response` | `AHQ_BASE_URL` points at the web UI — set it to the API gateway (`https://api-dev.automationhq.ai`). |
+| `/mcp` shows `ahq-mcp-server` **failed** | Dependencies not installed for the Python that launches the server — run `python -m pip install .` in the plugin's cache folder (NOT a dev checkout). Verify with: `cd <plugin folder>` then `python -c "from src.mcp_server import TOOLS; print(len(TOOLS))"` → must print `115`. |
+| Tools work but `/ahq` skills don't appear | Restart the Claude Code session — skills register at startup. Full names are namespaced: `/ahq-skills:ahq-dashboard`. |
 | Every AHQ call returns 401 | Wrong/expired token in `.env`, or you used a personal JWT instead of an ORGANIZATION token. |
 | `crawl_url` errors about a missing browser | Run `playwright install chromium` (Step 3.3). Required again after any playwright version bump. |
 | Data lands in the wrong org | Impossible via token alone — org ID is decoded from the token. Check you were given a token for the right organization. |
