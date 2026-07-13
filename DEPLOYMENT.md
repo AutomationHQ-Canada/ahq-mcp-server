@@ -1,7 +1,11 @@
 # Deploying / Installing ahq-mcp-server
 
-Two ways to use this server with Claude Code. Both give you the same 102 MCP tools; the plugin
+Two ways to use this server with Claude Code. Both give you the same 115 MCP tools; the plugin
 additionally installs the curated workflow skills.
+
+> **Just want to install and use it?** Follow the step-by-step handover guide in
+> [`INSTALL.md`](INSTALL.md) — validated end-to-end, with troubleshooting. The sections below
+> are the condensed reference.
 
 ## Option A — Claude Code plugin (recommended)
 
@@ -12,10 +16,12 @@ The repo doubles as a Claude Code plugin (`.claude-plugin/plugin.json` + `skills
 directory you're working in.
 
 ```
-# once the repo is on GitHub:
 /plugin marketplace add AutomationHQ-Canada/ahq-mcp-server
 /plugin install ahq-skills@automationhq
 ```
+
+(The repo is live at https://github.com/AutomationHQ-Canada/ahq-mcp-server — private; your
+GitHub account must be in the org.)
 
 Prerequisites on the machine:
 1. Python 3.12+ with this repo's dependencies installed (`pip install .` or `uv sync` from the
