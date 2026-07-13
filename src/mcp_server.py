@@ -107,6 +107,21 @@ async def _get_ahq_context(clients: ClientBundle) -> dict:
             out[k] = _slim_context_list(v, _CONTEXT_FIELDS[k])
         else:
             out[k] = v
+    if isinstance(results[0], Exception):
+        # /users/me 500s for ORGANIZATION tokens (no userId claim, server-side quirk) — fall
+        # back to the identity we can always derive: the token's own org claims.
+        from src.config.credentials import decode_ahq_token
+
+        try:
+            claims = decode_ahq_token(clients.asset._credentials.api_token)
+            out["user"] = {
+                "organizationId": claims.get("organizationId"),
+                "organizationName": claims.get("organizationName"),
+                "tokenType": claims.get("tokenType"),
+                "note": "identity derived from token claims; /users/me is unavailable for ORGANIZATION tokens",
+            }
+        except Exception:
+            pass  # keep the raw error string
     return out
 
 

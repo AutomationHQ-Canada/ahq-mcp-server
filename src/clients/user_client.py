@@ -32,10 +32,16 @@ class UserClient(BaseAhqClient):
         super().__init__(USER_MGMT_SVC, credentials, http_client)
 
     async def get_current_user(self) -> dict:
+        # NOTE: 500s ("No value present") for ORGANIZATION tokens with no userId claim — a
+        # server-side quirk, not a client bug. _get_ahq_context falls back to token claims.
         return await self.get("/rest/api/users/me")
 
     async def list_projects(self) -> list:
-        result = await self.get("/rest/api/projects")
+        # GET /rest/api/projects (bare) has NO handler on ProjectController — every list mapping
+        # is org-scoped. The old path 405'd since day one; the real one is
+        # /organizations/{orgId}/all.
+        result = await self.get(
+            f"/rest/api/projects/organizations/{self._credentials.org_id}/all")
         return result if isinstance(result, list) else result.get("content", result)
 
     async def list_users(self) -> list:
