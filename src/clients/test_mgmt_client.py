@@ -90,16 +90,71 @@ class TestMgmtClient(BaseAhqClient):
     async def get_bot(self, bot_id: str) -> dict:
         return await self.get(f"/rest/api/testbots/{bot_id}")
 
-    # --- Test Suites ---
+    async def create_test_bot(self, name: str, test_suites: list, description: str = "",
+                              bot_type: dict = None, folder_id: str = None,
+                              profile_id: str = None, number_of_retries: int = 0) -> dict:
+        """
+        POST /rest/api/testbots (TestBotController.addTestBot). A TestBot carries NO
+        browser/grid/environment config — that arrives at trigger time as an
+        ExecutionConfiguration on the execute call. Scripts attach only through Test Suites
+        (testSuites min 1, each {testSuiteId, name}); the server rejects duplicate bot names,
+        validates every referenced suite exists, and defaults botType to REGRESSION_TEST.
+        """
+        body = {
+            "name": name,
+            "description": description,
+            "testSuites": test_suites,
+            "excludeFromAnalytics": True,
+            "numberOfRetries": number_of_retries,
+        }
+        if bot_type:
+            body["botType"] = bot_type
+        if folder_id:
+            body["testBotFolderId"] = folder_id
+        if profile_id:
+            body["profileId"] = profile_id
+        return await self.post("/rest/api/testbots", json=body)
+
+    async def list_bot_types(self) -> list:
+        return await self.get("/rest/api/testbots/getAllTestBotTypes")
+
+    # --- Test Suites (Test Sets) ---
     async def list_suites(self) -> list:
         result = await self.get("/rest/api/suites/list", params={"offset": -1, "size": -1})
         return result.get("content", result) if isinstance(result, dict) else result
 
-    async def create_suite(self, name: str) -> dict:
-        return await self.post("/rest/api/suites", json={"name": name})
+    async def get_suite(self, suite_id: str) -> dict:
+        return await self.get(f"/rest/api/suites/{suite_id}")
+
+    async def create_suite(self, name: str, scripts: list = None) -> dict:
+        # Scripts are EMBEDDED in the TestSuite document (testScripts:
+        # List<TestScriptForTestSuiteView>) — there is no separate attach endpoint.
+        return await self.post("/rest/api/suites", json={"name": name, "testScripts": scripts or []})
 
     async def add_scripts_to_suite(self, suite_id: str, script_ids: list) -> dict:
-        return await self.post(f"/rest/api/suites/{suite_id}/scripts", json={"scriptIds": script_ids})
+        # There is NO POST /suites/{id}/scripts endpoint (the path this method used to call) —
+        # TestSuiteController only has POST (create) and PUT /{id} (full update). Scripts live
+        # embedded in the suite document, so this is a GET-merge-PUT, same pattern as
+        # update_common_function: fetch the suite, append the new scripts (resolving each
+        # script's name/sequence), and PUT the whole document back.
+        suite = await self.get_suite(suite_id)
+        existing = suite.get("testScripts") or []
+        existing_ids = {s.get("testScriptId") for s in existing}
+        seq = max((s.get("sequence", 0) for s in existing), default=0)
+        for script_id in script_ids:
+            if script_id in existing_ids:
+                continue
+            script = await self.get_test_script(script_id)
+            seq += 1
+            existing.append({
+                "testScriptId": script_id,
+                "name": script.get("name", ""),
+                "status": script.get("status"),
+                "selected": True,
+                "sequence": seq,
+            })
+        suite["testScripts"] = existing
+        return await self.put(f"/rest/api/suites/{suite_id}", json=suite)
 
     # --- Recorded Scripts ---
     # RecordedScriptController reads @RequestHeader("organizationId") — NOT the "org-id" header

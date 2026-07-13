@@ -13,7 +13,7 @@ that caused them. Validating here, before any client/API call, turns both into o
 
 import re
 
-from pydantic import BaseModel, ConfigDict, ValidationError, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 VALID_STATUSES = {"Not Started", "In Progress", "Ready", "To Be Repaired", "On Hold"}
 BUILT_IN_TEMPLATE_PREFIX = "template-id-"
@@ -113,6 +113,71 @@ class ScheduleOnceArgs(_Args):
     bot_id: str
     epoch_ms: int
     execution_configuration: _ExecutionConfiguration
+
+
+class RunExecutionConfiguration(_Args):
+    # Mirrors automationhq-frontend-v2's ExecutionConfigurationSchema (the Run TestBot dialog's
+    # zod contract) — the authoritative required-field set for POST /bots/{id}/execute.
+    # baseUrl/browser/gridId are hard-required there; the numeric bounds are the same ones the
+    # form enforces (timeouts 1-300s, delay 0-30s, retries 0-3). Values for browser/gridId must
+    # come from list_browsers/list_grids — never invented.
+    baseUrl: str = Field(min_length=1)
+    browser: str = Field(min_length=1)
+    gridId: str = Field(min_length=1)
+    # Server-required (confirmed live: 400 "Browser Version is required in browser configuration
+    # at index 0" when empty) — valid values come from the grid provider endpoint; "latest" works
+    # on plain Selenium grids.
+    browserVersion: str = Field(min_length=1)
+    osType: str = ""
+    gridUrl: str | None = None
+    gridUrlForExecution: str | None = None
+    resolution: str | None = None
+    type: str | None = None
+    headless: bool = False
+    timeout: int = Field(default=60, ge=1, le=300)
+    waitForElementTimeout: int = Field(default=30, ge=1, le=300)
+    delayBetweenSteps: int = Field(default=0, ge=0, le=30)
+    numberOfRetries: int = Field(default=0, ge=0, le=3)
+    screenshotAfterEachStep: bool = False
+    screenshotOnError: bool = True
+    screenshotOnFinish: bool = True
+    excludeToBeRepairedTest: bool = False
+    closeBrowserAfterEachExecution: bool = True
+    customProperties: list = Field(default_factory=list)
+    targetBranchName: str | None = None
+    scriptBranchOverrides: dict[str, str] | None = None
+    profileId: str | None = None
+
+
+class ExecuteBotArgs(_Args):
+    bot_id: str
+    execution_configuration: RunExecutionConfiguration
+    name: str | None = None
+    profile_id: str | None = None
+    partial_execution: bool = False
+
+
+class _TestSuiteRef(_Args):
+    testSuiteId: str = Field(min_length=1)
+    name: str = ""
+
+
+class _BotType(_Args):
+    type: str = Field(min_length=1)
+    value: str = Field(min_length=1)
+
+
+class TestBotCreateArgs(_Args):
+    # Mirrors the frontend's TestBotSchema: name 1-120, description <=500, at least one linked
+    # Test Suite. botType is required on the form but the server defaults it to REGRESSION_TEST,
+    # so it stays optional here. A TestBot has NO browser/grid config — that's execute-time.
+    name: str = Field(min_length=1, max_length=120)
+    test_suites: list[_TestSuiteRef] = Field(min_length=1)
+    description: str = Field(default="", max_length=500)
+    bot_type: _BotType | None = None
+    folder_id: str | None = None
+    profile_id: str | None = None
+    number_of_retries: int = Field(default=0, ge=0, le=3)
 
 
 class ApiCollectionCreateArgs(_Args):
@@ -431,6 +496,8 @@ VALIDATORS: dict[str, type[_Args]] = {
     "add_global_parameter": AddGlobalParameterArgs,
     "create_config_vault_secret": CreateConfigVaultSecretArgs,
     "update_config_vault_secret": UpdateConfigVaultSecretArgs,
+    "create_test_bot": TestBotCreateArgs,
+    "execute_bot": ExecuteBotArgs,
 }
 
 

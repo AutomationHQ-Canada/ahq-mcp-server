@@ -235,8 +235,8 @@ TOOLS = [
     Tool(name="list_bots", description="List all test bots in the project.", inputSchema={"type": "object", "properties": {"name": {"type": "string", "description": "Optional name filter"}}}),
     Tool(name="list_suites", description="List all test suites in the project.", inputSchema={"type": "object", "properties": {}}),
     Tool(name="list_environments", description="List all configured environments.", inputSchema={"type": "object", "properties": {}}),
-    Tool(name="create_suite", description="Create a new test suite.", inputSchema={"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}),
-    Tool(name="add_scripts_to_suite", description="Add test scripts to a test suite.", inputSchema={"type": "object", "properties": {"suite_id": {"type": "string"}, "script_ids": {"type": "array", "items": {"type": "string"}}}, "required": ["suite_id", "script_ids"]}),
+    Tool(name="create_suite", description="Create a new test suite (Test Set). Scripts can be attached now (script_ids) or later via add_scripts_to_suite; a suite feeds create_test_bot.", inputSchema={"type": "object", "properties": {"name": {"type": "string"}, "script_ids": {"type": "array", "items": {"type": "string"}, "description": "Optional test script ids to attach immediately"}}, "required": ["name"]}),
+    Tool(name="add_scripts_to_suite", description="Add test scripts to an existing test suite. (Scripts are embedded in the suite document — this fetches the suite, merges, and saves it back; already-attached scripts are skipped.)", inputSchema={"type": "object", "properties": {"suite_id": {"type": "string"}, "script_ids": {"type": "array", "items": {"type": "string"}}}, "required": ["suite_id", "script_ids"]}),
 
     # Version Control — branches, commits, and Pull Requests over test scripts.
     Tool(name="list_branches", description="List version-control branches in the project, optionally filtered by name.", inputSchema={"type": "object", "properties": {"query": {"type": "string", "description": "Optional name filter"}}}),
@@ -294,7 +294,13 @@ TOOLS = [
     Tool(name="delete_config_vault_secret", description="Permanently delete a vault secret.", inputSchema={"type": "object", "properties": {"secret_id": {"type": "string"}}, "required": ["secret_id"]}),
 
     # Execution
-    Tool(name="execute_bot", description="Run a test bot immediately. execution_configuration must include gridUrlForExecution and browser — get these from list_environments().", inputSchema={"type": "object", "properties": {"bot_id": {"type": "string"}, "execution_configuration": {"type": "object", "description": "Must include gridUrlForExecution, browser. Get from list_environments().", "properties": {"gridUrlForExecution": {"type": "string"}, "browser": {"type": "string"}, "profileId": {"type": "string"}}}, "partial_execution": {"type": "boolean", "default": False}}, "required": ["bot_id", "execution_configuration"]}),
+    Tool(name="create_test_bot", description="Create a TestBot (execution configuration for a set of Test Suites). A TestBot carries NO browser/grid settings — those are supplied at run time via execute_bot. Attach scripts by first creating a suite (create_suite) and passing its id+name in test_suites (min 1). Bot names must be unique in the project.", inputSchema={"type": "object", "properties": {"name": {"type": "string", "description": "1-120 chars, unique"}, "test_suites": {"type": "array", "items": {"type": "object", "properties": {"testSuiteId": {"type": "string"}, "name": {"type": "string"}}, "required": ["testSuiteId"]}, "description": "At least one suite from create_suite/list_suites"}, "description": {"type": "string"}, "bot_type": {"type": "object", "description": "Optional {type, value} from list_bot_types; server defaults to REGRESSION_TEST"}, "folder_id": {"type": "string"}, "profile_id": {"type": "string"}, "number_of_retries": {"type": "integer", "default": 0}}, "required": ["name", "test_suites"]}),
+    Tool(name="list_bot_types", description="List the available TestBot types ({type, value, color}) for create_test_bot's bot_type.", inputSchema={"type": "object", "properties": {}}),
+    Tool(name="list_grids", description="List execution grids (gridId + url). An execute_bot execution_configuration's gridId MUST come from here.", inputSchema={"type": "object", "properties": {}}),
+    Tool(name="list_browsers", description="List available browsers for execution. An execute_bot execution_configuration's browser MUST come from here.", inputSchema={"type": "object", "properties": {}}),
+    Tool(name="list_execution_types", description="List execution types (e.g. Web/Mobile) and platform options.", inputSchema={"type": "object", "properties": {}}),
+    Tool(name="execute_bot", description="Run a TestBot in the cloud. execution_configuration is validated locally against the same contract as the UI's Run dialog: baseUrl (the app-under-test URL), browser, browserVersion, and gridId are ALL required. Get gridId from list_grids, then valid osType/browser/browserVersion/resolution values from the grid's provider endpoints (call_api GET /rest/api/grids/provider/{gridId}/platforms?testingType=Web, .../browserVersions?browser=X&platform=Y) — 'latest' works on plain Selenium grids. Returns an executionId — poll get_execution_status, then get_execution_report for per-step results.", inputSchema={"type": "object", "properties": {"bot_id": {"type": "string"}, "execution_configuration": {"type": "object", "description": "Required: baseUrl, browser, browserVersion, gridId. Optional: osType, resolution, type ('Web'), timeout (1-300, default 60), waitForElementTimeout (1-300, default 30), delayBetweenSteps (0-30), numberOfRetries (0-3), screenshot flags, targetBranchName, profileId.", "properties": {"baseUrl": {"type": "string"}, "browser": {"type": "string"}, "browserVersion": {"type": "string"}, "gridId": {"type": "string"}, "osType": {"type": "string"}, "resolution": {"type": "string"}, "timeout": {"type": "integer"}, "targetBranchName": {"type": "string"}}, "required": ["baseUrl", "browser", "browserVersion", "gridId"]}, "name": {"type": "string", "description": "Execution display name (defaults to the bot's name)"}, "profile_id": {"type": "string"}, "partial_execution": {"type": "boolean", "default": False}}, "required": ["bot_id", "execution_configuration"]}),
+    Tool(name="get_execution_status", description="Lightweight progress/status poll for a running execution (by executionId from execute_bot).", inputSchema={"type": "object", "properties": {"execution_id": {"type": "string"}}, "required": ["execution_id"]}),
     Tool(name="schedule_bot_recurring", description="Schedule a bot on a cron expression. execution_configuration from list_environments().", inputSchema={"type": "object", "properties": {"bot_id": {"type": "string"}, "execution_configuration": {"type": "object"}, "cron": {"type": "string", "description": "Cron expression e.g. '0 0 * * *'"}}, "required": ["bot_id", "execution_configuration", "cron"]}),
     Tool(name="schedule_bot_once", description="Schedule a bot to run once at a specific epoch millisecond timestamp.", inputSchema={"type": "object", "properties": {"bot_id": {"type": "string"}, "execution_configuration": {"type": "object"}, "epoch_ms": {"type": "integer"}}, "required": ["bot_id", "execution_configuration", "epoch_ms"]}),
     Tool(name="cancel_schedule", description="Cancel a recurring scheduled bot.", inputSchema={"type": "object", "properties": {"schedule_id": {"type": "string"}}, "required": ["schedule_id"]}),
@@ -590,7 +596,14 @@ async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: boo
     if name == "list_environments":
         return await clients.config.list_environments()
     if name == "create_suite":
-        return await clients.test_mgmt.create_suite(args["name"])
+        scripts = None
+        if args.get("script_ids"):
+            scripts = []
+            for i, sid in enumerate(args["script_ids"], start=1):
+                script = await clients.test_mgmt.get_test_script(sid)
+                scripts.append({"testScriptId": sid, "name": script.get("name", ""),
+                                "status": script.get("status"), "selected": True, "sequence": i})
+        return await clients.test_mgmt.create_suite(args["name"], scripts)
     if name == "add_scripts_to_suite":
         return await clients.test_mgmt.add_scripts_to_suite(args["suite_id"], args["script_ids"])
 
@@ -706,9 +719,32 @@ async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: boo
         return await clients.config.delete_config_vault_secret(args["secret_id"])
 
     # Execution
+    if name == "create_test_bot":
+        return await clients.test_mgmt.create_test_bot(
+            args["name"], args["test_suites"],
+            description=args.get("description", ""),
+            bot_type=args.get("bot_type"),
+            folder_id=args.get("folder_id"),
+            profile_id=args.get("profile_id"),
+            number_of_retries=args.get("number_of_retries", 0),
+        )
+    if name == "list_bot_types":
+        return await clients.test_mgmt.list_bot_types()
+    if name == "list_grids":
+        return await clients.config.list_grids()
+    if name == "list_browsers":
+        return await clients.config.list_browsers()
+    if name == "list_execution_types":
+        return await clients.config.list_execution_types()
     if name == "execute_bot":
         # Correct entry point: executor-services validates bot, fan-outs, then calls background-v2 internally
-        return await clients.executor.execute_bot(args["bot_id"], args["execution_configuration"], args.get("partial_execution", False))
+        return await clients.executor.execute_bot(
+            args["bot_id"], args["execution_configuration"],
+            name=args.get("name"), profile_id=args.get("profile_id"),
+            partial_execution=args.get("partial_execution", False),
+        )
+    if name == "get_execution_status":
+        return await clients.executor.get_bot_execution_status(args["execution_id"])
     if name == "schedule_bot_recurring":
         return await clients.background.schedule_bot_recurring(args["bot_id"], args["execution_configuration"], args["cron"])
     if name == "schedule_bot_once":

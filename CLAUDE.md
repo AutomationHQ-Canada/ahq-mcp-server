@@ -318,6 +318,44 @@ class behind the real User Test Step rename incident (2026-07-09).
   `type` required) are all required; `description` max 600. Nesting is rejected server-side: a
   step's `templateId` must not be another Common Function's ID.
 
+### Execution path — create TestBot → execute → results (2026-07-13, proven live end-to-end)
+
+The full conversational chain works: `create_test_script` → `create_suite` → `create_test_bot` →
+`execute_bot` → `get_execution_status` → `get_execution_report`. Verified live: RealtyVista login
+script, 9/9 steps PASSED on the AHQ Premium Grid.
+
+- **A TestBot carries NO browser/grid/environment config.** It's only name + botType +
+  `testSuites` (min 1). Browser/grid arrive at TRIGGER time as an `ExecutionConfiguration` on
+  the execute call. Don't look for execution config on the bot — it isn't there.
+- **Scripts attach to suites, suites to bots.** `testScripts` is EMBEDDED in the TestSuite
+  document; there is NO `POST /suites/{id}/scripts` endpoint (the old client called one — it
+  never existed). `add_scripts_to_suite` is a GET-merge-PUT on the whole suite document.
+- **execute_bot contract** (POST `/rest/api/bots/{botId}/execute`, executor service; body is a
+  `BotExecution`): `baseUrl`, `browser`, `browserVersion`, `gridId` all required —
+  `browserVersion` is enforced server-side ("Browser Version is required in browser
+  configuration at index 0") even though the UI's zod schema allows empty. Valid values come
+  from the grid provider endpoints: `/rest/api/grids/provider/{gridId}/platforms?testingType=Web`,
+  `.../browsers?platform=`, `.../browserVersions?browser=&platform=`, `.../resolutions?platform=`
+  (config-services). Plain Selenium grids report platform `"Grid OS"` and version `"latest"`.
+- **Config-services lookup lists route on `params = "offset"`** with offset/size/sortBy
+  REQUIRED (grids, browsers, environments — same routing-key trap as CommonFunctions). This was
+  the root cause of the long-standing "list_environments hits the wrong endpoint" gap: the bare
+  GET matched no handler at all. The clients now always send paging.
+- **Results endpoints** (executor): `GET /rest/api/bots/execution/{id}/status` (lightweight
+  poll) and `/detailed-results` (full per-suite/script/iteration/step report —
+  `get_execution_report`). The previously-used `/execution/{id}/results` path never existed.
+- **Duplicate-name guard + retry trap**: TestBot and TestSuite creates reject duplicate names.
+  The base client retries timeouts, but POST create is not idempotent — a timed-out create that
+  actually persisted resurfaces as a confusing "This name already exists" on the retry
+  (happened live, twice). If a create 400s with name-exists right after a slow call, check
+  `list_suites`/`list_bots` — the entity probably exists.
+- **Dev grid health (2026-07-13)**: in-cluster `Selenium Hub` (ahq-selenium-hub.ahq-dev...) and
+  `Selenium` (selenium-hub.automationhq.ai) both fail to open sessions — infra, not client.
+  `AHQ Premium Grid` (TestingBot) works. A 1-2 second FAILED execution = grid session failure;
+  read `iterations[].errorMessage`.
+- Execution runs as cloud (`test-bot-executor-services`) for paid orgs; the UI falls back to the
+  user's local agent (localhost:9202) otherwise — the MCP execute_bot tool is the cloud path.
+
 ## Eval harness (`evals/`, slice 9i, 2026-07-12)
 
 Golden-task suite proving END-TO-END behavior against the live dev API — the runtime twin of the

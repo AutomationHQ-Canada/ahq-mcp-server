@@ -7,7 +7,10 @@ class ConfigClient(BaseAhqClient):
         super().__init__(CONFIG_SVC, credentials, http_client)
 
     async def list_environments(self) -> list:
-        result = await self.get("/rest/api/environments")
+        # Routes on @RequestMapping(params = "offset") with offset/size/sortBy required — the
+        # previous bare GET matched no handler at all (the long-standing "list_environments hits
+        # the wrong endpoint" gap, root-caused 2026-07-13).
+        result = await self.get("/rest/api/environments", params=self._LOOKUP_PAGING)
         return result if isinstance(result, list) else result.get("content", result)
 
     async def get_environment(self, env_id: str) -> dict:
@@ -19,6 +22,30 @@ class ConfigClient(BaseAhqClient):
 
     async def list_profiles(self) -> list:
         result = await self.get("/rest/api/profiles")
+        return result if isinstance(result, list) else result.get("content", result)
+
+    # --- Execution lookups (the source of valid ExecutionConfiguration values) ---
+    # These are exactly what the frontend's Run TestBot dialog queries to populate its
+    # grid/browser/environment dropdowns (lookup-grid/-browser/-execution-type controllers,
+    # all config-services). An ExecutionConfiguration should only ever be assembled from
+    # values returned here — never invented.
+    # LookupGridController routes its list on @GetMapping(params = "offset") with offset/size/
+    # sortBy all REQUIRED (same routing-key pattern as CommonFunctions) — a bare GET 400s.
+    _LOOKUP_PAGING = {"offset": 0, "size": 200, "sortBy": "name", "orderBy": "ASC"}
+
+    async def list_grids(self) -> list:
+        result = await self.get("/rest/api/grids", params=self._LOOKUP_PAGING)
+        return result if isinstance(result, list) else result.get("content", result)
+
+    async def get_grid(self, grid_id: str) -> dict:
+        return await self.get(f"/rest/api/grids/{grid_id}")
+
+    async def list_browsers(self) -> list:
+        result = await self.get("/rest/api/browsers", params=self._LOOKUP_PAGING)
+        return result if isinstance(result, list) else result.get("content", result)
+
+    async def list_execution_types(self) -> list:
+        result = await self.get("/rest/api/execution-types")
         return result if isinstance(result, list) else result.get("content", result)
 
     # --- Global Parameters ---
