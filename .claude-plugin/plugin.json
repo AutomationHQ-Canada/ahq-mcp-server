@@ -1,7 +1,7 @@
 {
   "name": "ahq-skills",
   "description": "AutomationHQ test-automation workflows for Claude Code — generate test scripts from a URL or requirements doc, run and schedule TestBots, and view execution/performance reports through the ahq-mcp-server MCP tools.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "author": {
     "name": "AutomationHQ"
   }

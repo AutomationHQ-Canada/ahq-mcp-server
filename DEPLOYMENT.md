@@ -24,14 +24,16 @@ directory you're working in.
 GitHub account must be in the org.)
 
 Prerequisites on the machine:
-1. Python 3.12+ with this repo's dependencies installed (`pip install .` or `uv sync` from the
-   plugin/checkout directory — dependencies are declared in `pyproject.toml`).
-2. `playwright install chromium` — one-time browser download for the `crawl_url` tool, and
-   again after any playwright version bump (the pip package and browser build must match;
-   playwright is pinned to a minor version in `pyproject.toml` for exactly this reason —
-   bump the pin and reinstall the browser together). Skippable if you never crawl.
-3. A `.env` in the plugin root with `AHQ_BASE_URL` and `AHQ_API_TOKEN` (an ORGANIZATION token
-   from Administration → Settings → API Tokens). `.env` is never committed.
+1. [`uv`](https://docs.astral.sh/uv/) on PATH — the plugin launches via `uv run`, which
+   auto-installs all Python dependencies (pinned by `uv.lock`) on first start. No separate
+   Python install or `pip install` needed.
+2. `uv run playwright install chromium` — one-time browser download for the `crawl_url` tool,
+   and again after any playwright version bump (the package and browser build must match;
+   playwright is pinned to a minor version in `pyproject.toml` for exactly this reason).
+   Skippable if you never crawl.
+3. A `.env` in the plugin root with `AHQ_BASE_URL`, `AHQ_API_TOKEN` (an ORGANIZATION token
+   from Administration → Settings → API Tokens), and `AHQ_PROJECT_ID`. `.env` is never
+   committed. See INSTALL.md for details.
 
 ## Option B — plain MCP server registration (no skills)
 
