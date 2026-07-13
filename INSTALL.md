@@ -50,7 +50,10 @@ The plugin clones itself to a fixed location:
 
 (e.g. `C:\Users\<you>\.claude\plugins\cache\automationhq\ahq-skills\0.1.0`). The MCP server is a
 Python process launched from that folder with your system `python`, so it needs its dependencies
-installed and your credentials placed there — once. In PowerShell:
+installed and your credentials placed there — once per machine. Day-to-day use after this needs
+nothing; you only repeat it (in the new version folder) after a plugin version update.
+
+**Windows (PowerShell):**
 
 ```powershell
 cd $env:USERPROFILE\.claude\plugins\cache\automationhq\ahq-skills\0.1.0
@@ -60,28 +63,54 @@ python -m pip install .
 
 # 2. Create your .env (never committed, personal to you)
 copy .env.example .env
-notepad .env   # fill in the two values below
+notepad .env   # fill in the three values below
 
 # 3. OPTIONAL — only if you'll use crawl_url (generate scripts by crawling a live URL)
 playwright install chromium
 ```
 
-Your `.env` needs exactly two values:
+**macOS / Linux:**
+
+```bash
+cd ~/.claude/plugins/cache/automationhq/ahq-skills/0.1.0
+
+# 1. Install Python dependencies
+python3 -m pip install .
+
+# 2. Create your .env (never committed, personal to you)
+cp .env.example .env
+nano .env   # fill in the three values below
+
+# 3. OPTIONAL — only if you'll use crawl_url (generate scripts by crawling a live URL)
+playwright install chromium
+```
+
+Your `.env` needs exactly three values:
 
 ```
 AHQ_BASE_URL=https://api-dev.automationhq.ai
 AHQ_API_TOKEN=<your ORGANIZATION token from Administration -> Settings -> API Tokens>
+AHQ_PROJECT_ID=<the UUID of the project to work in>
 ```
 
+> **Where to find `AHQ_PROJECT_ID`:** open the AHQ web UI and enter your project — the browser
+> URL is `dev.automationhq.ai/<orgId>/<projectId>/...`; the **second** UUID is the project ID.
+>
 > **Note:** `AHQ_BASE_URL` is the **API gateway** (`api-dev.automationhq.ai`), NOT the web UI
 > (`dev.automationhq.ai`). Your org ID is decoded from the token automatically — do not add it.
+> The `LLM_API_KEY` line in `.env.example` is currently unused — leave it or delete it.
 
 ## Step 4 — Verify
 
-1. **Restart Claude Code** (exit and run `claude` again — the MCP server starts with the session).
+1. **Restart Claude Code** (or run `/reload-plugins`) — the MCP server starts with the session.
 2. Run `/mcp` → `ahq-mcp-server` should show **connected** with 115 tools.
-3. Type `/ahq` → the 7 skills should autocomplete.
+3. Type `/ahq` → the 7 skills should autocomplete. Plugin skills are **namespaced**, so the full
+   names are `/ahq-skills:ahq-dashboard`, `/ahq-skills:ahq-gen-from-url`, etc.
 4. Smoke test — ask Claude: *"list my AHQ websites"*. Real data back = you're done.
+
+> Don't be alarmed if `/reload-plugins` reports `0 skills` — that counter only covers standalone
+> (non-plugin) skills. Verify with `claude plugin details ahq-skills@automationhq` in a terminal:
+> it should list **Skills (7)** and **MCP servers (1)**.
 
 ## Updating to a newer version
 
