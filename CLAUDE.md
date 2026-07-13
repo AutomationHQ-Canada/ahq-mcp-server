@@ -5,6 +5,15 @@ A Python MCP server that wraps the Aviso-UTAP (AutomationHQ) test automation pla
 Claude speaks plain language; the MCP server translates that into AHQ REST calls.
 No AHQ web UI needed — everything happens through MCP tools.
 
+## Versioning rule (for any change in this repo)
+
+The plugin updater keys ONLY on `.claude-plugin/plugin.json`'s `version` — pushing code without
+a bump means plugin users never receive it. Before pushing any user-visible change, bump BOTH
+`plugin.json` and `pyproject.toml` (kept in sync) in the same batch: PATCH for fixes/doc
+corrections, MINOR for new tools/skills/launcher changes, MAJOR for breaking tool contracts.
+Internal-only changes (evals, CI, design docs) need no bump. Full policy + release checklist +
+version history: `D:\MCP\AHQ_MCP_SERVER_MASTER_DESIGN.md` §14.
+
 ## Authentication
 - Header: `X-API-AUTH-KEY: <token>` on every AHQ request (NOT `Authorization: Bearer`)
 - Gateway URL: `https://api-dev.automationhq.ai` (NOT `https://dev.automationhq.ai`)
