@@ -422,6 +422,27 @@ async def list_tools() -> list[Tool]:
 # Tool dispatch
 # ---------------------------------------------------------------------------
 
+def _require_stdio_config() -> None:
+    """
+    Fail fast (per tool call) when stdio mode is missing its .env config. Without this, an empty
+    token + empty/wrong base URL makes every tool "succeed" against the web frontend's HTML —
+    a 10-minute misdiagnosis instead of a 10-second fix (hit live, first teammate install).
+    """
+    from src.config.ahq_services import REPO_ROOT
+
+    missing = [k for k, v in (
+        ("AHQ_BASE_URL", settings.ahq_base_url),
+        ("AHQ_API_TOKEN", settings.ahq_api_token),
+        ("AHQ_PROJECT_ID", settings.ahq_project_id),
+    ) if not v]
+    if missing:
+        raise RuntimeError(
+            f"ahq-mcp-server is not configured: {', '.join(missing)} is empty. "
+            f"Create {REPO_ROOT / '.env'} (copy .env.example and fill in the values — see "
+            f"INSTALL.md), then run /reload-plugins (or restart the session)."
+        )
+
+
 def _resolve_clients() -> tuple[ClientBundle, bool]:
     """
     stdio mode: no Starlette request in context -> DEFAULT_BUNDLE (credentials from .env, one
@@ -436,6 +457,7 @@ def _resolve_clients() -> tuple[ClientBundle, bool]:
     except LookupError:
         req = None
     if req is None:
+        _require_stdio_config()
         return DEFAULT_BUNDLE, False
     creds = AhqCredentials.from_headers(req.headers, base_url=settings.ahq_base_url)
     return ClientBundle.build(credentials=creds, http_client=app_http_client.client), True
@@ -838,11 +860,20 @@ async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: boo
 
 async def main():
     try:
-        me = await DEFAULT_BUNDLE.asset.validate_token()
-        name = me.get("name") or me.get("userId", "unknown")
-        print(f"[ahq-mcp-server] Connected as: {name}", file=sys.stderr)
-    except Exception as e:
-        print(f"[ahq-mcp-server] WARNING: Token validation failed: {e}", file=sys.stderr)
+        _require_stdio_config()
+    except RuntimeError as e:
+        # Keep serving (so tool calls return the same actionable error instead of the client
+        # showing an opaque "server failed to start"), but say it loudly once up front.
+        print(f"[ahq-mcp-server] NOT CONFIGURED: {e}", file=sys.stderr)
+    else:
+        print(f"[ahq-mcp-server] base_url={settings.ahq_base_url} "
+              f"project={settings.ahq_project_id}", file=sys.stderr)
+        try:
+            me = await DEFAULT_BUNDLE.asset.validate_token()
+            name = me.get("name") or me.get("userId", "unknown")
+            print(f"[ahq-mcp-server] Connected as: {name}", file=sys.stderr)
+        except Exception as e:
+            print(f"[ahq-mcp-server] WARNING: Token validation failed: {e}", file=sys.stderr)
 
     async with stdio_server() as (read_stream, write_stream):
         await server.run(read_stream, write_stream, server.create_initialization_options())

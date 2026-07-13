@@ -1,14 +1,41 @@
+import os
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# The directory containing pyproject.toml / .env — resolved from this file's location, NOT the
+# process cwd. Claude Code (and other MCP clients) launch the server with an arbitrary cwd (in
+# practice the user's project directory), so a cwd-relative env_file=".env" silently finds
+# nothing and the server runs with empty credentials against the default URL — every tool then
+# "succeeds" with the web app's HTML instead of API data. Found live during the first teammate
+# plugin install (2026-07-13).
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _env_file_candidates() -> tuple[str, ...]:
+    # Ordered lowest→highest precedence (pydantic-settings: later files win):
+    #   1. next to this package (repo checkout, or the plugin root when run via `-m` from there)
+    #   2. AHQ_MCP_HOME — set by the plugin's .mcp.json to ${CLAUDE_PLUGIN_ROOT}; covers the
+    #      pip-installed case where this file lives in site-packages and (1) points nowhere useful
+    #   3. process cwd, as a manual override
+    candidates = [str(REPO_ROOT / ".env")]
+    mcp_home = os.environ.get("AHQ_MCP_HOME")
+    if mcp_home:
+        candidates.append(str(Path(mcp_home) / ".env"))
+    candidates.append(".env")
+    return tuple(candidates)
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=_env_file_candidates(),
         env_file_encoding="utf-8",
         case_sensitive=False,
     )
 
-    ahq_base_url: str = "https://app.automationhq.ai"
+    # No default on purpose: the only guessable value would be the web frontend, which is never
+    # correct for API calls. Empty + the fail-fast guard in mcp_server beats silently wrong.
+    ahq_base_url: str = ""
     # Required for stdio mode (loaded from .env); left empty in hosted HTTP mode, where every
     # request supplies its own credentials via headers (AhqCredentials.from_headers) instead —
     # the container itself never holds a single tenant's token/project.

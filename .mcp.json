@@ -3,7 +3,10 @@
     "ahq-mcp-server": {
       "command": "python",
       "args": ["-m", "src.mcp_server"],
-      "cwd": "${CLAUDE_PLUGIN_ROOT}"
+      "cwd": "${CLAUDE_PLUGIN_ROOT}",
+      "env": {
+        "AHQ_MCP_HOME": "${CLAUDE_PLUGIN_ROOT}"
+      }
     }
   }
 }

@@ -82,6 +82,17 @@ class BaseAhqClient:
             try:
                 return r.json()
             except ValueError:
+                # A 200 whose body is the SPA's HTML means the request never reached the API —
+                # classic symptom of AHQ_BASE_URL pointing at the web frontend (or a missing
+                # token making the gateway serve the login shell). Surfacing it as an error here
+                # turns "every tool returns garbage that looks like success" into one clear hint.
+                if r.text.lstrip()[:15].lower().startswith(("<!doctype", "<html")):
+                    raise AhqApiError(
+                        r.status_code, r.reason_phrase,
+                        "Got the web frontend's HTML instead of an API response - check that "
+                        "AHQ_BASE_URL is the API gateway (e.g. https://api-dev.automationhq.ai, "
+                        "NOT the web UI) and that AHQ_API_TOKEN is set.",
+                    )
                 return {"status": r.status_code, "body": r.text}
 
     async def get(self, path: str, params: dict = None, extra_headers: dict = None, timeout: int = 30) -> dict:
