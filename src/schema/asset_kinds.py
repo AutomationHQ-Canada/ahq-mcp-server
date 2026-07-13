@@ -80,6 +80,24 @@ class TestScriptCreateArgs(_Args):
         return self
 
 
+class AddTestStepsArgs(_Args):
+    script_id: str = Field(min_length=1)
+    steps: list[TestStepIn] = Field(min_length=1)
+    position: int | None = Field(default=None, ge=0)
+
+
+class UpdateTestScriptArgs(_Args):
+    script_id: str = Field(min_length=1)
+    changes: dict
+
+    @field_validator("changes")
+    @classmethod
+    def _nonempty(cls, v):
+        if not v:
+            raise ValueError("changes must contain at least one field to update")
+        return v
+
+
 class SuiteCreateArgs(_Args):
     name: str
 
@@ -515,6 +533,8 @@ VALIDATORS: dict[str, type[_Args]] = {
     "update_config_vault_secret": UpdateConfigVaultSecretArgs,
     "create_test_bot": TestBotCreateArgs,
     "execute_bot": ExecuteBotArgs,
+    "add_test_steps": AddTestStepsArgs,
+    "update_test_script": UpdateTestScriptArgs,
 }
 
 

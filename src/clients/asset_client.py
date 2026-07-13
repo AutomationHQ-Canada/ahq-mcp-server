@@ -92,12 +92,24 @@ class AssetClient(BaseAhqClient):
             "websiteId": website_id,
             "locators": locators,
         }
-        return await self.post(
+        result = await self.post(
             "/rest/api/locators/pushSpyElements",
             json=[page_payload],
             extra_headers={"websiteId": website_id},
             timeout=60,
         )
+        # pushSpyElements doesn't echo the created locator IDs, but every caller needs them next
+        # (to build script steps) — previously forcing a get_page_by_url round-trip that returned
+        # the entire page document. Resolve name->locatorId here instead.
+        created = []
+        try:
+            page = await self.get_page_by_url(website_id, page_url)
+            for loc in (page.get("locators") or []):
+                created.append({"locatorName": loc.get("locatorName"),
+                                "locatorId": loc.get("locatorId") or loc.get("id")})
+        except Exception:
+            pass  # locator IDs are a convenience — never fail the add over the lookup
+        return {"result": result, "pageId": page_id, "locators": created}
 
     # --- Common Functions (User Test Steps) ---
     async def list_common_functions(self, name: str = None) -> list:

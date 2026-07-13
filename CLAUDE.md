@@ -374,6 +374,35 @@ script, 9/9 steps PASSED on the AHQ Premium Grid.
 - Execution runs as cloud (`test-bot-executor-services`) for paid orgs; the UI falls back to the
   user's local agent (localhost:9202) otherwise — the MCP execute_bot tool is the cloud path.
 
+### TypeValuePair type codes + friendly forms (2026-07-14)
+
+Full code table (from `typeAwareDisplay()`), previously undocumented past type 0: `0` literal,
+`1` data-driven column, `2` configuration/global parameter (value = param name), `3` runtime
+variable, `5` parameter reference, `6` faker/random (value = generator name), `7` vault secret
+(value = secret name). Script-writing tools (`create_test_script`, `add_test_steps`,
+`update_test_script`) also accept friendly single-key forms that are translated client-side:
+`{"literal": "x"}`, `{"configuration": "baseUrl"}`, `{"vault": "password"}`,
+`{"variable": "v"}`, `{"data_column": "col"}`, `{"faker": "Email"}`, `{"parameter": "p"}`.
+
+### Script editing + response hygiene (2026-07-14, from the second field report)
+
+- **`add_test_steps` / `update_test_script`**: PUT `/rest/api/stories/scripts/{id}` is a
+  full-document update — both tools are GET-merge-PUT (like update_common_function), with
+  sequence renumbering on insert. Protected-branch (often `main`) edits 403 by platform policy.
+- **`list_websites`** exists now — `search_websites("")` returns `[]`, making "list my websites"
+  unanswerable before.
+- **`add_locators` returns the created locator IDs** (`{locators: [{locatorName, locatorId}]}`)
+  — no more get_page_by_url round-trip to build script steps.
+- **List paging**: `-1/-1` offset/size is REJECTED on some deployments ("Page size must not be
+  less than one") while accepted on others — all list calls now send `offset=0&size=500`.
+- **ResponseObj slimming**: mutation responses arrive as a ~25-field mostly-null login-shaped
+  envelope with an untrustworthy `success` flag (defaults false even on success). The MCP layer
+  strips it to `{id, message, success}` and derives `success` from the message/status — don't
+  re-add a "verify with a GET" step for creates that report success.
+- `/users/me` 500s for ORGANIZATION tokens (no userId claim — server quirk); `get_ahq_context`
+  falls back to identity from token claims. `list_projects` uses
+  `/rest/api/projects/organizations/{orgId}/all` (the bare path has NO handler; 405'd forever).
+
 ## Eval harness (`evals/`, slice 9i, 2026-07-12)
 
 Golden-task suite proving END-TO-END behavior against the live dev API — the runtime twin of the

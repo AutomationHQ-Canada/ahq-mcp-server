@@ -1,6 +1,43 @@
 from src.clients.base_client import BaseAhqClient
 from src.config.ahq_services import TEST_MGMT_SVC
 
+# TypeValuePair.type codes (from typeAwareDisplay() in the backend) — the full table, so nobody
+# has to mine backend source again. The friendly single-key forms below are translated by
+# _normalize_step_parameters before any script write.
+TYPE_VALUE_PAIR_CODES = {
+    "literal": 0,        # {"literal": "text"}           -> value is the literal string
+    "data_column": 1,    # {"data_column": "colName"}    -> data-driven column reference
+    "configuration": 2,  # {"configuration": "baseUrl"}  -> global/config parameter name
+    "variable": 3,       # {"variable": "varName"}       -> runtime variable
+    "parameter": 5,      # {"parameter": "paramName"}    -> parameter reference
+    "faker": 6,          # {"faker": "Email"}            -> fake-data generator name
+    "vault": 7,          # {"vault": "secretName"}       -> vault secret name
+}
+
+_TVP_CLASS = "ai.automationhq.commons.entities.assets.TypeValuePair"
+
+# List endpoints reject size<=0 in at least some deployments ("Page size must not be less than
+# one" — hit live on AHQ2.0 Master while the same -1/-1 worked on another org). 0/500 works
+# everywhere; results beyond 500 are out of scope for a discovery list.
+_LIST_ALL = {"offset": 0, "size": 500}
+
+
+def _normalize_step_parameters(steps):
+    """
+    Accept friendly TypeValuePair forms in step parameters and translate them to the raw
+    {"type": <code>, "value": ...} shape, e.g. {"configuration": "baseUrl"} -> type 2,
+    {"vault": "password"} -> type 7. Raw shapes pass through untouched.
+    """
+    for step in steps or []:
+        for param in step.get("parameters") or []:
+            value = param.get("value")
+            if isinstance(value, dict) and len(value) == 1:
+                key = next(iter(value))
+                if key in TYPE_VALUE_PAIR_CODES:
+                    param["value"] = {"type": TYPE_VALUE_PAIR_CODES[key], "value": value[key]}
+                    param.setdefault("paramClass", _TVP_CLASS)
+    return steps
+
 
 class TestMgmtClient(BaseAhqClient):
     def __init__(self, credentials=None, http_client=None):
@@ -8,7 +45,7 @@ class TestMgmtClient(BaseAhqClient):
 
     # --- Test Scripts ---
     async def list_test_scripts(self, name: str = None) -> list:
-        params = {"offset": -1, "size": -1}
+        params = dict(_LIST_ALL)
         if name:
             params["name"] = name
         result = await self.get("/rest/api/stories/scripts/list", params=params)
@@ -46,7 +83,7 @@ class TestMgmtClient(BaseAhqClient):
         # difference between the two calls). Never rely on that default; always be explicit.
         payload = {
             "name": name,
-            "testSteps": steps or [],
+            "testSteps": _normalize_step_parameters(steps or []),
             "status": status,
             "type": script_type,
             "currentBranchName": branch_name,
@@ -61,9 +98,36 @@ class TestMgmtClient(BaseAhqClient):
             payload["repairComment"] = repair_comment
         return await self.post("/rest/api/stories/scripts", json=payload)
 
+    async def update_test_script(self, script_id: str, **changes) -> dict:
+        # PUT /rest/api/stories/scripts/{id} is a full-document update — same GET-merge-PUT
+        # discipline as update_common_function so a partial body can never wipe fields.
+        # NOTE: direct edits to a script on a PROTECTED branch (often "main") 403 with
+        # "Create a working branch and use a Pull Request" — that error is the platform's
+        # version-control policy, not a client bug.
+        current = await self.get_test_script(script_id)
+        if "testSteps" in changes:
+            changes["testSteps"] = _normalize_step_parameters(changes["testSteps"])
+        current.update(changes)
+        return await self.put(f"/rest/api/stories/scripts/{script_id}", json=current)
+
+    async def add_test_steps(self, script_id: str, steps: list, position: int = None) -> dict:
+        """
+        Append (or insert at `position`, 0-based) steps to an existing script — the single-call
+        replacement for the fetch-spec/read-controller/hand-build-PUT detour. Sequences are
+        renumbered across the whole script.
+        """
+        current = await self.get_test_script(script_id)
+        existing = current.get("testSteps") or []
+        pos = len(existing) if position is None else max(0, min(position, len(existing)))
+        merged = existing[:pos] + _normalize_step_parameters(list(steps)) + existing[pos:]
+        for i, step in enumerate(merged, start=1):
+            step["sequence"] = i
+        current["testSteps"] = merged
+        return await self.put(f"/rest/api/stories/scripts/{script_id}", json=current)
+
     # --- Epics ---
     async def list_epics(self) -> list:
-        result = await self.get("/rest/api/epics/list", params={"offset": -1, "size": -1})
+        result = await self.get("/rest/api/epics/list", params=dict(_LIST_ALL))
         return result.get("content", result) if isinstance(result, dict) else result
 
     async def get_epic(self, epic_id: str) -> dict:
@@ -81,7 +145,7 @@ class TestMgmtClient(BaseAhqClient):
 
     # --- Test Bots ---
     async def list_bots(self, name: str = None) -> list:
-        params = {"offset": -1, "size": -1}
+        params = dict(_LIST_ALL)
         if name:
             params["name"] = name
         result = await self.get("/rest/api/testbots/list", params=params)
@@ -129,7 +193,7 @@ class TestMgmtClient(BaseAhqClient):
 
     # --- Test Suites (Test Sets) ---
     async def list_suites(self) -> list:
-        result = await self.get("/rest/api/suites/list", params={"offset": -1, "size": -1})
+        result = await self.get("/rest/api/suites/list", params=dict(_LIST_ALL))
         return result.get("content", result) if isinstance(result, dict) else result
 
     async def get_suite(self, suite_id: str) -> dict:

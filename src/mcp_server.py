@@ -134,7 +134,8 @@ TOOLS = [
     Tool(name="get_ahq_context", description="Load full AHQ project snapshot from all services in parallel. Call this first before any other action.", inputSchema={"type": "object", "properties": {}}),
 
     # Asset — websites
-    Tool(name="search_websites", description="Search for an existing website by name in AHQ.", inputSchema={"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}),
+    Tool(name="list_websites", description="List ALL websites in the project. Use this for 'show me the websites' — search_websites needs a name and returns [] for an empty query.", inputSchema={"type": "object", "properties": {}}),
+    Tool(name="search_websites", description="Search for an existing website by name in AHQ. For the full list use list_websites.", inputSchema={"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}),
     Tool(name="create_website", description="Create a new website record in AHQ.", inputSchema={"type": "object", "properties": {"name": {"type": "string"}, "url": {"type": "string"}}, "required": ["name", "url"]}),
 
     # Asset — pages
@@ -202,6 +203,8 @@ TOOLS = [
     # Test scripts
     Tool(name="list_test_scripts", description="List or search test scripts by name.", inputSchema={"type": "object", "properties": {"name": {"type": "string", "description": "Optional name filter"}}}),
     Tool(name="get_test_script", description="Get full details of a test script by ID.", inputSchema={"type": "object", "properties": {"script_id": {"type": "string"}}, "required": ["script_id"]}),
+    Tool(name="add_test_steps", description="Append (or insert) steps into an EXISTING test script in one call — no manual PUT assembly needed. Steps use the same shape as create_test_script (templateId + templateTitle verbatim for built-ins + parameters). Scalar parameter values accept friendly forms: {\"literal\": \"text\"}, {\"configuration\": \"paramName\"}, {\"vault\": \"secretName\"}, {\"variable\": \"varName\"}, {\"data_column\": \"col\"}, {\"faker\": \"Email\"}, {\"parameter\": \"name\"} — or the raw {\"type\": <code>, \"value\": ...}. Sequences renumber automatically. NOTE: scripts on a protected branch (often 'main') reject direct edits — create a branch or delete+recreate.", inputSchema={"type": "object", "properties": {"script_id": {"type": "string"}, "steps": {"type": "array", "items": {"type": "object"}, "description": "Steps to add"}, "position": {"type": "integer", "description": "0-based insert position; omit to append at the end"}}, "required": ["script_id", "steps"]}),
+    Tool(name="update_test_script", description="Update fields of an existing test script (name, status, story_id, testSteps, ...) — GET-merge-PUT, so unspecified fields are preserved. Same protected-branch caveat as add_test_steps.", inputSchema={"type": "object", "properties": {"script_id": {"type": "string"}, "changes": {"type": "object", "description": "Fields to change, using the entity's own field names (e.g. name, status, storyId, testSteps)"}}, "required": ["script_id", "changes"]}),
     Tool(
         name="create_test_script",
         description=(
@@ -525,12 +528,42 @@ def _resolve_clients() -> tuple[ClientBundle, bool]:
     return ClientBundle.build(credentials=creds, http_client=app_http_client.client), True
 
 
+_RESPONSE_OBJ_KEEP = ("id", "message", "details", "validationErrors")
+
+
+def _slim_response_obj(resp):
+    """
+    AHQ mutation endpoints answer with a ~25-field ResponseObj/login-shaped envelope that is
+    almost entirely nulls (firstName, ssoEnabled, token, story, ...) — pure token waste on every
+    write. Detect that envelope (message set, user fields empty) and strip it to the few real
+    fields. Also fix the untrustworthy success flag: ResponseObj.success defaults to false and
+    several handlers never set it, so a "Test script added successfully" arrives with
+    success:false — derive it from the message/status instead.
+    """
+    if (
+        isinstance(resp, dict)
+        and "ssoEnabled" in resp
+        and resp.get("message") is not None
+        and resp.get("firstName") is None
+    ):
+        slim = {k: resp[k] for k in _RESPONSE_OBJ_KEEP if resp.get(k) not in (None, "", [])}
+        msg = str(resp.get("message", "")).lower()
+        slim["success"] = bool(
+            resp.get("success")
+            or "success" in msg
+            or "enqueued" in msg
+            or resp.get("status") in (0, 200)
+        )
+        return slim
+    return resp
+
+
 @server.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     try:
         clients, is_hosted = _resolve_clients()
         result = await _dispatch(name, arguments, clients, is_hosted)
-        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+        return [TextContent(type="text", text=json.dumps(_slim_response_obj(result), indent=2))]
     except Exception as e:
         return [TextContent(type="text", text=json.dumps({"error": str(e)}))]
 
@@ -550,6 +583,8 @@ async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: boo
         return await _get_ahq_context(clients)
 
     # Asset
+    if name == "list_websites":
+        return await clients.asset.list_websites()
     if name == "search_websites":
         return await clients.asset.search_websites(args["name"])
     if name == "create_website":
@@ -575,6 +610,11 @@ async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: boo
         return await clients.test_mgmt.list_test_scripts(args.get("name"))
     if name == "get_test_script":
         return await clients.test_mgmt.get_test_script(args["script_id"])
+    if name == "add_test_steps":
+        return await clients.test_mgmt.add_test_steps(
+            args["script_id"], args["steps"], args.get("position"))
+    if name == "update_test_script":
+        return await clients.test_mgmt.update_test_script(args["script_id"], **args["changes"])
     if name == "create_test_script":
         kwargs = {}
         if "status" in args:

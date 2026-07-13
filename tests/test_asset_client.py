@@ -81,14 +81,19 @@ async def test_add_locators_sends_raw_page_array_not_wrapped_object():
     captured = {}
 
     async def fake_request(method, url, **kwargs):
-        captured["url"] = url
-        captured["json"] = kwargs["json"]
-        captured["headers"] = kwargs["headers"]
-        return httpx.Response(200, json={"message": "ok"}, request=httpx.Request(method, url))
+        if "pushSpyElements" in url:
+            captured["url"] = url
+            captured["json"] = kwargs["json"]
+            captured["headers"] = kwargs["headers"]
+            return httpx.Response(200, json={"message": "ok"}, request=httpx.Request(method, url))
+        # the post-add lookup that resolves created locator IDs
+        return httpx.Response(200, json={"locators": [{"locatorName": "Email input", "locatorId": "loc-1"}]},
+                              request=httpx.Request(method, url))
 
     client = _client_with_fake_transport(fake_request)
     locators = [{"locatorName": "Email input", "locatorType": "input", "locationStrategies": [{"locateBy": "css", "locatorValue": "input#email", "selected": True}]}]
-    await client.add_locators("page-1", "site-1", "https://acme.example.com/login", "Login Page", locators)
+    result = await client.add_locators("page-1", "site-1", "https://acme.example.com/login", "Login Page", locators)
+    assert result["locators"] == [{"locatorName": "Email input", "locatorId": "loc-1"}]
 
     assert captured["url"] == "https://api-dev.automationhq.ai/ahq-asset-services/rest/api/locators/pushSpyElements"
     assert captured["json"] == [{
@@ -109,7 +114,8 @@ async def test_add_locators_backfills_deprecated_locateBy_locatorValue_from_stra
     captured = {}
 
     async def fake_request(method, url, **kwargs):
-        captured["json"] = kwargs["json"]
+        if "pushSpyElements" in url:
+            captured["json"] = kwargs["json"]
         return httpx.Response(200, json={"message": "ok"}, request=httpx.Request(method, url))
 
     client = _client_with_fake_transport(fake_request)
@@ -163,7 +169,8 @@ async def test_add_locators_does_not_override_explicit_locateBy():
     captured = {}
 
     async def fake_request(method, url, **kwargs):
-        captured["json"] = kwargs["json"]
+        if "pushSpyElements" in url:
+            captured["json"] = kwargs["json"]
         return httpx.Response(200, json={"message": "ok"}, request=httpx.Request(method, url))
 
     client = _client_with_fake_transport(fake_request)
