@@ -1,7 +1,9 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
+import pytest
 
+from src.clients.base_client import AhqApiError
 from src.clients.local_exec_client import LocalExecClient
 
 
@@ -110,7 +112,7 @@ async def test_execute_bot_locally_posts_directly_to_localhost_with_api_auth_key
     # BearerTokenInterceptor to the agent's own downstream calls (fetch TestBot, vault, ...),
     # which 401 without it even though /execute itself succeeds.
     fake_response = MagicMock()
-    fake_response.raise_for_status = MagicMock()
+    fake_response.status_code = 200
     fake_response.json.return_value = {"id": "job-1", "message": "Job is enqueued."}
 
     fake_async_client = AsyncMock()
@@ -130,6 +132,28 @@ async def test_execute_bot_locally_posts_directly_to_localhost_with_api_auth_key
     assert headers["projectid"] == "test-project"
     assert "Authorization" not in headers
     assert result == {"id": "job-1", "message": "Job is enqueued."}
+
+
+async def test_execute_bot_locally_surfaces_agent_error_body_on_failure():
+    # Regression test: execute_bot_locally used to call bare raise_for_status(), which discards
+    # the response body — a real agent-side 400 surfaced to the MCP caller as only "Client error
+    # '400 '" with the actual reason lost (confirmed live 2026-07-15). It must raise the same
+    # AhqApiError shape BaseAhqClient._request already uses for gateway-routed calls, carrying
+    # the real body through.
+    fake_response = MagicMock()
+    fake_response.status_code = 400
+    fake_response.reason_phrase = "Bad Request"
+    fake_response.text = '{"message": "TestBot has no executable suites"}'
+
+    fake_async_client = AsyncMock()
+    fake_async_client.__aenter__.return_value.post = AsyncMock(return_value=fake_response)
+
+    with patch("httpx.AsyncClient", return_value=fake_async_client):
+        client = LocalExecClient()
+        with pytest.raises(AhqApiError) as exc_info:
+            await client.execute_bot_locally("bot-1", {"gridId": "g1"})
+
+    assert "TestBot has no executable suites" in str(exc_info.value)
 
 
 async def test_get_agent_status_offline_resets_warmup_tracking():

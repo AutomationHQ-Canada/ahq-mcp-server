@@ -4,7 +4,7 @@ import time
 import httpx
 from src.config.ahq_services import STANDALONE_SVC, settings
 from src.config.credentials import decode_ahq_token
-from src.clients.base_client import BaseAhqClient
+from src.clients.base_client import AhqApiError, BaseAhqClient
 
 
 class LocalExecClient(BaseAhqClient):
@@ -125,7 +125,13 @@ class LocalExecClient(BaseAhqClient):
                 f"{self._local_url}/rest/api/bots/{bot_id}/execute",
                 json=body, headers=headers, timeout=30,
             )
-            r.raise_for_status()
+            # Bare raise_for_status() discards the response body — confirmed live 2026-07-15,
+            # an agent-side 400 surfaced to the caller as only "Client error '400 '" with the
+            # real reason (e.g. a validation message from TestBotExecutionController) lost.
+            # AhqApiError mirrors what BaseAhqClient._request already does for every gateway-
+            # routed call, so local execution gets the same diagnosability.
+            if r.status_code >= 400:
+                raise AhqApiError(r.status_code, r.reason_phrase, r.text)
             return r.json()
 
     async def list_registered_agents(self) -> list:

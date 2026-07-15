@@ -147,7 +147,27 @@ async def _crawl(url: str, credentials: dict, max_pages: int, hosted: bool) -> d
                     'input[type="email"], input[name*="user"], input[name*="email"]'
                 ).first.fill(credentials.get("username", ""))
                 await password_field.fill(credentials.get("password", ""))
+                start_url = login_page.url
                 await form.locator('button[type="submit"], input[type="submit"]').first.click()
+                # networkidle alone races the SPA's post-login redirect: there's commonly a brief
+                # network lull right after the login API call resolves and before the client-side
+                # navigation to the authenticated area actually starts, so wait_for_load_state can
+                # return while still sitting on the login URL (confirmed live against
+                # app.automationhq.ai: login → /checking → /{org}/{project}/dashboard). Wait for the
+                # URL to actually change first, then let it settle. A prior version of this fix
+                # checked `"login" not in u.lower()` instead of comparing against `start_url` — that
+                # is trivially true from the very first instant whenever the caller's own crawl
+                # target (the page we log in FROM) doesn't itself contain the substring "login" (e.g.
+                # this app's bare root "/" also renders the login form), making the wait a same-tick
+                # no-op and leaving the exact race it was meant to close (confirmed live: crawl_url
+                # against "https://app.automationhq.ai/" still only ever discovered the 4 pre-auth
+                # pages). Comparing against the URL actually seen before the click, whatever it was,
+                # correctly catches the first real navigation (to the transitional "/checking" page)
+                # regardless of what the starting URL happens to be.
+                try:
+                    await login_page.wait_for_url(lambda u: u != start_url, timeout=15_000)
+                except Exception:
+                    pass
                 await login_page.wait_for_load_state("networkidle", timeout=15_000)
             except Exception:
                 pass

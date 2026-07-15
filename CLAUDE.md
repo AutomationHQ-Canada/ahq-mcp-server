@@ -579,3 +579,59 @@ As of 2026-07-12 every §13 backlog slice is built (9a Recorded Script + Common 
 9b Archive Manager, 9c Project Roles, 9d Version Control v1, 9e Tunnel, 9f plugin packaging) —
 still missing: conflict resolution (9d-ii), drift-detection CI (9h, needs GitHub), TestBot
 creation, and a real execution-config/environments source.
+
+## MCP server bugs/gaps found building a UI-navigation regression script (2026-07-16, v1.0.1)
+
+Building a script that logs in then drives Administration → Global Settings → Global Parameters →
+Add Custom Property (no crawl_url path exists post-login) surfaced these:
+
+- **Fixed: `execute_bot_locally` swallowed the local agent's error body.** It called a bare
+  `r.raise_for_status()`, so an agent-side 400 reached the MCP caller as only
+  `"Client error '400 '"` with the real reason (a validation message, a not-found id, whatever the
+  agent actually said) discarded — confirmed live, the true cause was only visible by hitting
+  `localhost:9202` directly with `httpx` outside the MCP layer and reading `r.text`. Every other
+  client in `src/clients/` gets this for free via `BaseAhqClient._request`'s `AhqApiError`
+  (status + reason + parsed `message` field) — `local_exec_client.py`'s hand-rolled local-agent
+  call was the one path that bypassed it. Fixed by raising the same `AhqApiError` there instead;
+  regression test: `test_execute_bot_locally_surfaces_agent_error_body_on_failure`.
+- **Fixed: `crawl_url`'s "never reaches post-login pages" limitation (previously documented above
+  as an accepted gap) had a root cause after all, and it's now fixed.** The post-submit wait was
+  `login_page.wait_for_url(lambda u: "login" not in u.lower(), ...)` — trivially true from the very
+  first instant whenever the crawl's own starting URL doesn't itself contain "login" (this app's
+  bare root `/` also renders the login form), making the wait a same-tick no-op; `networkidle`
+  alone doesn't catch the SPA's client-side-only `/checking` transitional redirect either (no
+  further network activity during that hop). Fixed by capturing the URL before the click and
+  waiting for it to *change* from that value instead. Confirmed live: `crawl_url` against
+  `https://app.automationhq.ai/` now reaches the dashboard and discovers real authenticated pages
+  (9 pages incl. support tickets and object-repository, vs. 4 pre-auth-only pages before). Residual,
+  non-bug scope limit: crawl_url still only follows `<a href>` tags already in the DOM — pages only
+  reachable by clicking a JS-driven menu (e.g. this app's Administration flyout, which AntD doesn't
+  mount until clicked) still won't be found without a real click-driven crawl strategy.
+- **Open gap: `execute_bot` against a cloud grid (TestingBot) failed a specific script's login
+  step 100% of the time (2 runs, one bundled with another script, one fully isolated in its own
+  suite+bot) while an unrelated script with an *identical* login+wait+verify sequence passed in
+  the same batch.** Doubling the wait (10s → 20s) made zero difference — browser stayed on bare
+  `/login` either way, ruling out simple slowness. Only local-agent execution (real Selenium logs)
+  gave a concrete answer for the *next* failure in the same script (see below) — the cloud grid
+  path returns no screenshot (`get_execution_screenshots` 404s) and no comparable log access, so
+  this one is still unexplained. If it recurs: it's plausibly a click that registers in Selenium's
+  eyes without the app's overlay/focus state actually accepting it (an actionability gap Selenium
+  doesn't check the way stricter frameworks like Playwright do — this session hit exactly that
+  class of issue, "element intercepts pointer events", on a different locator during manual
+  Playwright verification of the same app).
+- **Locator lesson: an AntD custom-dropdown option's class name is not safely reusable across
+  different `<Select>` instances on the same page without seeing it render real data.** The
+  "Custom Property Type" dropdown's options were verified live (`.ant-select-item-option-content`,
+  confirmed by reading real rendered text via Playwright). The "Environment" dropdown's option
+  locator was *pattern-matched* from that verified one, never actually seen against real data (the
+  manual test account had zero environments configured, so it only ever showed "No data"). Running
+  the finished script against the real target project's real "dev" environment produced
+  `"All location strategies failed for locator 'Environment Option - dev'"` — a genuine
+  local-agent Selenium log, not a timing issue. Generalizing a verified locator pattern to a
+  same-looking-but-untested sibling element is the trap; there's no tool-level fix for this, just
+  a reminder to flag "verified against real data" vs. "pattern-matched, unverified" explicitly when
+  handing off locators.
+- **Local-agent execution timing, for future reference**: a run through ~14 real UI steps
+  (login + 4 levels of navigation + opening a dropdown) took about 3 minutes wall-clock on the
+  local agent, matching the cloud grid's pace roughly 1:1 — local isn't inherently faster, it's
+  just the only path with real debuggable logs.
