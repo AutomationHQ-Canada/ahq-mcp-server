@@ -35,6 +35,12 @@ spec:
         envFrom:
           - configMapRef:
               name: {{ .Values.configname }}
+          {{- if .Values.secretName }}
+          # Holds AHQ_MCP_AUTH_SECRET (stateless OAuth token key — must be identical on every
+          # replica). Created by DevOps out-of-band; the chart never contains the value.
+          - secretRef:
+              name: {{ .Values.secretName }}
+          {{- end }}
         resources:
           {{ .Values.resources | toYaml | nindent 10 | trim }}
         ports:

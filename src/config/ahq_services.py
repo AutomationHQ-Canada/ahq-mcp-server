@@ -51,6 +51,23 @@ class Settings(BaseSettings):
     ahq_project_id: str = ""
     llm_api_key: str = ""
 
+    # --- Hosted (HTTP) mode only — all defaulted so stdio users and tests never notice them ---
+    # Public URL this service is reachable at THROUGH the gateway, including the route prefix
+    # (StripPrefix removes it before requests reach us, but every URL we advertise to OAuth
+    # clients must include it), e.g. https://api-dev.automationhq.ai/ahq-mcp-server.
+    # Empty -> http://localhost:8000 for local development.
+    ahq_mcp_public_base_url: str = ""
+    # Fernet passphrase for the stateless OAuth blobs (client_id / code / access / refresh).
+    # REQUIRED in hosted mode and must be identical across replicas — ahq-mcp-http fails fast at
+    # startup if empty. Never used in stdio mode.
+    ahq_mcp_auth_secret: str = ""
+    ahq_mcp_rate_limit_per_min: int = 60
+    ahq_mcp_max_body_bytes: int = 2_000_000
+    # Extra allowed OAuth redirect URIs beyond loopback + the Claude callbacks, comma-separated
+    # (e.g. a future Cursor/Windsurf deep-link scheme).
+    ahq_mcp_extra_redirect_uris: str = ""
+    ahq_mcp_crawl_concurrency: int = 2
+
 
 # Gateway prefix constants — StripPrefix=1 removes these before forwarding
 ASSET_SVC         = "/ahq-asset-services"

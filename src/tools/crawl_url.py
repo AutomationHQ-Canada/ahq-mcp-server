@@ -1,8 +1,19 @@
+import asyncio
+
 from urllib.parse import urlparse
 from playwright.async_api import async_playwright, Page
 
+from src.config.ahq_services import settings
+from src.tools.url_guard import validate_public_http_url
+
 MAX_PAGES = 20
 NETWORK_IDLE_TIMEOUT = 10_000  # ms
+
+# Hosted pods serve many tenants: cap simultaneous headless-Chromium instances so N users
+# crawling at once can't OOM the pod (memory is sized for ~this many browsers, see the Helm
+# values). Waiting callers just queue on the semaphore; the MCP client's own request timeout
+# is the backstop.
+_CRAWL_SEMAPHORE = asyncio.Semaphore(max(1, settings.ahq_mcp_crawl_concurrency))
 
 
 async def _extract_locators(page: Page) -> list[dict]:
@@ -80,7 +91,23 @@ async def _validate_locators(page: Page, locators: list[dict]) -> list[dict]:
     return valid
 
 
-async def crawl_url(url: str, credentials: dict = None, max_pages: int = MAX_PAGES) -> dict:
+async def crawl_url(url: str, credentials: dict = None, max_pages: int = MAX_PAGES,
+                    hosted: bool = False) -> dict:
+    if hosted:
+        # SSRF guard (Slice 9j): a hosted crawl runs INSIDE the cluster, so a crafted URL
+        # (or a same-domain link found while crawling) must never reach private/metadata
+        # addresses. Checked here for the entry URL and again on every dequeued URL below —
+        # per-navigation DNS re-resolution is the guard; the rebinding TOCTOU window between
+        # check and goto is a documented accepted residual risk (Playwright can't pin IPs).
+        blocked = await validate_public_http_url(url)
+        if blocked:
+            return {"error": blocked}
+
+    async with _CRAWL_SEMAPHORE:
+        return await _crawl(url, credentials, max_pages, hosted)
+
+
+async def _crawl(url: str, credentials: dict, max_pages: int, hosted: bool) -> dict:
     base_domain = urlparse(url).netloc
     visited: set[str] = set()
     pages_data = []
@@ -134,6 +161,12 @@ async def crawl_url(url: str, credentials: dict = None, max_pages: int = MAX_PAG
                 continue
             visited.add(current_url)
 
+            if hosted:
+                blocked = await validate_public_http_url(current_url)
+                if blocked:
+                    pages_data.append({"url": current_url, "error": blocked})
+                    continue
+
             try:
                 page = await context.new_page()
                 await page.goto(current_url, wait_until="networkidle", timeout=NETWORK_IDLE_TIMEOUT + 20_000)
@@ -161,7 +194,8 @@ async def crawl_url(url: str, credentials: dict = None, max_pages: int = MAX_PAG
                 for link in links:
                     parsed = urlparse(link)
                     if (
-                        parsed.netloc == base_domain
+                        parsed.scheme in ("http", "https")
+                        and parsed.netloc == base_domain
                         and link not in visited
                         and link not in queue
                     ):

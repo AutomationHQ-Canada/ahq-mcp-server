@@ -1,3 +1,5 @@
+# SUPERSEDED by deploy/argocd-chart-draft/ahq-mcp-server/ (the Helm chart is the maintained
+# deployment definition — this raw manifest predates it and is kept only as a reference).
 apiVersion: apps/v1
 kind: Deployment
 metadata:

@@ -61,13 +61,61 @@ This gives raw tools only — the skills' workflow discipline (always resolve re
 templateIds, story_id required, vault-vs-literal credential prompts, ...) lives in the plugin
 skills and `CLAUDE.md`, so prefer Option A for anyone not working inside this repo.
 
-## Hosted (HTTP) mode
+## Option C — hosted remote MCP server (Slice 9m, 2026-07-14)
 
-`src/http_server.py` serves the same tools over HTTP for a centrally-hosted deployment;
-credentials come per-request from `X-API-AUTH-KEY` / `org-id` / `projectId` headers instead of
-`.env`. Some local-machine tools (crawling, local agent checks) are disabled in hosted mode.
-The CI workflow (`.github/workflows/ci.yml`) + Helm chart draft (`deploy/argocd-chart-draft/`)
-cover cluster deployment — see the chart README for the open DevOps questions.
+`src/http_server.py` (`ahq-mcp-http` entrypoint) serves the same tools over Streamable HTTP
+for the centrally-hosted deployment at `{AHQ_MCP_PUBLIC_BASE_URL}` (dev:
+`https://api-dev.automationhq.ai/ahq-mcp-server`). End users install NOTHING — they connect
+any MCP client to `{public base}/mcp` and authenticate one of two ways:
+
+**1. OAuth (Claude Desktop / claude.ai connectors, MCP Inspector, any OAuth-capable client).**
+The service is its own OAuth 2.1 authorization server (AHQ has none): dynamic client
+registration + PKCE, with a browser consent page where the user pastes their AHQ
+ORGANIZATION API token once and picks a project (validated live against the gateway — the
+Slice 9k org↔project check). All OAuth state (client_id, code, access/refresh tokens) is a
+Fernet-encrypted self-contained blob keyed by `AHQ_MCP_AUTH_SECRET` — no storage, any replica
+can serve any step. Tokens can't be individually revoked (no storage); the backstop is that
+every downstream call carries the user's embedded AHQ token, which the gateway re-validates
+against Mongo per request.
+
+**2. Headers (Cursor / VS Code / Claude Code without OAuth).** Same as before: send
+`X-API-AUTH-KEY: <org token>` and `projectId: <project id>` on every request. Example
+`.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "ahq": {
+      "url": "https://api-dev.automationhq.ai/ahq-mcp-server/mcp",
+      "headers": { "X-API-AUTH-KEY": "<org token>", "projectId": "<project id>" }
+    }
+  }
+}
+```
+
+The 7 workflow skills are also served as **MCP prompts** (`src/prompts.py`), so hosted
+clients get the curated workflows without the plugin.
+
+Hosted env vars (see the Helm chart `values-*.yaml` + Secret):
+
+| Var | Where | Notes |
+|---|---|---|
+| `AHQ_BASE_URL` | ConfigMap | gateway URL the server calls AHQ through |
+| `AHQ_MCP_PUBLIC_BASE_URL` | ConfigMap | public URL incl. `/ahq-mcp-server` prefix |
+| `AHQ_MCP_AUTH_SECRET` | **Secret** `ahq-mcp-server-secrets` | REQUIRED; identical on every replica; startup fails without it |
+| `AHQ_MCP_RATE_LIMIT_PER_MIN` | ConfigMap | per-org token bucket, default 60 |
+| `AHQ_MCP_CRAWL_CONCURRENCY` | ConfigMap | max simultaneous headless Chromium, default 2 |
+
+Hardening baked in: per-org rate limiting, 2 MB request-body cap, one JSON audit line per
+tool call (org/project/tool/duration/ok — never arguments), SSRF guard on hosted crawls
+(private/metadata addresses blocked per navigation). `crawl_url` IS available hosted
+(Chromium is baked into the Docker image); `extract_requirements` and
+`check_local_agent_status` remain stdio-only.
+
+Deploy prerequisites (DevOps): ECR repo `ahq-mcp-server`; k8s Secret `ahq-mcp-server-secrets`
+with a random ≥64-char `AHQ_MCP_AUTH_SECRET`; chart from `deploy/argocd-chart-draft/` adopted
+into kubernetes-argocd-apps; gateway change making `/ahq-mcp-server/**` permitAll (like
+`testbot-mcp-server` — OAuth Bearer tokens we issue can't pass the gateway's own auth).
 
 ## Note on `skills/` vs `.claude/skills/`
 

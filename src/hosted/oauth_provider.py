@@ -1,0 +1,244 @@
+import time
+from urllib.parse import urlencode, urlparse
+
+from mcp.server.auth.provider import (
+    AccessToken,
+    AuthorizationCode,
+    AuthorizationParams,
+    OAuthAuthorizationServerProvider,
+    RefreshToken,
+    RegistrationError,
+    TokenError,
+)
+from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
+
+from src.config.credentials import decode_ahq_token
+from src.hosted.token_codec import TokenCodec
+
+# Blob lifetimes. Everything is self-contained (no storage), so "revoking" a client or token
+# isn't possible — the backstop is that every downstream AHQ call carries the embedded AHQ API
+# token, which the gateway re-validates against Mongo's `tokens` collection on every request;
+# a deleted/revoked AHQ token dies at the caller's next tool call regardless of these TTLs.
+CLIENT_TTL = 90 * 24 * 3600
+TXN_TTL = 10 * 60
+CODE_TTL = 5 * 60
+ACCESS_TTL = 8 * 3600
+REFRESH_TTL = 30 * 24 * 3600
+
+# Non-loopback redirect URIs that are always acceptable: the Claude web/desktop OAuth callback.
+CLAUDE_CALLBACKS = (
+    "https://claude.ai/api/mcp/auth_callback",
+    "https://claude.com/api/mcp/auth_callback",
+)
+
+
+def redirect_uri_allowed(uri: str, extra: frozenset[str]) -> bool:
+    """
+    Registration-time redirect-URI policy: loopback http (any port, any path — RFC 8252 native
+    clients like Claude Code, Cursor and MCP Inspector listen on a random localhost port), the
+    Claude web callbacks, or an operator-configured extra (AHQ_MCP_EXTRA_REDIRECT_URIS).
+    Everything else is refused — a permissive policy here would let any website register itself
+    and receive authorization codes.
+    """
+    if uri in CLAUDE_CALLBACKS or uri in extra:
+        return True
+    parsed = urlparse(uri)
+    return parsed.scheme == "http" and parsed.hostname in ("localhost", "127.0.0.1", "::1")
+
+
+class AhqAuthorizationCode(AuthorizationCode):
+    ahq_token: str
+    project_id: str = ""
+
+
+class AhqRefreshToken(RefreshToken):
+    ahq_token: str
+    org_id: str = ""
+    project_id: str = ""
+
+
+class AhqAccessToken(AccessToken):
+    ahq_token: str = ""
+    org_id: str = ""
+    project_id: str = ""
+
+
+def _capped_ttl(ahq_token: str, base_ttl: int) -> int:
+    """Never issue our token past the embedded AHQ token's own expiry."""
+    exp = decode_ahq_token(ahq_token).get("exp")
+    if isinstance(exp, (int, float)):
+        remaining = int(exp - time.time())
+        if remaining < base_ttl:
+            return max(60, remaining)
+    return base_ttl
+
+
+class StatelessAhqProvider(OAuthAuthorizationServerProvider):
+    """
+    OAuth 2.1 authorization server with zero storage: the client_id, authorization code and
+    access/refresh tokens are all TokenCodec blobs, so any pod can serve any step of a flow
+    another pod started. AHQ has no authorization server of its own (verified 2026-07-14 —
+    the platform validates API tokens by a Mongo existence lookup), so this provider IS the
+    authorization server; the "login" is the /consent page where the user pastes their AHQ
+    ORGANIZATION API token, which gets validated live and sealed into the issued tokens.
+    """
+
+    def __init__(self, codec: TokenCodec, public_base_url: str, extra_redirect_uris: str = ""):
+        self.codec = codec
+        self.public_base_url = public_base_url.rstrip("/")
+        self.extra_redirect_uris = frozenset(
+            u.strip() for u in extra_redirect_uris.split(",") if u.strip()
+        )
+
+    # --- Dynamic client registration (RFC 7591), storage-free ---
+
+    async def register_client(self, client_info: OAuthClientInformationFull) -> None:
+        for uri in client_info.redirect_uris or []:
+            if not redirect_uri_allowed(str(uri), self.extra_redirect_uris):
+                raise RegistrationError(
+                    error="invalid_redirect_uri",
+                    error_description=(
+                        f"redirect_uri '{uri}' is not allowed: must be a loopback http URI, "
+                        f"a Claude callback, or configured in AHQ_MCP_EXTRA_REDIRECT_URIS"
+                    ),
+                )
+        # The SDK's RegistrationHandler generates a uuid client_id, calls this method, then
+        # echoes the SAME mutable model back to the client — so replacing client_id here with a
+        # self-contained encrypted copy of the whole registration record IS the persistence.
+        # (Load-bearing SDK behavior, pinned by test_register_client_replaces_uuid_client_id.)
+        record = client_info.model_dump(mode="json", exclude={"client_id"}, exclude_none=True)
+        client_info.client_id = self.codec.encode("client", {"reg": record}, CLIENT_TTL)
+
+    async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
+        payload = self.codec.decode("client", client_id)
+        if payload is None:
+            return None
+        return OAuthClientInformationFull.model_validate({**payload["reg"], "client_id": client_id})
+
+    # --- Authorization: hand off to the /consent page ---
+
+    async def authorize(self, client: OAuthClientInformationFull, params: AuthorizationParams) -> str:
+        txn = self.codec.encode(
+            "txn",
+            {
+                "client_id": client.client_id,
+                "client_name": client.client_name or "an MCP client",
+                "params": params.model_dump(mode="json"),
+            },
+            TXN_TTL,
+        )
+        return f"{self.public_base_url}/consent?{urlencode({'txn': txn})}"
+
+    # --- Code exchange ---
+
+    async def load_authorization_code(
+        self, client: OAuthClientInformationFull, authorization_code: str
+    ) -> AhqAuthorizationCode | None:
+        payload = self.codec.decode("code", authorization_code)
+        if payload is None:
+            return None
+        return AhqAuthorizationCode(
+            code=authorization_code,
+            scopes=payload.get("scopes") or [],
+            expires_at=payload["exp"],
+            client_id=payload["client_id"],
+            code_challenge=payload["code_challenge"],
+            redirect_uri=payload["redirect_uri"],
+            redirect_uri_provided_explicitly=payload["redirect_uri_provided_explicitly"],
+            ahq_token=payload["ahq_token"],
+            project_id=payload.get("project_id", ""),
+        )
+
+    def _issue_tokens(
+        self, client_id: str, ahq_token: str, org_id: str, project_id: str, scopes: list[str]
+    ) -> OAuthToken:
+        fields = {
+            "ahq_token": ahq_token,
+            "org_id": org_id,
+            "project_id": project_id,
+            "client_id": client_id,
+            "scopes": scopes,
+        }
+        access_ttl = _capped_ttl(ahq_token, ACCESS_TTL)
+        return OAuthToken(
+            access_token=self.codec.encode("access", fields, access_ttl),
+            refresh_token=self.codec.encode("refresh", fields, _capped_ttl(ahq_token, REFRESH_TTL)),
+            token_type="Bearer",
+            expires_in=access_ttl,
+            scope=" ".join(scopes) if scopes else None,
+        )
+
+    async def exchange_authorization_code(
+        self, client: OAuthClientInformationFull, authorization_code: AhqAuthorizationCode
+    ) -> OAuthToken:
+        org_id = decode_ahq_token(authorization_code.ahq_token).get("organizationId", "")
+        if not org_id:
+            raise TokenError(error="invalid_grant", error_description="embedded AHQ token has no organization")
+        return self._issue_tokens(
+            client_id=authorization_code.client_id,
+            ahq_token=authorization_code.ahq_token,
+            org_id=org_id,
+            project_id=authorization_code.project_id,
+            scopes=authorization_code.scopes,
+        )
+
+    # --- Refresh (rotates both tokens) ---
+
+    async def load_refresh_token(
+        self, client: OAuthClientInformationFull, refresh_token: str
+    ) -> AhqRefreshToken | None:
+        payload = self.codec.decode("refresh", refresh_token)
+        if payload is None:
+            return None
+        return AhqRefreshToken(
+            token=refresh_token,
+            client_id=payload["client_id"],
+            scopes=payload.get("scopes") or [],
+            expires_at=payload["exp"],
+            ahq_token=payload["ahq_token"],
+            org_id=payload.get("org_id", ""),
+            project_id=payload.get("project_id", ""),
+        )
+
+    async def exchange_refresh_token(
+        self, client: OAuthClientInformationFull, refresh_token: AhqRefreshToken, scopes: list[str]
+    ) -> OAuthToken:
+        return self._issue_tokens(
+            client_id=refresh_token.client_id,
+            ahq_token=refresh_token.ahq_token,
+            org_id=refresh_token.org_id,
+            project_id=refresh_token.project_id,
+            scopes=scopes,
+        )
+
+    # --- Resource-server side ---
+
+    async def load_access_token(self, token: str) -> AhqAccessToken | None:
+        payload = self.codec.decode("access", token)
+        if payload is None:
+            return None
+        return AhqAccessToken(
+            token=token,
+            client_id=payload["client_id"],
+            scopes=payload.get("scopes") or [],
+            expires_at=payload["exp"],
+            ahq_token=payload["ahq_token"],
+            org_id=payload.get("org_id", ""),
+            project_id=payload.get("project_id", ""),
+        )
+
+    async def revoke_token(self, token) -> None:
+        # Self-contained tokens can't be individually revoked without storage; see module
+        # docstring for why the AHQ-token backstop makes this acceptable. Revocation is
+        # disabled in the advertised metadata (RevocationOptions(enabled=False)).
+        return None
+
+
+class AhqTokenVerifier:
+    """SDK TokenVerifier protocol implementation for the /mcp resource side."""
+
+    def __init__(self, provider: StatelessAhqProvider):
+        self._provider = provider
+
+    async def verify_token(self, token: str) -> AhqAccessToken | None:
+        return await self._provider.load_access_token(token)

@@ -11,13 +11,17 @@ containerPort: 8000
 configname: ahq-mcp-server-prod-configmap
 replicas: 2
 environment: prod
+# CONFIRM with DevOps: prod Secret with AHQ_MCP_AUTH_SECRET — MUST be the same value on both
+# replicas (stateless OAuth tokens; a mismatch silently invalidates half of all logins).
+secretName: ahq-mcp-server-secrets
+# Chromium headroom (Slice 9j).
 resources:
   requests:
-    cpu: "200m"
-    memory: "300Mi"
+    cpu: "300m"
+    memory: "512Mi"
   limits:
     cpu: "1000m"
-    memory: "800Mi"
+    memory: "1536Mi"
 
 hpa:
   enabled: false
@@ -26,9 +30,12 @@ vpa:
   enabled: false
 
 #####################
-# No `secrets:` block — this service holds no tenant credentials server-side. Each caller supplies
-# their own AHQ token/projectId as request headers (see src/config/credentials.py), so the only
-# thing this ConfigMap needs is the platform's own base URL.
+# No tenant credentials server-side: each caller supplies their own AHQ token (OAuth Bearer or
+# X-API-AUTH-KEY header — see src/hosted/). The only secret is the OAuth blob key, which lives
+# in the Secret referenced by secretName above, not here.
 # CONFIRM with DevOps: the prod gateway URL.
 data:
   AHQ_BASE_URL: "https://api.automationhq.ai"
+  AHQ_MCP_PUBLIC_BASE_URL: "https://api.automationhq.ai/ahq-mcp-server"
+  AHQ_MCP_RATE_LIMIT_PER_MIN: "60"
+  AHQ_MCP_CRAWL_CONCURRENCY: "2"

@@ -10,10 +10,10 @@ configname: ahq-mcp-server-config
 replicas: 1
 resources:
   requests:
-    memory: "300Mi"
-    cpu: "200m"
+    memory: "512Mi"
+    cpu: "300m"
   limits:
-    memory: "800Mi"
+    memory: "1536Mi"
     cpu: "1000m"
 
 hpa:

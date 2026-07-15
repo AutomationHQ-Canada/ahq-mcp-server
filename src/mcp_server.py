@@ -1,6 +1,7 @@
 import asyncio
 import json
 import sys
+import time
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -11,6 +12,9 @@ from src.config.ahq_services import settings
 from src.config.credentials import AhqCredentials
 from src.clients.bundle import ClientBundle, DEFAULT_BUNDLE
 from src.clients.generic_client import SERVICE_MAP
+from src.hosted.audit import audit_log
+from src.hosted.rate_limit import OrgRateLimiter
+from src.prompts import get_skill_prompt, list_skill_prompts
 from src.schema.asset_kinds import VALIDATORS, format_validation_error
 from src.tools.crawl_url import crawl_url as _crawl_url
 from src.tools.extract_requirements import extract_requirements as _extract_requirements
@@ -36,11 +40,15 @@ class _HttpClientHolder:
 
 app_http_client = _HttpClientHolder()
 
-# Tools that are unsafe or meaningless to run from a centrally-hosted server: check_local_agent_status
-# probes the SERVER's own localhost (not the caller's machine); crawl_url fetches arbitrary
-# caller-given URLs from inside the cluster (SSRF surface); extract_requirements reads an arbitrary
-# path off the SERVER's disk (arbitrary-file-read surface once "local" isn't the caller's laptop).
-_HOSTED_UNSUPPORTED = {"check_local_agent_status", "crawl_url", "extract_requirements"}
+# Tools that are unsafe or meaningless to run from a centrally-hosted server:
+# check_local_agent_status probes the SERVER's own localhost (not the caller's machine);
+# extract_requirements reads an arbitrary path off the SERVER's disk (arbitrary-file-read
+# surface once "local" isn't the caller's laptop). crawl_url left this set in Slice 9j
+# (2026-07-14): hosted crawls are SSRF-guarded per navigation (src/tools/url_guard.py) and
+# Chromium is baked into the Docker image.
+_HOSTED_UNSUPPORTED = {"check_local_agent_status", "extract_requirements"}
+
+_rate_limiter = OrgRateLimiter(settings.ahq_mcp_rate_limit_per_min)
 
 
 # ---------------------------------------------------------------------------
@@ -52,7 +60,7 @@ _HOSTED_UNSUPPORTED = {"check_local_agent_status", "crawl_url", "extract_require
 # back at ~137K characters in a real org and overflowed the tool-result budget. The snapshot is
 # for DISCOVERY (what exists + ids to use); fetch full documents with the dedicated get_* tools.
 _CONTEXT_FIELDS = {
-    "projects": ("projectId", "id", "name"),
+    "projects": ("projectId", "id", "_id", "name", "projectName"),
     "websites": ("websiteId", "id", "name", "websiteUrl"),
     "environments": ("environmentId", "name", "value", "type", "isDefault"),
     "epics": ("epicId", "id", "name"),
@@ -524,7 +532,12 @@ def _resolve_clients() -> tuple[ClientBundle, bool]:
     if req is None:
         _require_stdio_config()
         return DEFAULT_BUNDLE, False
-    creds = AhqCredentials.from_headers(req.headers, base_url=settings.ahq_base_url)
+    # OAuth requests carry their credentials sealed inside the Bearer token; DualAuthMiddleware
+    # verifies it and stashes the result in the ASGI scope. Legacy header clients fall through
+    # to the original X-API-AUTH-KEY/projectId path.
+    creds = req.scope.get("ahq_credentials") or AhqCredentials.from_headers(
+        req.headers, base_url=settings.ahq_base_url
+    )
     return ClientBundle.build(credentials=creds, http_client=app_http_client.client), True
 
 
@@ -558,14 +571,59 @@ def _slim_response_obj(resp):
     return resp
 
 
+async def _dispatch_hosted(name: str, arguments: dict, clients: ClientBundle):
+    """
+    Hosted-only wrapper: per-org rate limiting plus one audit line per tool call. Tool
+    ARGUMENTS are deliberately never logged — they routinely contain credentials (script
+    steps, vault payloads).
+    """
+    creds = clients.user._credentials
+    org = creds.org_id or "unknown"
+    if not _rate_limiter.allow(org):
+        return {
+            "error": f"Rate limit exceeded ({settings.ahq_mcp_rate_limit_per_min} calls/min "
+                     f"per organization). Retry shortly."
+        }
+    started = time.monotonic()
+    try:
+        result = await _dispatch(name, arguments, clients, is_hosted=True)
+    except Exception as e:
+        audit_log("tool_call", org=org, project=creds.project_id, tool=name,
+                  duration_ms=int((time.monotonic() - started) * 1000),
+                  ok=False, error=str(e)[:200])
+        raise
+    error = result.get("error") if isinstance(result, dict) else None
+    audit_log("tool_call", org=org, project=creds.project_id, tool=name,
+              duration_ms=int((time.monotonic() - started) * 1000),
+              ok=error is None, **({"error": str(error)[:200]} if error is not None else {}))
+    return result
+
+
 @server.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     try:
         clients, is_hosted = _resolve_clients()
-        result = await _dispatch(name, arguments, clients, is_hosted)
+        if is_hosted:
+            result = await _dispatch_hosted(name, arguments, clients)
+        else:
+            result = await _dispatch(name, arguments, clients, is_hosted)
         return [TextContent(type="text", text=json.dumps(_slim_response_obj(result), indent=2))]
     except Exception as e:
         return [TextContent(type="text", text=json.dumps({"error": str(e)}))]
+
+
+@server.list_prompts()
+async def list_prompts():
+    return list_skill_prompts()
+
+
+@server.get_prompt()
+async def get_prompt(name: str, arguments: dict | None = None):
+    try:
+        hosted = server.request_context.request is not None
+    except LookupError:
+        hosted = False
+    return get_skill_prompt(name, hosted=hosted)
 
 
 async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: bool = False):
@@ -888,6 +946,7 @@ async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: boo
             url=args["url"],
             credentials=args.get("credentials"),
             max_pages=args.get("max_pages", 20),
+            hosted=is_hosted,
         )
     if name == "extract_requirements":
         return _extract_requirements(args["file_path"])
@@ -1008,6 +1067,39 @@ async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: boo
 # Entry point
 # ---------------------------------------------------------------------------
 
+async def _check_project_in_org() -> str | None:
+    """
+    Slice 9k: the org is derived from the token (can't drift), but AHQ_PROJECT_ID is configured
+    independently — a token from org A plus a project id from org B passes every local check and
+    then silently reads/writes empty or wrong-org data on every call (hit live 2026-07-13).
+    Returns a loud message when the configured project is not among the token org's projects,
+    None when it is. Network/API failure downgrades to a warning message prefixed WARNING —
+    never blocks serving.
+    """
+    try:
+        projects = await DEFAULT_BUNDLE.user.list_projects()
+    except Exception as e:
+        return f"WARNING: project↔org check skipped ({e})"
+
+    # Real documents use `_id` + `projectName` (confirmed live 2026-07-14); other spellings
+    # kept defensively.
+    def _pid(p):
+        return p.get("projectId") or p.get("id") or p.get("_id")
+
+    ids = {str(_pid(p)) for p in projects if isinstance(p, dict) and _pid(p)}
+    if settings.ahq_project_id in ids:
+        return None
+    listing = ", ".join(
+        f"{p.get('name') or p.get('projectName', '?')}={_pid(p)}"
+        for p in projects[:10] if isinstance(p, dict)
+    ) or "none visible to this token"
+    return (
+        f"ERROR: AHQ_PROJECT_ID '{settings.ahq_project_id}' does not belong to this token's "
+        f"organization — every tool would read/write the wrong place. Update ~/.ahq/.env with "
+        f"one of this org's projects: {listing}"
+    )
+
+
 async def main():
     try:
         _require_stdio_config()
@@ -1024,6 +1116,9 @@ async def main():
             print(f"[ahq-mcp-server] Connected as: {name}", file=sys.stderr)
         except Exception as e:
             print(f"[ahq-mcp-server] WARNING: Token validation failed: {e}", file=sys.stderr)
+        mismatch = await _check_project_in_org()
+        if mismatch:
+            print(f"[ahq-mcp-server] {mismatch}", file=sys.stderr)
 
     async with stdio_server() as (read_stream, write_stream):
         await server.run(read_stream, write_stream, server.create_initialization_options())

@@ -20,6 +20,45 @@ version history: `D:\MCP\AHQ_MCP_SERVER_MASTER_DESIGN.md` §14.
 - Org token type: `ORGANIZATION` — signed with a different secret than user JWTs
 - `.env` must never be committed
 
+## Hosted mode authentication (Slice 9m, 2026-07-14)
+
+`ahq-mcp-http` (`src/http_server.py`) is its own OAuth 2.1 authorization server — AHQ has NO
+OAuth server anywhere (verified: no authorization-server dep in any pom; the gateway validates
+API tokens by a Mongo `tokens.value` existence lookup, no signature/expiry/revocation check).
+Key facts a future session must not rediscover:
+
+- **Everything is stateless**: client_id, authorization code, access + refresh tokens are all
+  Fernet blobs (`src/hosted/token_codec.py`) keyed by `AHQ_MCP_AUTH_SECRET` — required at
+  startup, must be identical across replicas (a mismatch silently invalidates logins). The
+  user's pasted AHQ ORGANIZATION token is sealed INSIDE the access token; `/consent` validates
+  it live via `list_projects` (which is also the 9k org↔project check + project picker).
+- **Stateless DCR rides on SDK mutation-echo**: `register_client` REPLACES the SDK-generated
+  uuid `client_id` with an encrypted registration record and the SDK echoes the mutated model
+  back (pinned by `test_register_client_replaces_uuid_client_id_with_blob` — check it after
+  any `mcp` package upgrade).
+- **Dual auth on /mcp** (`src/hosted/dual_auth.py`): `Authorization: Bearer <our blob>` →
+  credentials into `scope["ahq_credentials"]`; legacy `X-API-AUTH-KEY`+`projectId` headers →
+  pass-through to the original `from_headers` path. The SDK's `RequireAuthMiddleware` is NOT
+  used (it would 401 the header clients).
+- **No token revocation by design** — no storage; the gateway re-validates the embedded AHQ
+  token on every downstream call, so a revoked AHQ token dies at the next tool call anyway.
+- **Public URLs vs app paths**: the gateway's `StripPrefix=1` removes `/ahq-mcp-server` before
+  requests reach us, so routes are prefix-less but every ADVERTISED URL (metadata docs,
+  consent redirect, `WWW-Authenticate: resource_metadata`) must be built from
+  `AHQ_MCP_PUBLIC_BASE_URL` (which includes the prefix). Also: bare `/mcp` is path-rewritten
+  to `/mcp/` in-process (`_ExactMcpPath`) — Starlette's Mount 307 would emit a prefix-less
+  Location that 404s through the gateway.
+- **Redirect-URI policy**: loopback http (any port) + `https://claude.ai|claude.com/api/mcp/auth_callback`
+  + `AHQ_MCP_EXTRA_REDIRECT_URIS`. Anything else is refused at registration.
+- Hosted hardening: per-org in-process rate limit (`AHQ_MCP_RATE_LIMIT_PER_MIN`, default 60),
+  2 MB body cap, one JSON audit line per tool call (never log tool arguments — they contain
+  credentials). `crawl_url` is hosted-ENABLED since 9j with an SSRF guard
+  (`src/tools/url_guard.py`, `is_global` check on every navigation; DNS-rebinding TOCTOU is
+  accepted residual risk); `extract_requirements`/`check_local_agent_status` stay stdio-only.
+- The 7 skills are also served as MCP prompts (`src/prompts.py`) so hosted clients get the
+  workflows; the gateway needs `/ahq-mcp-server/**` permitAll (like `testbot-mcp-server`)
+  before OAuth Bearer tokens can reach us.
+
 ## AHQ Platform Knowledge (Aviso-UTAP)
 
 ### Module Map — where things live in the UI
