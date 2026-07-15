@@ -11,8 +11,7 @@ from src.schema.asset_kinds import (
     CreateConfigVaultSecretArgs,
     PromoteRecordedScriptArgs,
     EpicCreateArgs,
-    ScheduleOnceArgs,
-    ScheduleRecurringArgs,
+    SchedulerCreateArgs,
     StoryCreateArgs,
     SuiteCreateArgs,
     TestScriptCreateArgs,
@@ -22,7 +21,10 @@ from src.schema.asset_kinds import (
 )
 
 VALID_STEP = {"templateId": "real-uuid-1234", "parameters": []}
-VALID_EXEC_CONFIG = {"gridUrlForExecution": "https://grid.example.com", "browser": "chrome"}
+VALID_EXEC_CONFIG = {
+    "baseUrl": "env-uuid-1", "browser": "chrome", "gridId": "grid-1",
+    "browserVersion": "latest", "osType": "Grid OS",
+}
 
 
 def _valid_test_script_args(**overrides):
@@ -93,18 +95,44 @@ class TestSuiteAndScripts:
 
 
 class TestScheduler:
-    def test_recurring_accepts_full_execution_configuration(self):
-        ScheduleRecurringArgs(bot_id="b1", cron="0 0 * * *", execution_configuration=VALID_EXEC_CONFIG)
+    def test_recurring_accepts_all_required_fields(self):
+        SchedulerCreateArgs(bot_id="b1", name="Nightly Run", cron="0 0 * * *",
+                            execution_configuration=VALID_EXEC_CONFIG)
+
+    def test_recurring_emails_optional_defaults_empty(self):
+        args = SchedulerCreateArgs(bot_id="b1", name="Nightly Run", cron="0 0 * * *",
+                                   execution_configuration=VALID_EXEC_CONFIG)
+        assert args.emails == []
+
+    def test_recurring_rejects_missing_name(self):
+        with pytest.raises(ValidationError):
+            SchedulerCreateArgs(bot_id="b1", cron="0 0 * * *", execution_configuration=VALID_EXEC_CONFIG)
+
+    def test_recurring_rejects_blank_name(self):
+        with pytest.raises(ValidationError):
+            SchedulerCreateArgs(bot_id="b1", name="", cron="0 0 * * *", execution_configuration=VALID_EXEC_CONFIG)
+
+    def test_recurring_rejects_name_over_120_chars(self):
+        with pytest.raises(ValidationError):
+            SchedulerCreateArgs(bot_id="b1", name="x" * 121, cron="0 0 * * *",
+                               execution_configuration=VALID_EXEC_CONFIG)
+
+    def test_recurring_rejects_missing_cron(self):
+        with pytest.raises(ValidationError):
+            SchedulerCreateArgs(bot_id="b1", name="Nightly Run", execution_configuration=VALID_EXEC_CONFIG)
+
+    def test_recurring_rejects_blank_cron(self):
+        # This is the exact case that NullPointerExceptions server-side (recurringRule.replace on
+        # a null/blank value) — catching it here means the caller gets a clean error instead.
+        with pytest.raises(ValidationError):
+            SchedulerCreateArgs(bot_id="b1", name="Nightly Run", cron="", execution_configuration=VALID_EXEC_CONFIG)
 
     def test_recurring_rejects_execution_configuration_missing_browser(self):
         with pytest.raises(ValidationError):
-            ScheduleRecurringArgs(
-                bot_id="b1", cron="0 0 * * *",
+            SchedulerCreateArgs(
+                bot_id="b1", name="Nightly Run", cron="0 0 * * *",
                 execution_configuration={"gridUrlForExecution": "https://grid.example.com"},
             )
-
-    def test_once_accepts_full_execution_configuration(self):
-        ScheduleOnceArgs(bot_id="b1", epoch_ms=123, execution_configuration=VALID_EXEC_CONFIG)
 
 
 class TestApiAndWorkflow:

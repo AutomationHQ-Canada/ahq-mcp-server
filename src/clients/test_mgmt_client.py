@@ -493,3 +493,89 @@ class TestMgmtClient(BaseAhqClient):
 
     async def get_template(self, template_id: str) -> dict:
         return await self.get(f"/rest/api/templates/{template_id}")
+
+    # --- Scheduler ---
+    # The REAL scheduler backing both the "Scheduler Admin" UI page and each TestBot's own
+    # clock-icon dialog — test-management-services' /rest/api/schedulers. This is NOT the same
+    # system as background-v2-services' /background-jobs/execution-jobs/schedule-* endpoints
+    # (what schedule_bot_recurring/schedule_bot_once used before this): those write to a
+    # completely different, UI-invisible mechanism that doesn't reliably fire at all (confirmed
+    # live 2026-07-15 — a "successful" create there never actually ran, and the job vanished from
+    # its own status lookup). Body shape confirmed against automationhq-frontend-v2's
+    # SchedulerSchema/TSchedulerCreateSchema and its callSchedulerCreateApi.
+    _SCHEDULER_RESOURCE_TYPE_TEST_BOT = 1
+
+    def _scheduler_body(self, bot_id: str, name: str, emails: list, recurring_rule: str,
+                        execution_configuration: dict) -> dict:
+        return {
+            "name": name,
+            "emails": emails or [],
+            "recurringRule": recurring_rule,
+            "executionConfiguration": execution_configuration,
+            "resourceId": bot_id,
+            "resourceType": self._SCHEDULER_RESOURCE_TYPE_TEST_BOT,
+            "organizationId": self._credentials.org_id,
+            "projectId": self._credentials.project_id,
+        }
+
+    async def create_scheduler(self, bot_id: str, name: str, emails: list, recurring_rule: str,
+                               execution_configuration: dict) -> dict:
+        """
+        POST /rest/api/schedulers — recurring schedule for a TestBot. recurringRule is a required
+        cron expression; this endpoint has no confirmed one-time-run mode (see
+        convert_text_to_cron for a human-language -> cron helper, and AhqCronExpression in the
+        frontend for what a valid expression looks like).
+        """
+        body = self._scheduler_body(bot_id, name, emails, recurring_rule, execution_configuration)
+        return await self.post("/rest/api/schedulers", json=body)
+
+    async def update_scheduler(self, scheduler_id: str, bot_id: str = None, name: str = None,
+                               emails: list = None, recurring_rule: str = None,
+                               execution_configuration: dict = None) -> dict:
+        """
+        PUT /rest/api/schedulers/{id} — full-document replace, not a patch: callSchedulerUpdateApi
+        takes the identical TSchedulerCreateSchema payload as create, and AddScheduler.tsx's edit
+        mode always fetches the existing record first and resubmits the whole thing (the same
+        destructive-PUT shape already hit once in this codebase — see update_common_function).
+        GETs the current scheduler and merges in only the fields the caller actually wants
+        changed, so updating just the cron expression can't silently wipe emails or the execution
+        config.
+        """
+        current = await self.get_scheduler(scheduler_id)
+        body = self._scheduler_body(
+            bot_id if bot_id is not None else current.get("resourceId"),
+            name if name is not None else current.get("name"),
+            emails if emails is not None else current.get("emails"),
+            recurring_rule if recurring_rule is not None else current.get("recurringRule"),
+            execution_configuration if execution_configuration is not None else current.get("executionConfiguration"),
+        )
+        return await self.put(f"/rest/api/schedulers/{scheduler_id}", json=body)
+
+    async def list_schedulers(self, bot_id: str = None, offset: int = 0, size: int = 100) -> dict:
+        # Matches ListSchedulers.tsx's own filter shape exactly — the TestBot scheduler drawer
+        # (the "Schedulers" panel in the UI) filters strictly by resourceId == this bot's id, so
+        # a schedule created against the wrong bot_id would succeed but never appear there. Pass
+        # bot_id to reproduce that exact view and confirm what a given bot actually has.
+        body = {"offset": offset, "size": size, "sortBy": "createdDate", "orderBy": "desc", "resourceType": 1}
+        if bot_id:
+            body["resourceId"] = bot_id
+        return await self.post("/rest/api/schedulers/listByFilter", json=body)
+
+    async def get_scheduler(self, scheduler_id: str) -> dict:
+        return await self.get(f"/rest/api/schedulers/{scheduler_id}")
+
+    async def delete_scheduler(self, scheduler_id: str) -> dict:
+        return await self.delete(f"/rest/api/schedulers/{scheduler_id}")
+
+    async def toggle_scheduler(self, scheduler_id: str) -> dict:
+        # Enable/disable without deleting — no request body (matches callSchedulerToggleApi).
+        return await self.patch(f"/rest/api/schedulers/{scheduler_id}/toggle")
+
+    async def list_scheduler_recipient_emails(self) -> list:
+        # Previously-used recipient emails, for suggesting values rather than guessing one.
+        result = await self.get("/rest/api/schedulers/emails")
+        return result if isinstance(result, list) else result.get("content", result)
+
+    async def convert_text_to_cron(self, text: str) -> dict:
+        """Human-language -> cron expression, e.g. 'every day at 9am' -> '0 9 * * *'."""
+        return await self.post("/rest/api/schedulers/convert-to-cron", json={"text": text, "locale": "en"})

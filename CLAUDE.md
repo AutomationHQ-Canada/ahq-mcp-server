@@ -142,6 +142,15 @@ Asset types: Epics, Stories, Applications, Pages, Locators, Recorded Scripts, Te
 ### Scheduler Admin
 Centralized view of all scheduled TestBot runs. Schedules are created per-TestBot (clock icon) and managed here. Toggle Enabled without deleting to pause.
 
+**One-time scheduling removed (2026-07-15)**: `schedule_bot_once` (background-v2-services'
+`/background-jobs/execution-jobs/schedule-once-at`) is gone — the tool, its client method
+(`BackgroundClient.schedule_bot_once`), and its validator (`ScheduleOnceArgs`) were all deleted.
+It shared the same UI-invisible, unreliable dispatch mechanism already called out for the old
+`schedule_bot_recurring` path: a call reports success and shows a PENDING job that never actually
+executes, and the job later vanishes from status lookup (confirmed live). There is no known
+reliable one-time-schedule endpoint on this platform — for a single future run, use `execute_bot`
+at the right time instead (schedule an external trigger, or just call it when the moment arrives).
+
 ### System Status
 Health check per microservice: Liveness, Readiness, Ping — each shows UP (green) or DOWN (red).
 
@@ -551,14 +560,14 @@ asking to "test my API" or "run a load test" means the mtaf-core tools below, no
 | `get_tunnel_status` / `start_tunnel` / `stop_tunnel` / `execute_tunnel_command` | Tunnel control (see Tunnel Commands note — dev gateway currently 403s all tunnel tokens) |
 | `list_bots` / `execute_bot` | Run a TestBot by name |
 | `get_execution_report` | View pass/fail results by `execution_id` (bug fix 2026-07-10 — previously called a nonexistent client method and always threw `AttributeError`) |
-| `schedule_bot_recurring` | Set up a cron schedule |
+| `schedule_bot_recurring` | Set up a cron schedule (one-time scheduling removed 2026-07-15 — see note below) |
 | `test_api_request` / `test_workflow` / `run_performance_bot` | API/load testing — see mtaf-core section above |
 | `get_service_spec` / `call_api` | Discover and call any AHQ endpoint not covered by a hand-written tool |
 
 ## Pre-flight validation (2026-07-10)
 
 Every tool that creates/schedules something (`create_test_script`, `create_suite`,
-`add_scripts_to_suite`, `schedule_bot_recurring`/`schedule_bot_once`, `create_api_collection`,
+`add_scripts_to_suite`, `schedule_bot_recurring`, `create_api_collection`,
 `create_api_request`, `create_workflow`, `create_epic`, `create_story`,
 `promote_recorded_script`, `create_common_function`/`update_common_function`) is now validated in
 `src/schema/asset_kinds.py` before `_dispatch` calls the client/API — a bad payload returns a

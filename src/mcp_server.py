@@ -15,7 +15,7 @@ from src.clients.generic_client import SERVICE_MAP
 from src.hosted.audit import audit_log
 from src.hosted.rate_limit import OrgRateLimiter
 from src.prompts import get_skill_prompt, list_skill_prompts
-from src.schema.asset_kinds import VALIDATORS, format_validation_error
+from src.schema.asset_kinds import VALIDATORS, format_validation_error, RunExecutionConfiguration
 from src.tools.crawl_url import crawl_url as _crawl_url
 from src.tools.extract_requirements import extract_requirements as _extract_requirements
 
@@ -47,6 +47,62 @@ app_http_client = _HttpClientHolder()
 # (2026-07-14): hosted crawls are SSRF-guarded per navigation (src/tools/url_guard.py) and
 # Chromium is baked into the Docker image.
 _HOSTED_UNSUPPORTED = {"check_local_agent_status", "extract_requirements"}
+
+# The one Grid record execute_bot's caller can pick that means "run on my own machine" — the
+# same two URL forms test-local-execution-services' own BotExecutionRepository checks for.
+_LOCAL_GRID_URLS = {"http://localhost:4455/wd/hub", "http://127.0.0.1:4455/wd/hub"}
+
+
+async def _is_local_grid(clients: ClientBundle, grid_id: str) -> bool:
+    """
+    True if gridId resolves to the local-agent grid. Confirmed via a real browser HAR capture:
+    for this grid, the Run TestBot dialog never calls the cloud executor at all — it POSTs
+    straight to localhost:9202 (same machine as the browser). Routing through the cloud instead
+    enqueues a job the cloud has no way to ever deliver to this developer's own machine, so it
+    just sits ENQUEUED forever — a different, earlier-stage failure than the grid
+    misclassification bug that only matters once a request already reached the agent.
+    """
+    try:
+        grid = await clients.config.get_grid(grid_id)
+    except Exception:
+        return False
+    return isinstance(grid, dict) and grid.get("url") in _LOCAL_GRID_URLS
+
+
+def _fill_resolution_default(execution_configuration: dict, is_local: bool) -> dict:
+    """
+    "Local Machine Resolution" only means something for the local-agent grid ("use whatever
+    resolution my own machine has") — a real cloud grid like TestingBot rejects it outright
+    (confirmed live: 500, "Invalid screen-resolution specified: Local Machine Resolution"). Only
+    fill it in once we've confirmed the target actually is the local grid; leave it unset
+    otherwise, matching the pre-existing (working) behavior for cloud grids.
+    """
+    if is_local and not execution_configuration.get("resolution"):
+        execution_configuration["resolution"] = "Local Machine Resolution"
+    return execution_configuration
+
+
+async def _fill_custom_properties(clients: ClientBundle, execution_configuration: dict) -> dict:
+    """
+    The Run TestBot / Scheduler dialogs always populate execution_configuration.customProperties
+    from the project's stored Global Parameters before submitting (confirmed via HAR: the UI
+    calls GET .../globalParameters, then sends those exact customPropertyId/name/value triplets
+    on the execute call) — this is what resolves {{username}}-style type-2 "configuration"
+    variables in test steps at runtime. Our schema defaults this to an empty list, and no caller
+    can reasonably be expected to already know the project's customPropertyId GUIDs — omitting it
+    leaves those variables unresolved, and a step ends up literally typing the placeholder name
+    instead of a real value (confirmed live: "username" typed verbatim into a login form instead
+    of the configured email). Only fills in when the caller didn't already supply an override.
+    """
+    if execution_configuration.get("customProperties"):
+        return execution_configuration
+    try:
+        params = await clients.config.list_global_parameters()
+        execution_configuration["customProperties"] = params.get("customProperties") or []
+    except Exception:
+        pass  # best-effort — an empty list here is the same as today's behavior, not worse
+    return execution_configuration
+
 
 _rate_limiter = OrgRateLimiter(settings.ahq_mcp_rate_limit_per_min)
 
@@ -362,11 +418,15 @@ TOOLS = [
     Tool(name="list_execution_types", description="List execution types (e.g. Web/Mobile) and platform options.", inputSchema={"type": "object", "properties": {}}),
     Tool(name="create_environment", description="Create an execution Environment (name + app-under-test URL). execute_bot's executionConfiguration.baseUrl must reference an Environment ID — if list_environments has nothing for the target app, create one here first.", inputSchema={"type": "object", "properties": {"name": {"type": "string"}, "url": {"type": "string", "description": "The app-under-test URL this environment points at"}, "env_type": {"type": "string", "default": "Web"}, "description": {"type": "string"}}, "required": ["name", "url"]}),
     Tool(name="get_grid_capabilities", description="One call returns everything an execute_bot config needs for a grid: valid platforms (osType values), browsers, resolutions, and browser versions (pass browser to get its versions). Use this instead of guessing — values differ per grid ('Grid OS'/'latest' on plain Selenium, real OS/version lists on TestingBot/BrowserStack).", inputSchema={"type": "object", "properties": {"grid_id": {"type": "string"}, "testing_type": {"type": "string", "default": "Web"}, "browser": {"type": "string", "description": "Optional — include to also get this browser's valid versions"}}, "required": ["grid_id"]}),
-    Tool(name="execute_bot", description="Run a TestBot in the cloud. execution_configuration is validated locally before submission. REQUIRED: baseUrl (an ENVIRONMENT ID from list_environments/create_environment — NOT a URL, despite the name; the backend resolves it via environment lookup and a raw URL kills the run at report time), browser + browserVersion + osType (from get_grid_capabilities), gridId (from list_grids). Returns executionId AND jobId — poll get_execution_status (which falls back to the detailed report when the lightweight status is UNKNOWN), then get_execution_report for per-step results.", inputSchema={"type": "object", "properties": {"bot_id": {"type": "string"}, "execution_configuration": {"type": "object", "description": "Required: baseUrl (Environment ID), browser, browserVersion, osType, gridId. Optional: resolution, type ('Web'), timeout (1-300, default 60), waitForElementTimeout (1-300, default 30), delayBetweenSteps (0-30), numberOfRetries (0-3), screenshot flags, targetBranchName, profileId.", "properties": {"baseUrl": {"type": "string", "description": "Environment ID (NOT a URL)"}, "browser": {"type": "string"}, "browserVersion": {"type": "string"}, "osType": {"type": "string"}, "gridId": {"type": "string"}, "resolution": {"type": "string"}, "timeout": {"type": "integer"}, "targetBranchName": {"type": "string"}}, "required": ["baseUrl", "browser", "browserVersion", "osType", "gridId"]}, "name": {"type": "string", "description": "Execution display name (defaults to the bot's name)"}, "profile_id": {"type": "string"}, "partial_execution": {"type": "boolean", "default": False}}, "required": ["bot_id", "execution_configuration"]}),
+    Tool(name="execute_bot", description="Run a TestBot — on the cloud grid pool, or on this machine's own local agent if gridId resolves to it (detected automatically; routed directly to localhost:9202, bypassing the cloud, since the cloud has no way to deliver a job to a specific developer's machine). execution_configuration is validated locally before submission. REQUIRED: baseUrl (an ENVIRONMENT ID from list_environments/create_environment — NOT a URL, despite the name; the backend resolves it via environment lookup and a raw URL kills the run at report time), browser + browserVersion + osType (from get_grid_capabilities), gridId (from list_grids). Returns executionId AND jobId — poll get_execution_status (which falls back to the detailed report when the lightweight status is UNKNOWN), then get_execution_report for per-step results.", inputSchema={"type": "object", "properties": {"bot_id": {"type": "string"}, "execution_configuration": {"type": "object", "description": "Required: baseUrl (Environment ID), browser, browserVersion, osType, gridId. Optional: resolution, type ('Web'), timeout (1-300, default 60), waitForElementTimeout (1-300, default 30), delayBetweenSteps (0-30), numberOfRetries (0-3), screenshot flags, targetBranchName, profileId.", "properties": {"baseUrl": {"type": "string", "description": "Environment ID (NOT a URL)"}, "browser": {"type": "string"}, "browserVersion": {"type": "string"}, "osType": {"type": "string"}, "gridId": {"type": "string"}, "resolution": {"type": "string"}, "timeout": {"type": "integer"}, "targetBranchName": {"type": "string"}}, "required": ["baseUrl", "browser", "browserVersion", "osType", "gridId"]}, "name": {"type": "string", "description": "Execution display name (defaults to the bot's name)"}, "profile_id": {"type": "string"}, "partial_execution": {"type": "boolean", "default": False}}, "required": ["bot_id", "execution_configuration"]}),
     Tool(name="get_execution_status", description="Progress/status poll for a running execution (by executionId from execute_bot). The lightweight endpoint reports UNKNOWN for finished runs — this tool automatically falls back to the detailed report's overall status in that case. For queue-position detail, use get_job_status with the jobId from execute_bot's response.", inputSchema={"type": "object", "properties": {"execution_id": {"type": "string"}}, "required": ["execution_id"]}),
-    Tool(name="schedule_bot_recurring", description="Schedule a bot on a cron expression. execution_configuration from list_environments().", inputSchema={"type": "object", "properties": {"bot_id": {"type": "string"}, "execution_configuration": {"type": "object"}, "cron": {"type": "string", "description": "Cron expression e.g. '0 0 * * *'"}}, "required": ["bot_id", "execution_configuration", "cron"]}),
-    Tool(name="schedule_bot_once", description="Schedule a bot to run once at a specific epoch millisecond timestamp.", inputSchema={"type": "object", "properties": {"bot_id": {"type": "string"}, "execution_configuration": {"type": "object"}, "epoch_ms": {"type": "integer"}}, "required": ["bot_id", "execution_configuration", "epoch_ms"]}),
-    Tool(name="cancel_schedule", description="Cancel a recurring scheduled bot.", inputSchema={"type": "object", "properties": {"schedule_id": {"type": "string"}}, "required": ["schedule_id"]}),
+    Tool(name="schedule_bot_recurring", description="Create a recurring schedule for a TestBot — the real scheduler backing both the Scheduler Admin page and each TestBot's own clock-icon dialog (test-management-services). REQUIRED: name (1-120 chars, the schedule's own name — ask the user if not given), cron (a real cron expression — use convert_text_to_cron first if the user described it in plain language, e.g. 'every day at 9am'), execution_configuration (same shape as execute_bot's: baseUrl/browser/browserVersion/osType/gridId required). emails (result-recipient list) is optional but should be asked for — check list_scheduler_recipient_emails for previously-used addresses first.", inputSchema={"type": "object", "properties": {"bot_id": {"type": "string"}, "name": {"type": "string", "description": "The schedule's own name, 1-120 chars"}, "emails": {"type": "array", "items": {"type": "string"}, "description": "Result-notification recipients"}, "cron": {"type": "string", "description": "Cron expression, e.g. '0 9 * * *'. Use convert_text_to_cron to derive one from plain language."}, "execution_configuration": {"type": "object", "properties": {"baseUrl": {"type": "string", "description": "Environment ID (NOT a URL)"}, "browser": {"type": "string"}, "browserVersion": {"type": "string"}, "osType": {"type": "string"}, "gridId": {"type": "string"}}, "required": ["baseUrl", "browser", "browserVersion", "osType", "gridId"]}}, "required": ["bot_id", "name", "cron", "execution_configuration"]}),
+    Tool(name="cancel_schedule", description="Delete a recurring schedule created by schedule_bot_recurring (test-management-services' real scheduler).", inputSchema={"type": "object", "properties": {"schedule_id": {"type": "string"}}, "required": ["schedule_id"]}),
+    Tool(name="update_schedule", description="Update an existing recurring schedule (name, emails, cron, and/or execution_configuration) — only supply the fields you want changed, everything else is preserved from the current schedule (fetched first, merged, then saved as a whole — the real endpoint has no partial-patch mode).", inputSchema={"type": "object", "properties": {"schedule_id": {"type": "string"}, "bot_id": {"type": "string"}, "name": {"type": "string"}, "emails": {"type": "array", "items": {"type": "string"}}, "cron": {"type": "string"}, "execution_configuration": {"type": "object"}}, "required": ["schedule_id"]}),
+    Tool(name="toggle_schedule", description="Enable/disable a recurring schedule without deleting it (flips its current state).", inputSchema={"type": "object", "properties": {"schedule_id": {"type": "string"}}, "required": ["schedule_id"]}),
+    Tool(name="list_schedulers", description="List recurring schedules (the same ones shown in Scheduler Admin). Pass bot_id to reproduce the exact filtered view a TestBot's own scheduler dialog shows — useful to confirm a schedule actually landed against the bot you expected.", inputSchema={"type": "object", "properties": {"bot_id": {"type": "string", "description": "Optional — filter to one TestBot's schedules"}, "offset": {"type": "integer", "default": 0}, "size": {"type": "integer", "default": 100}}}),
+    Tool(name="list_scheduler_recipient_emails", description="Previously-used schedule result-notification email addresses, for suggesting values instead of guessing one.", inputSchema={"type": "object", "properties": {}}),
+    Tool(name="convert_text_to_cron", description="Convert a plain-language schedule description (e.g. 'every day at 9am', 'every Monday at noon') into a cron expression for schedule_bot_recurring — use this instead of hand-writing cron syntax.", inputSchema={"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}),
     Tool(name="get_job_status", description="Get the status and details of an execution job.", inputSchema={"type": "object", "properties": {"job_id": {"type": "string"}}, "required": ["job_id"]}),
     Tool(name="list_recent_runs", description="List recent execution reports. With bot_id: that bot's execution history; without: the report list across bots. (Rewired 2026-07-13 — the old background-jobs path never existed and always 404'd.)", inputSchema={"type": "object", "properties": {"bot_id": {"type": "string"}, "limit": {"type": "integer", "default": 10}}}),
 
@@ -897,9 +957,28 @@ async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: boo
     if name == "list_execution_types":
         return await clients.config.list_execution_types()
     if name == "execute_bot":
-        # Correct entry point: executor-services validates bot, fan-outs, then calls background-v2 internally
+        # Correct entry point: executor-services validates bot, fan-outs, then calls background-v2 internally.
+        # Rebuild execution_configuration from the validated model (not the raw args dict) so its
+        # declared defaults (timeout=60, waitForElementTimeout=30, closeBrowserAfterEachExecution=True,
+        # type="Web", targetBranchName="main") actually reach the API. The VALIDATORS check above
+        # only used this model to raise on bad input and threw it away — any field the caller
+        # omitted stayed absent from the outgoing JSON, and the backend fills an absent field with
+        # 0/false/blank rather than a working value (confirmed live: an omitted timeout/
+        # waitForElementTimeout produced a 0-second timeout, dooming the run).
+        execution_configuration = RunExecutionConfiguration(**args["execution_configuration"]).model_dump(exclude_none=True)
+        execution_configuration = await _fill_custom_properties(clients, execution_configuration)
+        is_local = await _is_local_grid(clients, execution_configuration["gridId"])
+        execution_configuration = _fill_resolution_default(execution_configuration, is_local)
+        if is_local:
+            # Local grid: POST directly to this machine's own agent (localhost:9202), bypassing
+            # the cloud entirely — see _is_local_grid's docstring. profile_id/partial_execution
+            # are cloud-executor-only concepts (never seen in the browser's direct-to-agent
+            # request) and are not supported on this path.
+            return await clients.local_exec.execute_bot_locally(
+                args["bot_id"], execution_configuration, name=args.get("name"),
+            )
         return await clients.executor.execute_bot(
-            args["bot_id"], args["execution_configuration"],
+            args["bot_id"], execution_configuration,
             name=args.get("name"), profile_id=args.get("profile_id"),
             partial_execution=args.get("partial_execution", False),
         )
@@ -918,11 +997,40 @@ async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: boo
                 pass  # keep the lightweight answer — a poll must not fail because the report isn't ready
         return status
     if name == "schedule_bot_recurring":
-        return await clients.background.schedule_bot_recurring(args["bot_id"], args["execution_configuration"], args["cron"])
-    if name == "schedule_bot_once":
-        return await clients.background.schedule_bot_once(args["bot_id"], args["execution_configuration"], args["epoch_ms"])
+        # Real scheduler (test-management-services' /rest/api/schedulers) — NOT
+        # background-v2-services' schedule-recurring endpoint this tool used before, which
+        # writes to a different, UI-invisible mechanism (confirmed live 2026-07-15: the
+        # equivalent one-time endpoint reports success and shows a PENDING job that never
+        # actually runs, and disappears from status lookup). Same defaulting fix as execute_bot
+        # for the nested execution_configuration (see its comment).
+        execution_configuration = RunExecutionConfiguration(**args["execution_configuration"]).model_dump(exclude_none=True)
+        execution_configuration = await _fill_custom_properties(clients, execution_configuration)
+        execution_configuration = _fill_resolution_default(
+            execution_configuration, await _is_local_grid(clients, execution_configuration["gridId"]))
+        return await clients.test_mgmt.create_scheduler(
+            args["bot_id"], args["name"], args.get("emails") or [], args["cron"], execution_configuration,
+        )
     if name == "cancel_schedule":
-        return await clients.background.cancel_schedule(args["schedule_id"])
+        return await clients.test_mgmt.delete_scheduler(args["schedule_id"])
+    if name == "update_schedule":
+        execution_configuration = None
+        if args.get("execution_configuration"):
+            execution_configuration = RunExecutionConfiguration(**args["execution_configuration"]).model_dump(exclude_none=True)
+            execution_configuration = await _fill_custom_properties(clients, execution_configuration)
+            execution_configuration = _fill_resolution_default(
+                execution_configuration, await _is_local_grid(clients, execution_configuration["gridId"]))
+        return await clients.test_mgmt.update_scheduler(
+            args["schedule_id"], args.get("bot_id"), args.get("name"), args.get("emails"),
+            args.get("cron"), execution_configuration,
+        )
+    if name == "toggle_schedule":
+        return await clients.test_mgmt.toggle_scheduler(args["schedule_id"])
+    if name == "list_schedulers":
+        return await clients.test_mgmt.list_schedulers(args.get("bot_id"), args.get("offset", 0), args.get("size", 100))
+    if name == "list_scheduler_recipient_emails":
+        return await clients.test_mgmt.list_scheduler_recipient_emails()
+    if name == "convert_text_to_cron":
+        return await clients.test_mgmt.convert_text_to_cron(args["text"])
     if name == "get_job_status":
         return await clients.background.get_job_status(args["job_id"])
     if name == "list_recent_runs":

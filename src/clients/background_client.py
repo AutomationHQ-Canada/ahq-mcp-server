@@ -24,16 +24,6 @@ class BackgroundClient(BaseAhqClient):
             },
         )
 
-    async def schedule_bot_once(self, bot_id: str, execution_configuration: dict, epoch_ms: int) -> dict:
-        return await self.post(
-            "/background-jobs/execution-jobs/schedule-once-at",
-            json={
-                "botId": bot_id,
-                "execution": {"executionConfiguration": execution_configuration},
-                "scheduledAtEpochMs": epoch_ms,
-            },
-        )
-
     async def cancel_schedule(self, schedule_id: str) -> dict:
         return await self.delete(f"/background-jobs/execution-jobs/schedule-recurring/{schedule_id}")
 

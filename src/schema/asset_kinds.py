@@ -114,31 +114,15 @@ class AddScriptsToSuiteArgs(_Args):
         return v
 
 
-class _ExecutionConfiguration(_Args):
-    # The scheduler form requires these two; Tool.inputSchema today types execution_configuration
-    # as a bare untyped object, so nothing has ever checked this before the API call.
-    gridUrlForExecution: str
-    browser: str
-
-
-class ScheduleRecurringArgs(_Args):
-    bot_id: str
-    cron: str
-    execution_configuration: _ExecutionConfiguration
-
-
-class ScheduleOnceArgs(_Args):
-    bot_id: str
-    epoch_ms: int
-    execution_configuration: _ExecutionConfiguration
-
-
 class RunExecutionConfiguration(_Args):
-    # Mirrors automationhq-frontend-v2's ExecutionConfigurationSchema (the Run TestBot dialog's
-    # zod contract) — the authoritative required-field set for POST /bots/{id}/execute.
-    # baseUrl/browser/gridId are hard-required there; the numeric bounds are the same ones the
-    # form enforces (timeouts 1-300s, delay 0-30s, retries 0-3). Values for browser/gridId must
-    # come from list_browsers/list_grids — never invented.
+    # Mirrors automationhq-frontend-v2's ExecutionConfigurationSchema — the same shape backs
+    # BOTH the Run TestBot dialog (POST /bots/{id}/execute) and the scheduler dialogs
+    # (schedule-recurring / schedule-once-at): AddScheduler.tsx's own INITIAL_FORM_VALUES carry
+    # the identical osType/browserVersion/gridId/resolution/timeout/etc. fields, confirmed by
+    # reading it directly — this is not an assumption. baseUrl/browser/gridId are hard-required
+    # there; the numeric bounds are the same ones the form enforces (timeouts 1-300s, delay
+    # 0-30s, retries 0-3). Values for browser/gridId must come from list_browsers/list_grids —
+    # never invented.
     baseUrl: str = Field(min_length=1)
     browser: str = Field(min_length=1)
     gridId: str = Field(min_length=1)
@@ -166,8 +150,17 @@ class RunExecutionConfiguration(_Args):
         return v
     gridUrl: str | None = None
     gridUrlForExecution: str | None = None
+    # "Local Machine Resolution" only means something for the local-agent grid ("use whatever
+    # resolution my own machine has") — a real cloud grid like TestingBot rejects it outright
+    # (confirmed live: "Invalid screen-resolution specified: Local Machine Resolution", 500 on
+    # session creation). So this can't be a static default here; the dispatch layer in
+    # mcp_server.py fills it in AFTER determining whether the target grid is actually local (see
+    # _fill_resolution_default) — left unset otherwise, matching the pre-existing (working)
+    # behavior for cloud grids.
     resolution: str | None = None
-    type: str | None = None
+    # type has no equivalent grid-dependent trap — every grid this platform talks to is Web-only
+    # today (no API/mobile-only bot type flows through execute_bot's execution_configuration).
+    type: str = "Web"
     headless: bool = False
     timeout: int = Field(default=60, ge=1, le=300)
     waitForElementTimeout: int = Field(default=30, ge=1, le=300)
@@ -179,7 +172,8 @@ class RunExecutionConfiguration(_Args):
     excludeToBeRepairedTest: bool = False
     closeBrowserAfterEachExecution: bool = True
     customProperties: list = Field(default_factory=list)
-    targetBranchName: str | None = None
+    # Matches the frontend's own branch-fallback pattern (activeBranchByProject[projectId] ?? 'main').
+    targetBranchName: str = "main"
     scriptBranchOverrides: dict[str, str] | None = None
     profileId: str | None = None
 
@@ -190,6 +184,22 @@ class ExecuteBotArgs(_Args):
     name: str | None = None
     profile_id: str | None = None
     partial_execution: bool = False
+
+
+class SchedulerCreateArgs(_Args):
+    # Mirrors automationhq-frontend-v2's SchedulerSchema (the TestBot clock-icon dialog's real
+    # zod contract, which POSTs to test-management-services' /rest/api/schedulers) — NOT the
+    # background-v2-services scheduling endpoints this tool used before, which write to a
+    # different, UI-invisible mechanism that doesn't reliably fire (confirmed live 2026-07-15).
+    bot_id: str = Field(min_length=1)
+    name: str = Field(min_length=1, max_length=120)
+    emails: list[str] = Field(default_factory=list)
+    # The cron expression itself (backend field name recurringRule) — required server-side (a
+    # null value here throws a live NullPointerException in the backend's own
+    # recurringRule.replace(...) call). Use convert_text_to_cron for a human-language -> cron
+    # helper rather than hand-writing one.
+    cron: str = Field(min_length=1)
+    execution_configuration: RunExecutionConfiguration
 
 
 class _TestSuiteRef(_Args):
@@ -509,8 +519,7 @@ VALIDATORS: dict[str, type[_Args]] = {
     "create_test_script": TestScriptCreateArgs,
     "create_suite": SuiteCreateArgs,
     "add_scripts_to_suite": AddScriptsToSuiteArgs,
-    "schedule_bot_recurring": ScheduleRecurringArgs,
-    "schedule_bot_once": ScheduleOnceArgs,
+    "schedule_bot_recurring": SchedulerCreateArgs,
     "create_api_collection": ApiCollectionCreateArgs,
     "create_api_request": ApiRequestCreateArgs,
     "create_workflow": WorkflowCreateArgs,

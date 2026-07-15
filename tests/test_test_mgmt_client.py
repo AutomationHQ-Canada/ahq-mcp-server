@@ -110,3 +110,168 @@ async def test_get_template_by_id():
 
     assert result["templateId"] == "tmpl-1"
     assert result["params"][0]["name"] == "uiLocator"
+
+
+# --- Scheduler — the REAL endpoint (test-management-services' /rest/api/schedulers), confirmed
+# against automationhq-frontend-v2's SchedulerSchema/TSchedulerCreateSchema and its
+# callSchedulerCreateApi. NOT background-v2-services' schedule-recurring/-once-at endpoints,
+# which write to a different, UI-invisible mechanism that doesn't reliably fire.
+
+async def test_create_scheduler_sends_real_endpoint_and_shape():
+    captured = {}
+
+    async def fake_request(method, url, **kwargs):
+        captured["method"] = method
+        captured["url"] = url
+        captured["json"] = kwargs["json"]
+        return httpx.Response(200, json={"schedulerId": "sched-1"}, request=httpx.Request(method, url))
+
+    client = _client_with_fake_transport(fake_request)
+    cfg = {"baseUrl": "env-1", "browser": "Chrome", "gridId": "grid-1", "browserVersion": "latest", "osType": "Grid OS"}
+    result = await client.create_scheduler("bot-1", "Nightly Run", ["a@example.com"], "0 0 * * *", cfg)
+
+    assert captured["method"] == "POST"
+    assert captured["url"] == "https://api-dev.automationhq.ai/ahq-test-management-services/rest/api/schedulers"
+    assert captured["json"] == {
+        "name": "Nightly Run",
+        "emails": ["a@example.com"],
+        "recurringRule": "0 0 * * *",
+        "executionConfiguration": cfg,
+        "resourceId": "bot-1",
+        "resourceType": 1,
+        "organizationId": "test-org",
+        "projectId": "test-project",
+    }
+    assert result == {"schedulerId": "sched-1"}
+
+
+async def test_toggle_scheduler_sends_no_body():
+    captured = {}
+
+    async def fake_request(method, url, **kwargs):
+        captured["method"] = method
+        captured["url"] = url
+        captured["json"] = kwargs.get("json")
+        return httpx.Response(200, json={"enabled": False}, request=httpx.Request(method, url))
+
+    client = _client_with_fake_transport(fake_request)
+    await client.toggle_scheduler("sched-1")
+
+    assert captured["method"] == "PATCH"
+    assert captured["url"] == "https://api-dev.automationhq.ai/ahq-test-management-services/rest/api/schedulers/sched-1/toggle"
+    assert captured["json"] is None
+
+
+async def test_delete_scheduler_uses_real_path():
+    async def fake_request(method, url, **kwargs):
+        assert method == "DELETE"
+        assert url == "https://api-dev.automationhq.ai/ahq-test-management-services/rest/api/schedulers/sched-1"
+        return httpx.Response(200, json={"success": True}, request=httpx.Request(method, url))
+
+    client = _client_with_fake_transport(fake_request)
+    await client.delete_scheduler("sched-1")
+
+
+_EXISTING_SCHEDULER = {
+    "schedulerId": "sched-1",
+    "resourceId": "bot-1",
+    "resourceType": 1,
+    "name": "Nightly Run",
+    "emails": ["existing@example.com"],
+    "recurringRule": "0 0 * * *",
+    "executionConfiguration": {"baseUrl": "env-1", "browser": "Chrome", "gridId": "grid-1",
+                               "browserVersion": "latest", "osType": "Grid OS"},
+}
+
+
+async def test_update_scheduler_merges_partial_change_over_existing_record():
+    # Regression coverage for the exact destructive-PUT trap update_common_function already
+    # guards against: the real endpoint takes a full-document replace, not a patch, so an update
+    # that only wants to change the cron must not silently wipe emails/executionConfiguration.
+    captured = {}
+
+    async def fake_request(method, url, **kwargs):
+        if method == "GET":
+            return httpx.Response(200, json=_EXISTING_SCHEDULER, request=httpx.Request(method, url))
+        captured["method"] = method
+        captured["url"] = url
+        captured["json"] = kwargs["json"]
+        return httpx.Response(200, json={"schedulerId": "sched-1"}, request=httpx.Request(method, url))
+
+    client = _client_with_fake_transport(fake_request)
+    await client.update_scheduler("sched-1", recurring_rule="0 9 * * *")  # only the cron changes
+
+    assert captured["method"] == "PUT"
+    assert captured["url"] == "https://api-dev.automationhq.ai/ahq-test-management-services/rest/api/schedulers/sched-1"
+    assert captured["json"] == {
+        "name": "Nightly Run",  # preserved
+        "emails": ["existing@example.com"],  # preserved
+        "recurringRule": "0 9 * * *",  # the actual change
+        "executionConfiguration": _EXISTING_SCHEDULER["executionConfiguration"],  # preserved
+        "resourceId": "bot-1",  # preserved
+        "resourceType": 1,
+        "organizationId": "test-org",
+        "projectId": "test-project",
+    }
+
+
+async def test_update_scheduler_overrides_only_explicitly_given_fields():
+    async def fake_request(method, url, **kwargs):
+        if method == "GET":
+            return httpx.Response(200, json=_EXISTING_SCHEDULER, request=httpx.Request(method, url))
+        captured["json"] = kwargs["json"]
+        return httpx.Response(200, json={"schedulerId": "sched-1"}, request=httpx.Request(method, url))
+
+    captured = {}
+    client = _client_with_fake_transport(fake_request)
+    await client.update_scheduler("sched-1", name="Renamed", emails=["new@example.com"])
+
+    assert captured["json"]["name"] == "Renamed"
+    assert captured["json"]["emails"] == ["new@example.com"]
+    assert captured["json"]["recurringRule"] == "0 0 * * *"  # untouched, preserved from existing
+
+
+async def test_list_schedulers_filters_by_bot_id_matching_ui_shape():
+    # Matches ListSchedulers.tsx's own filter exactly — the TestBot scheduler drawer filters
+    # strictly by resourceId == this bot's id, so this is what confirms whether a created
+    # schedule actually landed against the bot the caller expected.
+    captured = {}
+
+    async def fake_request(method, url, **kwargs):
+        captured["json"] = kwargs["json"]
+        return httpx.Response(200, json={"content": []}, request=httpx.Request(method, url))
+
+    client = _client_with_fake_transport(fake_request)
+    await client.list_schedulers(bot_id="bot-1")
+
+    assert captured["json"] == {
+        "offset": 0, "size": 100, "sortBy": "createdDate", "orderBy": "desc",
+        "resourceType": 1, "resourceId": "bot-1",
+    }
+
+
+async def test_list_schedulers_omits_resource_id_when_no_bot_given():
+    captured = {}
+
+    async def fake_request(method, url, **kwargs):
+        captured["json"] = kwargs["json"]
+        return httpx.Response(200, json={"content": []}, request=httpx.Request(method, url))
+
+    client = _client_with_fake_transport(fake_request)
+    await client.list_schedulers()
+
+    assert "resourceId" not in captured["json"]
+
+
+async def test_convert_text_to_cron_sends_locale_en():
+    captured = {}
+
+    async def fake_request(method, url, **kwargs):
+        captured["json"] = kwargs["json"]
+        return httpx.Response(200, json={"success": True, "expression": "0 9 * * *"}, request=httpx.Request(method, url))
+
+    client = _client_with_fake_transport(fake_request)
+    result = await client.convert_text_to_cron("every day at 9am")
+
+    assert captured["json"] == {"text": "every day at 9am", "locale": "en"}
+    assert result["expression"] == "0 9 * * *"

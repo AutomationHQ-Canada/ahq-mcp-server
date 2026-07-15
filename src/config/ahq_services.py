@@ -50,6 +50,11 @@ class Settings(BaseSettings):
     # since the gateway doesn't validate that a request's org-id header matches the token's claim.
     ahq_project_id: str = ""
     llm_api_key: str = ""
+    # Grace period check_local_agent_status waits out the first time it sees the local agent
+    # online, before reporting ready — the agent's own async startup (token revalidation,
+    # chromedriver resolution) can still be in progress even though it already answers /ping.
+    # Stdio-only (check_local_agent_status is unavailable in hosted mode).
+    ahq_local_agent_warmup_seconds: int = 15
 
     # --- Hosted (HTTP) mode only — all defaulted so stdio users and tests never notice them ---
     # Public URL this service is reachable at THROUGH the gateway, including the route prefix

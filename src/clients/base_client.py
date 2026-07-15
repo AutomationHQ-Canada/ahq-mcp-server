@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 
 import httpx
@@ -17,7 +18,21 @@ class AhqApiError(Exception):
     def __init__(self, status_code: int, reason: str, body: str = ""):
         self.status_code = status_code
         self.body = body
-        super().__init__(f"AHQ API error {status_code} ({reason}): {body[:500]}")
+        # Every AHQ error response is the same ResponseObj envelope with a human-readable
+        # "message" field — surfacing that directly (instead of the raw JSON blob) is the
+        # difference between an LLM caller actually relaying "Another scheduler is already
+        # scheduled within 1 hour of this time" to the user vs. it getting lost in noise
+        # (confirmed live: this exact case, 2026-07-15). Falls back to the raw body if it isn't
+        # JSON or has no "message" key.
+        message = None
+        try:
+            parsed = json.loads(body)
+            if isinstance(parsed, dict) and parsed.get("message"):
+                message = parsed["message"]
+        except (ValueError, TypeError):
+            pass
+        detail = message if message else body[:500]
+        super().__init__(f"AHQ API error {status_code} ({reason}): {detail}")
 
 
 class BaseAhqClient:
@@ -106,3 +121,6 @@ class BaseAhqClient:
 
     async def put(self, path: str, json: dict = None, params: dict = None, extra_headers: dict = None, timeout: int = 30) -> dict:
         return await self._request("PUT", f"{self._base}{path}", json=json or {}, params=params, extra_headers=extra_headers, timeout=timeout)
+
+    async def patch(self, path: str, json: dict = None, params: dict = None, extra_headers: dict = None, timeout: int = 30) -> dict:
+        return await self._request("PATCH", f"{self._base}{path}", json=json, params=params, extra_headers=extra_headers, timeout=timeout)
