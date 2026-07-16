@@ -117,9 +117,35 @@ class StatelessAhqProvider(OAuthAuthorizationServerProvider):
 
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
         payload = self.codec.decode("client", client_id)
-        if payload is None:
+        if payload is not None:
+            return OAuthClientInformationFull.model_validate({**payload["reg"], "client_id": client_id})
+        return self._implicit_client(client_id)
+
+    def _implicit_client(self, client_id: str) -> OAuthClientInformationFull | None:
+        """
+        VS Code's Copilot Chat MCP OAuth client skips Dynamic Client Registration (RFC 7591)
+        entirely — confirmed live 2026-07-16, reproduced in a brand-new temporary profile with
+        zero cached state, so it's the client's actual behavior, not a caching artifact. It goes
+        straight to /authorize with a self-constructed, never-registered client_id: its own
+        redirect URIs, space-joined (e.g. "http://127.0.0.1:33418/ https://vscode.dev/redirect").
+        Since every real client here is already reduced to "does each redirect_uri pass the
+        allowlist" (register_client above does nothing else with them), there's no meaningful
+        security distinction between "registered via /register" and "self-declared, every URI
+        independently allowed" — so treat the latter as an implicit public client rather than
+        hard-failing a client that never violates the actual boundary (the allowlist). The SDK's
+        authorize handler still independently validates the requested redirect_uri is exactly one
+        of these declared ones (client.validate_redirect_uri), so this doesn't loosen that check.
+        """
+        uris = client_id.split()
+        if not uris or not all(redirect_uri_allowed(u, self.extra_redirect_uris) for u in uris):
             return None
-        return OAuthClientInformationFull.model_validate({**payload["reg"], "client_id": client_id})
+        return OAuthClientInformationFull(
+            client_id=client_id,
+            redirect_uris=uris,
+            token_endpoint_auth_method="none",
+            grant_types=["authorization_code", "refresh_token"],
+            response_types=["code"],
+        )
 
     # --- Authorization: hand off to the /consent page ---
 

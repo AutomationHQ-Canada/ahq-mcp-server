@@ -78,6 +78,25 @@ async def test_get_client_round_trips_registration():
     assert await provider.get_client("garbage") is None
 
 
+async def test_get_client_accepts_vscode_style_unregistered_client_id():
+    # VS Code's Copilot Chat MCP OAuth client skips DCR entirely (confirmed live 2026-07-16,
+    # reproduced in a brand-new temporary profile) and goes straight to /authorize with a
+    # self-constructed client_id: its own redirect URIs, space-joined, never registered via
+    # /register. Every URI must still independently pass the allowlist.
+    provider = _provider()
+    client_id = "http://127.0.0.1:33418/ https://vscode.dev/redirect"
+    client = await provider.get_client(client_id)
+    assert client is not None
+    assert client.client_id == client_id
+    assert [str(u) for u in client.redirect_uris] == ["http://127.0.0.1:33418/", "https://vscode.dev/redirect"]
+    assert client.token_endpoint_auth_method == "none"
+
+
+async def test_get_client_rejects_unregistered_client_id_with_disallowed_uri():
+    provider = _provider()
+    assert await provider.get_client("http://127.0.0.1:33418/ https://evil.example.com/cb") is None
+
+
 async def test_register_rejects_non_loopback_non_claude_redirect():
     provider = _provider()
     info = _client_info(redirect_uris=[AnyUrl("https://evil.example.com/callback")])

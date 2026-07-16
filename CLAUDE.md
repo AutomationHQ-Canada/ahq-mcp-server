@@ -63,15 +63,23 @@ Key facts a future session must not rediscover:
 - The 7 skills are also served as MCP prompts (`src/prompts.py`) so hosted clients get the
   workflows; the gateway needs `/ahq-mcp-server/**` permitAll (like `testbot-mcp-server`)
   before OAuth Bearer tokens can reach us.
-- **Redirect-URI allowlist grows per real client, not preemptively.** Found live during
-  client-matrix validation (2026-07-16): VS Code's Copilot Chat MCP OAuth client registers with
-  `https://vscode.dev/redirect` even for a local desktop session — not a loopback URI, and not
-  `claude.ai`/`claude.com`. Our `/register` 400'd it, and VS Code's client masked that as a
-  confusing second-hand `/authorize` error ("Client ID ... not found") instead of surfacing the
-  real registration failure. `oauth_provider.py`'s `KNOWN_CLIENT_CALLBACKS` now includes it. If a
-  future client (Cursor, Windsurf, ...) hits the same symptom, the fix is the same: check its
-  actual `/register` request via a direct curl repro (like this one), find the real
-  `redirect_uri`, add it here — don't guess.
+- **VS Code's Copilot Chat MCP OAuth client skips Dynamic Client Registration entirely** —
+  confirmed live 2026-07-16, reproduced in a brand-new temporary profile with zero cached state
+  (ruling out caching). It goes straight to `/authorize` with a self-constructed, never-registered
+  `client_id`: its own redirect URIs, space-joined verbatim (e.g.
+  `"http://127.0.0.1:33418/ https://vscode.dev/redirect"`). The first symptom looked like a
+  redirect-URI allowlist gap (`https://vscode.dev/redirect` 400'd at `/register`) — that's real and
+  now fixed (`KNOWN_CLIENT_CALLBACKS` includes it), but fixing it alone didn't help, because
+  `/register` was never actually being called. `StatelessAhqProvider.get_client()` now has an
+  `_implicit_client()` fallback: if a client_id doesn't decode as one of our own blobs, treat it as
+  an implicit public client IF every space-separated URI in it independently passes
+  `redirect_uri_allowed()` — this doesn't loosen the real security boundary (the allowlist), it
+  just stops requiring prior `/register` for a client whose "identity" already satisfies it. The
+  SDK's authorize handler still independently validates the requested `redirect_uri` against the
+  client's declared list either way. If a future client (Cursor, Windsurf, ...) hits a similar
+  symptom, check with a direct curl repro of both `/register` AND `/authorize` before assuming
+  which one is actually failing — don't guess from the error message alone, it can be a second-hand
+  symptom of an earlier silent failure.
 
 ## AHQ Platform Knowledge (Aviso-UTAP)
 
