@@ -38,32 +38,32 @@ _TOKEN_INPUT = """<label for="ahq_token">AutomationHQ Organization API token</la
 <input type="password" id="ahq_token" name="ahq_token" autocomplete="off" required>
 <p class="hint">Create one in the AutomationHQ web app under Administration &rarr; API Tokens (type: Organization).</p>"""
 
-_PROJECT_INPUT = """<label for="project_id">Project ID <span class="hint">(optional &mdash; leave empty to pick from a list)</span></label>
-<input type="text" id="project_id" name="project_id" value="{value}">"""
-
 
 def _error_banner(message: str) -> str:
     return f'<p class="error">{html.escape(message)}</p>'
 
 
 def _render(txn: str, client_name: str, banner: str = "", token_value: str = "",
-            project_value: str = "", projects: list | None = None, status: int = 200) -> Response:
+            projects: list | None = None, status: int = 200) -> Response:
     if projects is not None:
         # Project picker round-trip: the validated token rides along hidden so the user
         # doesn't have to paste it twice (their own browser, their own token, 10-min txn TTL).
+        # Names only, no id shown — the id is still what actually travels as the field value.
         token_field = (
             f'<input type="hidden" name="ahq_token" value="{html.escape(token_value, quote=True)}">'
         )
         radios = "\n".join(
             f'<div class="radio"><label><input type="radio" name="project_id" '
             f'value="{html.escape(p["id"], quote=True)}" required> '
-            f'{html.escape(p["name"])} <span class="hint">({html.escape(p["id"])})</span></label></div>'
+            f'{html.escape(p["name"])}</label></div>'
             for p in projects
         )
         project_field = f"<label>Choose a project</label>\n{radios}"
     else:
+        # First screen: token only. No manual project-id entry — the project is always chosen
+        # from the live picker after the token is validated (auto-selected if there's only one).
         token_field = _TOKEN_INPUT
-        project_field = _PROJECT_INPUT.format(value=html.escape(project_value, quote=True))
+        project_field = ""
     return HTMLResponse(
         _PAGE.format(
             client_name=html.escape(client_name),

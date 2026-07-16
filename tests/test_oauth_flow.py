@@ -187,6 +187,16 @@ def test_consent_without_project_renders_picker(client):
     assert 'type="radio"' in resp.text
     assert "Project Two" in resp.text
     assert "Org One" in resp.text  # org-name confirmation banner
+    assert "(proj-2)" not in resp.text  # id must not be shown alongside the name, only in value=
+
+
+def test_consent_first_screen_has_no_project_id_field(client):
+    reg = _register(client)
+    txn = _authorize_to_txn(client, reg["client_id"])
+    resp = client.get("/consent", params={"txn": txn})
+    assert resp.status_code == 200
+    assert 'name="project_id"' not in resp.text
+    assert 'name="ahq_token"' in resp.text
 
 
 def test_expired_txn_shows_expired_page(client):
