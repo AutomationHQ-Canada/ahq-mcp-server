@@ -580,6 +580,18 @@ As of 2026-07-12 every §13 backlog slice is built (9a Recorded Script + Common 
 still missing: conflict resolution (9d-ii), drift-detection CI (9h, needs GitHub), TestBot
 creation, and a real execution-config/environments source.
 
+## Never guess a UI locator (2026-07-16)
+
+Found live: when a fast path to real locators wasn't obviously available (e.g. a browser
+extension the session expected wasn't connected), the model defaulted to hand-guessed generic
+selectors (`input[type='email']`, `input[type='password']`) for a login step instead of using
+`crawl_url`, which was sitting right there in the tool list the whole time. A guessed selector
+"working" is an accident of the moment's markup and breaks the instant it differs even slightly.
+The rule, now also stated directly in `crawl_url`/`get_page_by_url`'s own tool descriptions and
+both generation skills: before writing any `ui-locator` step for a live page, call `get_page_by_url`
+first to check for an existing locator; if none exists, call `crawl_url` to capture real ones.
+Never fall back to a raw guessed selector as a substitute.
+
 ## MCP server bugs/gaps found building a UI-navigation regression script (2026-07-16, v1.0.1)
 
 Building a script that logs in then drives Administration → Global Settings → Global Parameters →

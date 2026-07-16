@@ -62,9 +62,12 @@ generated from it — no live app/URL involved.
 
 7. Call `create_test_script` for each derived test case:
    - Name format: "<Requirement ref> — <Scenario>" (e.g. "REQ-12 — Login with invalid password")
-   - Steps use the templateIds resolved above, only if concrete UI targets are known from context;
-     otherwise leave the script as a single descriptive placeholder step and flag it as needing
-     manual locator/template work.
+   - Steps use the templateIds resolved above. If a requirement needs a `ui-locator` for a live
+     page, check `get_page_by_url` for an existing locator first; if none exists and a target URL
+     is known, call `crawl_url` on it to capture real locators rather than falling back to a
+     placeholder. Only leave a single descriptive placeholder step (flagged as needing manual
+     locator/template work) when no concrete UI target or URL is known at all — never guess a raw
+     selector as a substitute.
    - See CLAUDE.md's "TestStep shape" section for the exact, proven-working shape. In short: each
      step needs `templateId` + `templateTitle` (built-ins only) + a `parameters` array (NOT
      `params`) with one entry per `{{placeholder}}` in `templateTitle` — `{"key": "ui-locator",
@@ -100,6 +103,9 @@ generated from it — no live app/URL involved.
 ## Rules
 - Never fabricate UI locators that weren't derivable from context — flag those scripts instead of
   guessing (this mirrors the grounding-rules discipline used for `crawl_url`/`ahq-gen-from-url`)
+- Never write a raw guessed selector (e.g. `input[type='email']`) into a step instead of a real
+  `locatorId` — check `get_page_by_url` first, and if none exists, call `crawl_url` (when a URL is
+  known) before writing the step
 - Never fabricate a templateId — always resolve it via `search_step_templates`/`get_step_template` first
 - Never omit `templateTitle` on a step whose templateId is a built-in (`"template-id-N"`) — causes a 500
 - Never put step values in `params` — use `parameters` (a list); `params` does not drive step titles or execution

@@ -103,6 +103,7 @@ The user has a deployed web application and wants test scripts generated automat
 - Never omit `templateTitle` on a step whose templateId is a built-in (`"template-id-N"`) — causes a 500
 - Never put step values in `params` — use `parameters` (a list); `params` does not drive step titles or execution
 - Never fabricate `locateBy`/`locatorValue` on a `ui-locator` parameter — pass only `{"locatorId": "..."}` and let the server enrich it
+- Never write a raw guessed selector (e.g. `input[type='email']`) into a step instead of a real `locatorId` — check `get_page_by_url` for an existing locator first, and if none exists, call `crawl_url` to capture real ones before writing the step
 - Never call `create_test_script` without `website_id` and `story_id` — both are validated locally and rejected if missing; resolve or create a story rather than omitting it
 - Never create a script with 0 steps
 - Script names must be unique — append " (2)", " (3)" if duplicates arise

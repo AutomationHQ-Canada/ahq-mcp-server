@@ -205,7 +205,7 @@ TOOLS = [
     # Asset — pages
     Tool(name="list_pages", description="List all pages under a website.", inputSchema={"type": "object", "properties": {"website_id": {"type": "string"}}, "required": ["website_id"]}),
     Tool(name="create_page", description="Create a page under an existing website.", inputSchema={"type": "object", "properties": {"website_id": {"type": "string"}, "name": {"type": "string"}, "url": {"type": "string"}}, "required": ["website_id", "name", "url"]}),
-    Tool(name="get_page_by_url", description="Check if a page already exists at a given URL (for dedup).", inputSchema={"type": "object", "properties": {"website_id": {"type": "string"}, "url": {"type": "string"}}, "required": ["website_id", "url"]}),
+    Tool(name="get_page_by_url", description="Check if a page already exists at a given URL, and if so, what locators it already has. Call this BEFORE writing any ui-locator test step for a live URL — if the locator you need isn't in the result, call crawl_url on that URL to capture it (never guess a raw selector instead).", inputSchema={"type": "object", "properties": {"website_id": {"type": "string"}, "url": {"type": "string"}}, "required": ["website_id", "url"]}),
     Tool(
         name="add_locators",
         description="Batch-create locators for a page.",
@@ -310,7 +310,7 @@ TOOLS = [
                                         "key": {"type": "string", "description": "Must match a {{placeholder}} name in templateTitle, e.g. 'text' or 'ui-locator'"},
                                         "value": {
                                             "type": "object",
-                                            "description": "For key='ui-locator': {\"locatorId\": \"<real id from add_locators>\"} — the server auto-enriches name/locateBy/locatorValue from the saved page locator, do not fabricate the rest. For any scalar key (text, number, expected, ...): {\"type\": 0, \"value\": \"<literal>\"} — type 0 means literal; other type codes exist for variables/data-driven/vault/etc. but 0 covers the common case.",
+                                            "description": "For key='ui-locator': {\"locatorId\": \"<real id from add_locators>\"} — the server auto-enriches name/locateBy/locatorValue from the saved page locator, do not fabricate the rest. NEVER invent a raw CSS/XPath selector here as a substitute (e.g. \"input[type='email']\") — check get_page_by_url first for an existing locator, and if none exists, call crawl_url to capture real ones before writing this step. For any scalar key (text, number, expected, ...): {\"type\": 0, \"value\": \"<literal>\"} — type 0 means literal; other type codes exist for variables/data-driven/vault/etc. but 0 covers the common case.",
                                         },
                                         "paramClass": {"type": "string", "description": "Fully-qualified class name matching value's shape: 'ai.automationhq.commons.entities.assets.UILocator' or 'ai.automationhq.commons.entities.assets.TypeValuePair'"}
                                     },
@@ -436,7 +436,7 @@ TOOLS = [
     Tool(name="get_performance_report", description="Get performance/ROI metrics from an execution.", inputSchema={"type": "object", "properties": {"execution_id": {"type": "string"}}, "required": ["execution_id"]}),
 
     # Application context
-    Tool(name="crawl_url", description="Crawl a live web application and capture locators (XPath, CSS, aria-label) for test script generation.", inputSchema={"type": "object", "properties": {"url": {"type": "string"}, "credentials": {"type": "object", "properties": {"username": {"type": "string"}, "password": {"type": "string"}}}, "max_pages": {"type": "integer", "default": 20}}, "required": ["url"]}),
+    Tool(name="crawl_url", description="Crawl a live web application and capture real locators (XPath, CSS, aria-label) for test script generation. Run this whenever a test step needs a ui-locator for a page you haven't already captured locators for — never write a step against a hand-guessed selector (e.g. \"input[type='email']\") instead of calling this first.", inputSchema={"type": "object", "properties": {"url": {"type": "string"}, "credentials": {"type": "object", "properties": {"username": {"type": "string"}, "password": {"type": "string"}}}, "max_pages": {"type": "integer", "default": 20}}, "required": ["url"]}),
     Tool(
         name="extract_requirements",
         description=(
