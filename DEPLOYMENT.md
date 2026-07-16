@@ -10,10 +10,10 @@ additionally installs the curated workflow skills.
 ## Option A — Claude Code plugin (recommended)
 
 The repo doubles as a Claude Code plugin (`.claude-plugin/plugin.json` + `skills/*/SKILL.md` +
-`.mcp.json`). Installing it registers the MCP server AND the 7 workflow skills
-(`/ahq-gen-from-url`, `/ahq-gen-from-requirements`, `/ahq-run-bot`, `/ahq-schedule-bot`,
-`/ahq-view-report`, `/ahq-view-performance`, `/ahq-dashboard`) in one step — no matter which
-directory you're working in.
+`.mcp.json`). Installing it registers the MCP server AND the 8 workflow skills
+(`/ahq-test-architecture`, `/ahq-gen-from-url`, `/ahq-gen-from-requirements`, `/ahq-run-bot`,
+`/ahq-schedule-bot`, `/ahq-view-report`, `/ahq-view-performance`, `/ahq-dashboard`) in one step —
+no matter which directory you're working in.
 
 ```
 /plugin marketplace add AutomationHQ-Canada/ahq-mcp-server
@@ -93,7 +93,7 @@ against Mongo per request.
 }
 ```
 
-The 7 workflow skills are also served as **MCP prompts** (`src/prompts.py`), so hosted
+The 8 workflow skills are also served as **MCP prompts** (`src/prompts.py`), so hosted
 clients get the curated workflows without the plugin.
 
 Hosted env vars (see the Helm chart `values-*.yaml` + Secret):

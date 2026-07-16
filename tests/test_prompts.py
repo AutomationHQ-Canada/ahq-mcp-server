@@ -6,12 +6,13 @@ EXPECTED_SKILLS = {
     "ahq-gen-from-url",
     "ahq-run-bot",
     "ahq-schedule-bot",
+    "ahq-test-architecture",
     "ahq-view-performance",
     "ahq-view-report",
 }
 
 
-def test_all_seven_skills_parsed():
+def test_all_skills_parsed():
     assert set(SKILL_PROMPTS) == EXPECTED_SKILLS
 
 

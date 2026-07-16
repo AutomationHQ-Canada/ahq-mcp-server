@@ -21,7 +21,7 @@ _HOSTED_NOTE = {
 def parse_skill_md(text: str) -> tuple[dict, str]:
     """
     Splits a SKILL.md into (frontmatter meta, markdown body). The frontmatter is strictly
-    `key: value` scalars plus an indented `tools:` list (verified across all 7 skills) — a
+    `key: value` scalars plus an indented `tools:` list (verified across all skills) — a
     15-line hand parser beats adding a pyyaml dependency for this. Indented lines (list items)
     and unknown shapes are simply skipped.
     """

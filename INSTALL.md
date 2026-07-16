@@ -2,8 +2,9 @@
 
 Follow this guide to connect Claude Code to AutomationHQ. You get **115 MCP tools** (script
 generation, bot execution, reporting, version control, archive, roles, API/load testing, ...)
-plus **7 workflow skills** (`/ahq-gen-from-url`, `/ahq-gen-from-requirements`, `/ahq-run-bot`,
-`/ahq-schedule-bot`, `/ahq-view-report`, `/ahq-view-performance`, `/ahq-dashboard`).
+plus **8 workflow skills** (`/ahq-test-architecture`, `/ahq-gen-from-url`,
+`/ahq-gen-from-requirements`, `/ahq-run-bot`, `/ahq-schedule-bot`, `/ahq-view-report`,
+`/ahq-view-performance`, `/ahq-dashboard`).
 
 Total time: ~10 minutes. Every step below was validated end-to-end on Windows on 2026-07-13.
 
@@ -112,7 +113,7 @@ AHQ_PROJECT_ID=<the UUID of the project to work in>
 1. **Restart Claude Code** (or run `/reload-plugins`) — the MCP server starts with the session
    (first start installs dependencies, give it a moment).
 2. Run `/mcp` → `ahq-mcp-server` should show **connected** with 121 tools.
-3. Type `/ahq` → the 7 skills should autocomplete. Plugin skills are **namespaced**, so the full
+3. Type `/ahq` → the 8 skills should autocomplete. Plugin skills are **namespaced**, so the full
    names are `/ahq-skills:ahq-dashboard`, `/ahq-skills:ahq-gen-from-url`, etc.
 4. Smoke test — ask Claude: *"list my AHQ websites"*. Real data back = you're done.
 

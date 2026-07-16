@@ -60,7 +60,7 @@ Key facts a future session must not rediscover:
   for the cloud to reach a specific user's agent (confirmed: `ahq-standalone-local-v2-services`'
   agent registry is a one-way heartbeat the agent pushes up, not a command channel) — a hosted
   session gets a clean error pointing at stdio instead of a silent hang/connection-refused.
-- The 7 skills are also served as MCP prompts (`src/prompts.py`) so hosted clients get the
+- The 8 skills are also served as MCP prompts (`src/prompts.py`) so hosted clients get the
   workflows; the gateway needs `/ahq-mcp-server/**` permitAll (like `testbot-mcp-server`)
   before OAuth Bearer tokens can reach us.
 - **VS Code's Copilot Chat MCP OAuth client skips Dynamic Client Registration entirely** —
