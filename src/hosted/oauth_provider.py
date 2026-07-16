@@ -25,22 +25,28 @@ CODE_TTL = 5 * 60
 ACCESS_TTL = 8 * 3600
 REFRESH_TTL = 30 * 24 * 3600
 
-# Non-loopback redirect URIs that are always acceptable: the Claude web/desktop OAuth callback.
-CLAUDE_CALLBACKS = (
+# Non-loopback redirect URIs that are always acceptable: known first-party client web callbacks.
+# VS Code (github.copilot-chat's generic MCP OAuth client) uses vscode.dev/redirect even for a
+# local desktop session — confirmed live 2026-07-16: registration 400'd on this exact URI, VS
+# Code fell back to a synthesized (invalid) client_id instead of surfacing the registration
+# error, and /authorize then failed with "Client ID ... not found" — a confusing second-hand
+# symptom of the real, first failure at /register.
+KNOWN_CLIENT_CALLBACKS = (
     "https://claude.ai/api/mcp/auth_callback",
     "https://claude.com/api/mcp/auth_callback",
+    "https://vscode.dev/redirect",
 )
 
 
 def redirect_uri_allowed(uri: str, extra: frozenset[str]) -> bool:
     """
     Registration-time redirect-URI policy: loopback http (any port, any path — RFC 8252 native
-    clients like Claude Code, Cursor and MCP Inspector listen on a random localhost port), the
-    Claude web callbacks, or an operator-configured extra (AHQ_MCP_EXTRA_REDIRECT_URIS).
-    Everything else is refused — a permissive policy here would let any website register itself
-    and receive authorization codes.
+    clients like Claude Code, Cursor and MCP Inspector listen on a random localhost port), known
+    first-party client web callbacks (Claude web/desktop, VS Code), or an operator-configured
+    extra (AHQ_MCP_EXTRA_REDIRECT_URIS). Everything else is refused — a permissive policy here
+    would let any website register itself and receive authorization codes.
     """
-    if uri in CLAUDE_CALLBACKS or uri in extra:
+    if uri in KNOWN_CLIENT_CALLBACKS or uri in extra:
         return True
     parsed = urlparse(uri)
     return parsed.scheme == "http" and parsed.hostname in ("localhost", "127.0.0.1", "::1")

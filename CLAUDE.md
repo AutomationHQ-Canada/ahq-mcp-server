@@ -63,6 +63,15 @@ Key facts a future session must not rediscover:
 - The 7 skills are also served as MCP prompts (`src/prompts.py`) so hosted clients get the
   workflows; the gateway needs `/ahq-mcp-server/**` permitAll (like `testbot-mcp-server`)
   before OAuth Bearer tokens can reach us.
+- **Redirect-URI allowlist grows per real client, not preemptively.** Found live during
+  client-matrix validation (2026-07-16): VS Code's Copilot Chat MCP OAuth client registers with
+  `https://vscode.dev/redirect` even for a local desktop session — not a loopback URI, and not
+  `claude.ai`/`claude.com`. Our `/register` 400'd it, and VS Code's client masked that as a
+  confusing second-hand `/authorize` error ("Client ID ... not found") instead of surfacing the
+  real registration failure. `oauth_provider.py`'s `KNOWN_CLIENT_CALLBACKS` now includes it. If a
+  future client (Cursor, Windsurf, ...) hits the same symptom, the fix is the same: check its
+  actual `/register` request via a direct curl repro (like this one), find the real
+  `redirect_uri`, add it here — don't guess.
 
 ## AHQ Platform Knowledge (Aviso-UTAP)
 

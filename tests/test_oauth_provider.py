@@ -93,6 +93,7 @@ def test_redirect_policy_allows_loopback_any_port_and_claude_callbacks():
     assert redirect_uri_allowed("http://[::1]:8080/cb", extra)
     assert redirect_uri_allowed("https://claude.ai/api/mcp/auth_callback", extra)
     assert redirect_uri_allowed("https://claude.com/api/mcp/auth_callback", extra)
+    assert redirect_uri_allowed("https://vscode.dev/redirect", extra)
     assert not redirect_uri_allowed("https://localhost:33418/callback", extra)  # https loopback: not RFC 8252
     assert not redirect_uri_allowed("http://192.168.1.5:8000/cb", extra)
     assert redirect_uri_allowed("myapp://oauth/callback", frozenset({"myapp://oauth/callback"}))
