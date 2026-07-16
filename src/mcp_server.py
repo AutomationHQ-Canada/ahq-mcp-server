@@ -970,6 +970,21 @@ async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: boo
         is_local = await _is_local_grid(clients, execution_configuration["gridId"])
         execution_configuration = _fill_resolution_default(execution_configuration, is_local)
         if is_local:
+            if is_hosted:
+                # The hosted server runs as a shared cloud pod — "localhost:9202" from there is
+                # the pod's own loopback, not the caller's laptop. There is no reverse channel
+                # (confirmed: ahq-standalone-local-v2-services' agent registry is a one-way
+                # heartbeat the agent pushes up, not a command channel the cloud can push down),
+                # so this can never work over a hosted connector by design, not just for now.
+                return {
+                    "error": (
+                        "This TestBot's grid runs on your own machine's local agent "
+                        "(localhost:9202), which the hosted MCP server can't reach — only a "
+                        "stdio connection running on that same machine can. Use the ahq-skills "
+                        "Claude Code plugin (stdio) for local-grid execution, or point this bot "
+                        "at a cloud grid instead."
+                    )
+                }
             # Local grid: POST directly to this machine's own agent (localhost:9202), bypassing
             # the cloud entirely — see _is_local_grid's docstring. profile_id/partial_execution
             # are cloud-executor-only concepts (never seen in the browser's direct-to-agent

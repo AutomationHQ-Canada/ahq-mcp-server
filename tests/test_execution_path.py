@@ -270,6 +270,29 @@ async def test_dispatch_execute_bot_routes_local_grid_directly_to_agent(monkeypa
     assert result == {"message": "Job is enqueued."}
 
 
+async def test_dispatch_execute_bot_rejects_local_grid_when_hosted(monkeypatch):
+    # The hosted server can never reach a caller's own machine (localhost:9202 there is the
+    # pod's own loopback) — must return a clean error instead of trying and hanging/refusing.
+    async def fake_get_grid(grid_id):
+        return {"gridId": grid_id, "url": "http://localhost:4455/wd/hub"}
+
+    async def must_not_be_called(*args, **kwargs):
+        raise AssertionError("must not attempt local-agent execution from a hosted session")
+
+    monkeypatch.setattr(DEFAULT_BUNDLE.config, "get_grid", fake_get_grid)
+    monkeypatch.setattr(DEFAULT_BUNDLE.config, "list_global_parameters", lambda: _no_global_parameters())
+    monkeypatch.setattr(DEFAULT_BUNDLE.local_exec, "execute_bot_locally", must_not_be_called)
+    monkeypatch.setattr(DEFAULT_BUNDLE.executor, "execute_bot", must_not_be_called)
+
+    result = await _dispatch("execute_bot", {
+        "bot_id": "b1",
+        "execution_configuration": _valid_exec_config(gridId="local-grid-1"),
+    }, DEFAULT_BUNDLE, is_hosted=True)
+
+    assert "error" in result
+    assert "hosted MCP server can't reach" in result["error"]
+
+
 async def test_dispatch_execute_bot_keeps_non_local_grid_on_cloud_path(monkeypatch):
     async def fake_get_grid(grid_id):
         return {"gridId": grid_id, "url": "https://testingbot-grid.example.com/wd/hub"}

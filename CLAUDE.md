@@ -55,6 +55,11 @@ Key facts a future session must not rediscover:
   credentials). `crawl_url` is hosted-ENABLED since 9j with an SSRF guard
   (`src/tools/url_guard.py`, `is_global` check on every navigation; DNS-rebinding TOCTOU is
   accepted residual risk); `extract_requirements`/`check_local_agent_status` stay stdio-only.
+  `execute_bot` against a local grid is gated the same way (2026-07-16): the hosted pod's
+  "localhost:9202" is its own loopback, not the caller's machine, and there is no reverse channel
+  for the cloud to reach a specific user's agent (confirmed: `ahq-standalone-local-v2-services`'
+  agent registry is a one-way heartbeat the agent pushes up, not a command channel) — a hosted
+  session gets a clean error pointing at stdio instead of a silent hang/connection-refused.
 - The 7 skills are also served as MCP prompts (`src/prompts.py`) so hosted clients get the
   workflows; the gateway needs `/ahq-mcp-server/**` permitAll (like `testbot-mcp-server`)
   before OAuth Bearer tokens can reach us.
