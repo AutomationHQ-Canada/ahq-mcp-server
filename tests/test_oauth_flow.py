@@ -38,6 +38,7 @@ def _cfg(**overrides):
         ahq_mcp_auth_secret="test-secret",
         ahq_mcp_extra_redirect_uris="",
         ahq_mcp_max_body_bytes=2_000_000,
+        ahq_mcp_consent_frontend_url="",
     )
     base.update(overrides)
     return types.SimpleNamespace(**base)
@@ -197,6 +198,97 @@ def test_consent_first_screen_has_no_project_id_field(client):
     assert resp.status_code == 200
     assert 'name="project_id"' not in resp.text
     assert 'name="ahq_token"' in resp.text
+
+
+def test_consent_api_start_single_project_redirects_immediately(client):
+    reg = _register(client)
+    txn = _authorize_to_txn(client, reg["client_id"])
+    resp = client.post("/consent/api/start", json={"txn": txn, "ahq_token": ORG_TOKEN})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "pick_project"  # two projects in the fixture -> no auto-select
+    assert body["organization_name"] == "Org One"
+    assert {p["name"] for p in body["projects"]} == {"Project One", "Project Two"}
+
+
+def test_consent_api_start_auto_redirects_when_exactly_one_project(client, monkeypatch):
+    async def one_project(self):
+        return [{"_id": "proj-1", "projectName": "Project One"}]
+
+    monkeypatch.setattr(UserClient, "list_projects", one_project)
+    reg = _register(client)
+    txn = _authorize_to_txn(client, reg["client_id"])
+    resp = client.post("/consent/api/start", json={"txn": txn, "ahq_token": ORG_TOKEN})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "redirect"
+    assert body["redirect_url"].startswith(REDIRECT_URI)
+    assert "code=" in body["redirect_url"]
+
+
+def test_consent_api_start_rejects_non_organization_token(client):
+    reg = _register(client)
+    txn = _authorize_to_txn(client, reg["client_id"])
+    resp = client.post("/consent/api/start", json={"txn": txn, "ahq_token": USER_TOKEN})
+    assert resp.status_code == 400
+    assert resp.json()["status"] == "error"
+    assert "ORGANIZATION" in resp.json()["message"]
+
+
+def test_consent_api_start_expired_txn(client):
+    resp = client.post("/consent/api/start", json={"txn": "garbage", "ahq_token": ORG_TOKEN})
+    assert resp.status_code == 400
+    assert resp.json()["status"] == "error"
+
+
+def test_consent_api_finish_completes_with_chosen_project(client):
+    reg = _register(client)
+    txn = _authorize_to_txn(client, reg["client_id"])
+    resp = client.post("/consent/api/finish", json={"txn": txn, "ahq_token": ORG_TOKEN, "project_id": "proj-2"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "redirect"
+    assert body["redirect_url"].startswith(REDIRECT_URI)
+
+
+def test_consent_api_finish_rejects_project_not_in_org(client):
+    reg = _register(client)
+    txn = _authorize_to_txn(client, reg["client_id"])
+    resp = client.post("/consent/api/finish", json={
+        "txn": txn, "ahq_token": ORG_TOKEN, "project_id": "someone-elses-project",
+    })
+    assert resp.status_code == 400
+    assert resp.json()["status"] == "error"
+    assert "does not belong" in resp.json()["message"]
+
+
+def test_consent_api_finish_requires_project_id(client):
+    reg = _register(client)
+    txn = _authorize_to_txn(client, reg["client_id"])
+    resp = client.post("/consent/api/finish", json={"txn": txn, "ahq_token": ORG_TOKEN, "project_id": ""})
+    assert resp.status_code == 400
+    assert resp.json()["status"] == "error"
+
+
+def test_authorize_redirects_to_frontend_consent_url_when_configured(monkeypatch):
+    async def fake_list_projects(self):
+        return [{"_id": "proj-1", "projectName": "Project One"}]
+
+    monkeypatch.setattr(UserClient, "list_projects", fake_list_projects)
+    cfg = _cfg(ahq_mcp_consent_frontend_url="https://dev.automationhq.ai/mcp-consent")
+    with TestClient(create_app(cfg), follow_redirects=False) as c:
+        reg = _register(c)
+        resp = c.get("/authorize", params={
+            "client_id": reg["client_id"],
+            "response_type": "code",
+            "code_challenge": CHALLENGE,
+            "code_challenge_method": "S256",
+            "redirect_uri": REDIRECT_URI,
+            "state": "state-xyz",
+        })
+        assert resp.status_code == 302
+        location = resp.headers["location"]
+        assert location.startswith("https://dev.automationhq.ai/mcp-consent?txn=")
 
 
 def test_expired_txn_shows_expired_page(client):

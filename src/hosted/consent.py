@@ -1,7 +1,7 @@
 import html
 
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, RedirectResponse, Response
+from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from mcp.server.auth.provider import construct_redirect_uri
 
@@ -92,52 +92,48 @@ def _normalize_projects(raw: list) -> list[dict]:
     return projects
 
 
+_EXPIRED_HTML = (
+    "<h1>This connection link has expired</h1>"
+    "<p>Go back to your MCP client and start the connection again.</p>"
+)
+_EXPIRED_JSON_MESSAGE = "This connection link has expired. Go back to your MCP client and start the connection again."
+
+
 def make_consent_endpoints(codec: TokenCodec, settings, user_client_factory, http_client_holder):
     """
-    Returns (GET, POST) Starlette endpoints for the token-paste consent page — the human step
-    of the OAuth flow. user_client_factory is the UserClient class (injected for tests);
-    http_client_holder is mcp_server.app_http_client (shared pooled httpx client).
+    Returns (GET, POST, api_start, api_finish) Starlette endpoints for the consent step of the
+    OAuth flow. GET/POST are the built-in bare-HTML page (the fallback default). api_start/
+    api_finish are the JSON equivalents the frontend-hosted consent page
+    (automationhq-frontend-v2) calls instead, when AHQ_MCP_CONSENT_FRONTEND_URL is configured —
+    both pairs share the exact same validation/issuance logic below, not a copy.
+    user_client_factory is the UserClient class (injected for tests); http_client_holder is
+    mcp_server.app_http_client (shared pooled httpx client).
     """
 
     def _load_txn(request: Request, form=None):
         txn = (form.get("txn") if form is not None else request.query_params.get("txn")) or ""
         return txn, codec.decode("txn", txn)
 
-    async def consent_get(request: Request) -> Response:
-        txn, payload = _load_txn(request)
-        if payload is None:
-            return HTMLResponse(
-                "<h1>This connection link has expired</h1><p>Go back to your MCP client and start the connection again.</p>",
-                status_code=400,
-            )
-        return _render(txn, payload["client_name"])
-
-    async def consent_post(request: Request) -> Response:
-        form = await request.form()
-        txn, payload = _load_txn(request, form)
-        if payload is None:
-            return HTMLResponse(
-                "<h1>This connection link has expired</h1><p>Go back to your MCP client and start the connection again.</p>",
-                status_code=400,
-            )
-        client_name = payload["client_name"]
-        token = str(form.get("ahq_token") or "").strip()
-        project_id = str(form.get("project_id") or "").strip()
-
+    async def _validate_and_list(token: str, project_id: str = "") -> dict:
+        """
+        Org-token check + live gateway validation (Slice 9k project<->org consistency check —
+        the returned project list IS the org's real project set), shared by both the HTML and
+        JSON consent handlers. Returns {"ok": False, "message": ...} on any failure (with
+        "projects"/"org_name" also included for the project_not_in_org case, since that one still
+        needs to show a picker), or {"ok": True, "org_id", "org_name", "projects"} on success.
+        """
         claims = decode_ahq_token(token)
         org_id = claims.get("organizationId", "")
         if not token or not org_id or claims.get("tokenType") != "ORGANIZATION":
             audit_log("auth.consent_fail", reason="not_an_organization_token")
-            return _render(
-                txn, client_name, status=400,
-                banner=_error_banner(
+            return {
+                "ok": False,
+                "message": (
                     "That doesn't look like an AutomationHQ ORGANIZATION API token. Create one "
                     "under Administration → API Tokens (type: Organization) and paste it here."
                 ),
-            )
+            }
 
-        # Live validation against the real gateway — the same call is the Slice 9k
-        # project↔org consistency check (the returned list IS the org's project set).
         creds = AhqCredentials(base_url=settings.ahq_base_url, api_token=token,
                                org_id=org_id, project_id=project_id)
         try:
@@ -146,38 +142,32 @@ def make_consent_endpoints(codec: TokenCodec, settings, user_client_factory, htt
             ).list_projects()
         except Exception:
             audit_log("auth.consent_fail", org=org_id, reason="gateway_rejected_token")
-            return _render(
-                txn, client_name, status=400,
-                banner=_error_banner(
+            return {
+                "ok": False,
+                "message": (
                     "AutomationHQ rejected this token — it may be expired or deleted. "
                     "Check it in Administration → API Tokens and try again."
                 ),
-            )
+            }
         projects = _normalize_projects(raw)
+        org_name = claims.get("organizationName", org_id)
 
         if project_id and project_id not in {p["id"] for p in projects}:
             audit_log("auth.consent_fail", org=org_id, reason="project_not_in_org")
-            org_name = claims.get("organizationName", org_id)
-            return _render(
-                txn, client_name, token_value=token, projects=projects, status=400,
-                banner=_error_banner(
+            return {
+                "ok": False,
+                "projects": projects,
+                "org_name": org_name,
+                "message": (
                     f"Project '{project_id}' does not belong to organization "
                     f"'{org_name}'. Pick one of its projects below."
                 ),
-            )
-        if not project_id:
-            if len(projects) == 1:
-                project_id = projects[0]["id"]
-            else:
-                org_name = claims.get("organizationName", org_id)
-                return _render(
-                    txn, client_name, token_value=token, projects=projects,
-                    banner=f'<p class="org">Token accepted for organization '
-                           f"<strong>{html.escape(org_name)}</strong>.</p>",
-                )
+            }
+        return {"ok": True, "org_id": org_id, "org_name": org_name, "projects": projects}
 
+    def _issue_code(payload: dict, token: str, project_id: str) -> str:
         params = payload["params"]
-        code = codec.encode(
+        return codec.encode(
             "code",
             {
                 "ahq_token": token,
@@ -190,11 +180,91 @@ def make_consent_endpoints(codec: TokenCodec, settings, user_client_factory, htt
             },
             CODE_TTL,
         )
-        audit_log("auth.consent_ok", org=org_id, project=project_id)
+
+    def _redirect_url(payload: dict, code: str) -> str:
+        params = payload["params"]
+        return construct_redirect_uri(params["redirect_uri"], code=code, state=params.get("state"))
+
+    async def consent_get(request: Request) -> Response:
+        txn, payload = _load_txn(request)
+        if payload is None:
+            return HTMLResponse(_EXPIRED_HTML, status_code=400)
+        return _render(txn, payload["client_name"])
+
+    async def consent_post(request: Request) -> Response:
+        form = await request.form()
+        txn, payload = _load_txn(request, form)
+        if payload is None:
+            return HTMLResponse(_EXPIRED_HTML, status_code=400)
+        client_name = payload["client_name"]
+        token = str(form.get("ahq_token") or "").strip()
+        project_id = str(form.get("project_id") or "").strip()
+
+        result = await _validate_and_list(token, project_id)
+        if not result["ok"]:
+            return _render(
+                txn, client_name, token_value=token, projects=result.get("projects"),
+                status=400, banner=_error_banner(result["message"]),
+            )
+        projects = result["projects"]
+
+        if not project_id:
+            if len(projects) == 1:
+                project_id = projects[0]["id"]
+            else:
+                return _render(
+                    txn, client_name, token_value=token, projects=projects,
+                    banner=f'<p class="org">Token accepted for organization '
+                           f"<strong>{html.escape(result['org_name'])}</strong>.</p>",
+                )
+
+        code = _issue_code(payload, token, project_id)
+        audit_log("auth.consent_ok", org=result["org_id"], project=project_id)
         return RedirectResponse(
-            construct_redirect_uri(params["redirect_uri"], code=code, state=params.get("state")),
-            status_code=302,
-            headers={"Cache-Control": "no-store"},
+            _redirect_url(payload, code), status_code=302, headers={"Cache-Control": "no-store"},
         )
 
-    return consent_get, consent_post
+    async def consent_api_start(request: Request) -> Response:
+        body = await request.json()
+        txn = str(body.get("txn") or "")
+        payload = codec.decode("txn", txn)
+        if payload is None:
+            return JSONResponse({"status": "error", "message": _EXPIRED_JSON_MESSAGE}, status_code=400)
+        token = str(body.get("ahq_token") or "").strip()
+
+        result = await _validate_and_list(token)
+        if not result["ok"]:
+            return JSONResponse({"status": "error", "message": result["message"]}, status_code=400)
+        projects = result["projects"]
+
+        if len(projects) == 1:
+            project_id = projects[0]["id"]
+            code = _issue_code(payload, token, project_id)
+            audit_log("auth.consent_ok", org=result["org_id"], project=project_id)
+            return JSONResponse({"status": "redirect", "redirect_url": _redirect_url(payload, code)})
+        return JSONResponse({
+            "status": "pick_project",
+            "organization_name": result["org_name"],
+            "projects": projects,
+        })
+
+    async def consent_api_finish(request: Request) -> Response:
+        body = await request.json()
+        txn = str(body.get("txn") or "")
+        payload = codec.decode("txn", txn)
+        if payload is None:
+            return JSONResponse({"status": "error", "message": _EXPIRED_JSON_MESSAGE}, status_code=400)
+        token = str(body.get("ahq_token") or "").strip()
+        project_id = str(body.get("project_id") or "").strip()
+        if not project_id:
+            return JSONResponse({"status": "error", "message": "Choose a project."}, status_code=400)
+
+        result = await _validate_and_list(token, project_id)
+        if not result["ok"]:
+            return JSONResponse({"status": "error", "message": result["message"]}, status_code=400)
+
+        code = _issue_code(payload, token, project_id)
+        audit_log("auth.consent_ok", org=result["org_id"], project=project_id)
+        return JSONResponse({"status": "redirect", "redirect_url": _redirect_url(payload, code)})
+
+    return consent_get, consent_post, consent_api_start, consent_api_finish

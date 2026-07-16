@@ -72,6 +72,10 @@ class Settings(BaseSettings):
     # (e.g. a future Cursor/Windsurf deep-link scheme).
     ahq_mcp_extra_redirect_uris: str = ""
     ahq_mcp_crawl_concurrency: int = 2
+    # Frontend-hosted consent page (automationhq-frontend-v2's real design system) to redirect to
+    # instead of our own bare-HTML /consent page, e.g. https://dev.automationhq.ai/mcp-consent.
+    # Empty -> falls back to the built-in HTML page (local/stdio testing, or before this is wired).
+    ahq_mcp_consent_frontend_url: str = ""
 
 
 # Gateway prefix constants — StripPrefix=1 removes these before forwarding

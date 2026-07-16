@@ -80,6 +80,19 @@ Key facts a future session must not rediscover:
   symptom, check with a direct curl repro of both `/register` AND `/authorize` before assuming
   which one is actually failing — don't guess from the error message alone, it can be a second-hand
   symptom of an earlier silent failure.
+- **Frontend-hosted consent page (2026-07-16)**: `/consent`'s bare-HTML GET/POST pair is now only
+  the fallback default. When `AHQ_MCP_CONSENT_FRONTEND_URL` is set,
+  `StatelessAhqProvider.authorize()` redirects there instead (a real page in
+  `automationhq-frontend-v2`, e.g. `/mcp-consent`), which drives the same flow via two JSON
+  endpoints instead of HTML: `POST /consent/api/start` (`{txn, ahq_token}` →
+  `{status: "redirect", redirect_url}` on a single project, `{status: "pick_project",
+  organization_name, projects}` on multiple, `{status: "error", message}` on failure) and
+  `POST /consent/api/finish` (`{txn, ahq_token, project_id}` → same redirect/error shape). Both
+  share the exact same validation/issuance logic as the HTML handlers
+  (`consent.py`'s `_validate_and_list`/`_issue_code`/`_redirect_url` closures) — not a
+  duplicate — so nothing about the actual OAuth semantics differs between the two UIs. No CORS
+  wiring was needed for this: the app's `CORSMiddleware` (`http_server.py`) was already
+  `allow_origins=["*"]` before this change.
 
 ## AHQ Platform Knowledge (Aviso-UTAP)
 
