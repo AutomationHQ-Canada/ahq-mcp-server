@@ -1,0 +1,79 @@
+name: "UTAP (Aviso): Build and Push to ECR"
+
+# Manual-trigger only for the first Aviso rollout — there is no staging environment for this
+# deployment target yet, so an automatic push-triggered pipeline isn't warranted until the
+# self-hosted deploy has been validated at least once.
+on:
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-2
+  ECR_REPOSITORY: utap/utap-mcp-server
+  ECR_REGISTRY: 501429054313.dkr.ecr.us-east-2.amazonaws.com
+
+jobs:
+  test:
+    name: Run test suite
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install --no-cache-dir ".[dev]"
+
+      - name: Run tests
+        run: pytest -q
+
+  build-and-push:
+    name: Build and Push Docker Image to ECR (utap/utap-mcp-server)
+    needs: test
+    runs-on: ubuntu-latest
+
+    concurrency:
+      group: ecr-push-utap-${{ github.ref_name }}
+      cancel-in-progress: true
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_GITHUB_ACTION }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_GITHUB_ACTION }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            -t ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ github.run_number }} \
+            -t ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:latest \
+            .
+
+      - name: Push Docker image to ECR
+        run: |
+          docker push ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ github.run_number }}
+          docker push ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:latest
+
+      - name: Output image details
+        run: |
+          echo "Docker image pushed successfully!"
+          echo "Build Number: ${{ github.run_number }}"
+          echo "Image Tag: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ github.run_number }}"
+
+      # No GitOps dispatch step here — unlike ci.yml's SaaS dev path, getting this image running
+      # in Aviso's environment is a manual az acr import + bicep deploy, done by whoever owns
+      # azure-infra-bicep-repo, matching how every other Aviso-bound service's utap-build.yml
+      # workflow already works.
