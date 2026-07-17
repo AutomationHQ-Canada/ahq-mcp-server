@@ -8,10 +8,9 @@ plus **8 workflow skills** (`/ahq-test-architecture`, `/ahq-gen-from-url`,
 
 Total time: ~10 minutes. Every step below was validated end-to-end on Windows on 2026-07-13.
 
-> Don't want to install anything? Once the hosted server is deployed, any MCP client (Claude
-> Desktop, Cursor, VS Code, ...) can connect to it with just a URL — see "Option C — hosted
-> remote MCP server" in [`DEPLOYMENT.md`](DEPLOYMENT.md). This guide is for the Claude Code
-> plugin (stdio) setup.
+> Don't want to install anything? Any MCP client (Claude Desktop, claude.ai, VS Code, Cursor,
+> Windsurf) can connect to the hosted server with just a URL — see [`CONNECT.md`](CONNECT.md)
+> for the step-by-step connector guide. This guide is for the Claude Code plugin (stdio) setup.
 
 ---
 
