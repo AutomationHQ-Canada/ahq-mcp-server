@@ -55,18 +55,21 @@ def redirect_uri_allowed(uri: str, extra: frozenset[str]) -> bool:
 class AhqAuthorizationCode(AuthorizationCode):
     ahq_token: str
     project_id: str = ""
+    base_url: str = ""
 
 
 class AhqRefreshToken(RefreshToken):
     ahq_token: str
     org_id: str = ""
     project_id: str = ""
+    base_url: str = ""
 
 
 class AhqAccessToken(AccessToken):
     ahq_token: str = ""
     org_id: str = ""
     project_id: str = ""
+    base_url: str = ""
 
 
 def _capped_ttl(ahq_token: str, base_ttl: int) -> int:
@@ -184,15 +187,18 @@ class StatelessAhqProvider(OAuthAuthorizationServerProvider):
             redirect_uri_provided_explicitly=payload["redirect_uri_provided_explicitly"],
             ahq_token=payload["ahq_token"],
             project_id=payload.get("project_id", ""),
+            base_url=payload.get("base_url", ""),
         )
 
     def _issue_tokens(
-        self, client_id: str, ahq_token: str, org_id: str, project_id: str, scopes: list[str]
+        self, client_id: str, ahq_token: str, org_id: str, project_id: str, scopes: list[str],
+        base_url: str = "",
     ) -> OAuthToken:
         fields = {
             "ahq_token": ahq_token,
             "org_id": org_id,
             "project_id": project_id,
+            "base_url": base_url,
             "client_id": client_id,
             "scopes": scopes,
         }
@@ -217,6 +223,7 @@ class StatelessAhqProvider(OAuthAuthorizationServerProvider):
             org_id=org_id,
             project_id=authorization_code.project_id,
             scopes=authorization_code.scopes,
+            base_url=authorization_code.base_url,
         )
 
     # --- Refresh (rotates both tokens) ---
@@ -235,6 +242,7 @@ class StatelessAhqProvider(OAuthAuthorizationServerProvider):
             ahq_token=payload["ahq_token"],
             org_id=payload.get("org_id", ""),
             project_id=payload.get("project_id", ""),
+            base_url=payload.get("base_url", ""),
         )
 
     async def exchange_refresh_token(
@@ -246,6 +254,7 @@ class StatelessAhqProvider(OAuthAuthorizationServerProvider):
             org_id=refresh_token.org_id,
             project_id=refresh_token.project_id,
             scopes=scopes,
+            base_url=refresh_token.base_url,
         )
 
     # --- Resource-server side ---
@@ -262,6 +271,7 @@ class StatelessAhqProvider(OAuthAuthorizationServerProvider):
             ahq_token=payload["ahq_token"],
             org_id=payload.get("org_id", ""),
             project_id=payload.get("project_id", ""),
+            base_url=payload.get("base_url", ""),
         )
 
     async def revoke_token(self, token) -> None:

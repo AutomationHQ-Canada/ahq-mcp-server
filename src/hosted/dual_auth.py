@@ -44,7 +44,10 @@ class DualAuthMiddleware:
                 await self._send_auth_error(send, "invalid_token", "Token is invalid or expired")
                 return
             scope["ahq_credentials"] = AhqCredentials(
-                base_url=self.base_url,
+                # access.base_url was resolved from the AHQ token's own urlDetails claim at
+                # consent time (dev vs prod gateway) — self.base_url is only a fallback for
+                # tokens issued before this existed.
+                base_url=access.base_url or self.base_url,
                 api_token=access.ahq_token,
                 org_id=access.org_id,
                 project_id=access.project_id,

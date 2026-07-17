@@ -25,6 +25,13 @@ def _fake_jwt(claims: dict) -> str:
 
 ORG_TOKEN = _fake_jwt({"organizationId": "org-1", "organizationName": "Org One", "tokenType": "ORGANIZATION"})
 USER_TOKEN = _fake_jwt({"organizationId": "org-1", "tokenType": "USER"})
+# A real prod token embeds urlDetails.baseUrl = https://api.automationhq.ai (confirmed live
+# 2026-07-17) — this dev-hosted server must resolve THAT gateway for this token, not its own
+# fixed AHQ_BASE_URL (dev).
+PROD_ORG_TOKEN = _fake_jwt({
+    "organizationId": "org-prod", "organizationName": "Org Prod", "tokenType": "ORGANIZATION",
+    "urlDetails": [{"key": "baseUrl", "value": "https://api.automationhq.ai"}],
+})
 
 VERIFIER = "a" * 43
 CHALLENGE = base64.urlsafe_b64encode(hashlib.sha256(VERIFIER.encode()).digest()).decode().rstrip("=")
@@ -46,8 +53,11 @@ def _cfg(**overrides):
 
 @pytest.fixture
 def client(monkeypatch):
+    seen_base_urls = []
+
     async def fake_list_projects(self):
-        if self._credentials.api_token != ORG_TOKEN:
+        seen_base_urls.append(self._credentials.base_url)
+        if self._credentials.api_token not in (ORG_TOKEN, PROD_ORG_TOKEN):
             raise RuntimeError("401 from gateway")
         # Real /projects/organizations/{orgId}/all shape: `_id` + `projectName`
         # (confirmed live 2026-07-14 — NOT projectId/name).
@@ -56,6 +66,7 @@ def client(monkeypatch):
 
     monkeypatch.setattr(UserClient, "list_projects", fake_list_projects)
     with TestClient(create_app(_cfg()), follow_redirects=False) as c:
+        c.seen_base_urls = seen_base_urls
         yield c
 
 
@@ -260,6 +271,57 @@ def test_consent_api_finish_rejects_project_not_in_org(client):
     assert resp.status_code == 400
     assert resp.json()["status"] == "error"
     assert "does not belong" in resp.json()["message"]
+
+
+def test_consent_api_start_resolves_prod_gateway_from_token(client):
+    # The actual bug: this server is dev-hosted (ahq_base_url=https://api-dev...), but a prod
+    # org token's own urlDetails must make list_projects hit prod's gateway, not dev's — same
+    # single consent URL correctly serving both environments.
+    reg = _register(client)
+    txn = _authorize_to_txn(client, reg["client_id"])
+    resp = client.post("/consent/api/start", json={"txn": txn, "ahq_token": PROD_ORG_TOKEN})
+    assert resp.status_code == 200
+    assert client.seen_base_urls[-1] == "https://api.automationhq.ai"
+
+
+def test_prod_token_session_survives_into_mcp_credentials(client):
+    # End-to-end: the base_url resolved at consent time (prod) must still be the one used for
+    # every subsequent /mcp tool call's credentials, not this server's own dev AHQ_BASE_URL.
+    reg = _register(client)
+    txn = _authorize_to_txn(client, reg["client_id"])
+    consent = client.post("/consent/api/finish", json={
+        "txn": txn, "ahq_token": PROD_ORG_TOKEN, "project_id": "proj-1",
+    })
+    assert consent.status_code == 200
+    code = parse_qs(urlparse(consent.json()["redirect_url"]).query)["code"][0]
+
+    token_resp = client.post("/token", data={
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": REDIRECT_URI,
+        "client_id": reg["client_id"],
+        "code_verifier": VERIFIER,
+    })
+    assert token_resp.status_code == 200, token_resp.text
+    access_token = token_resp.json()["access_token"]
+
+    # Unit coverage for the actual base_url propagation lives in test_dual_auth.py and
+    # test_oauth_provider.py; this just confirms the prod-sourced token round-trips through the
+    # full register->authorize->consent->token->/mcp pipeline without breaking.
+    verifier_resp = client.post(
+        "/mcp",
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Accept": "application/json, text/event-stream",
+            "Content-Type": "application/json",
+        },
+        json={
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {"protocolVersion": "2025-03-26", "capabilities": {},
+                       "clientInfo": {"name": "flow-test", "version": "0"}},
+        },
+    )
+    assert verifier_resp.status_code == 200
 
 
 def test_consent_api_finish_requires_project_id(client):

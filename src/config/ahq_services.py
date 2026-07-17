@@ -76,6 +76,13 @@ class Settings(BaseSettings):
     # instead of our own bare-HTML /consent page, e.g. https://dev.automationhq.ai/mcp-consent.
     # Empty -> falls back to the built-in HTML page (local/stdio testing, or before this is wired).
     ahq_mcp_consent_frontend_url: str = ""
+    # Extra allowed AHQ gateway base URLs a token's own urlDetails.baseUrl claim may resolve to,
+    # beyond the two known hosts (dev/prod — see credentials.KNOWN_BASE_URLS), comma-separated
+    # (e.g. a future staging environment).
+    ahq_mcp_extra_base_urls: str = ""
+
+    def extra_base_urls(self) -> frozenset[str]:
+        return frozenset(u.strip() for u in self.ahq_mcp_extra_base_urls.split(",") if u.strip())
 
 
 # Gateway prefix constants — StripPrefix=1 removes these before forwarding

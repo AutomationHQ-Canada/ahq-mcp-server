@@ -80,6 +80,22 @@ Key facts a future session must not rediscover:
   symptom, check with a direct curl repro of both `/register` AND `/authorize` before assuming
   which one is actually failing — don't guess from the error message alone, it can be a second-hand
   symptom of an earlier silent failure.
+- **One consent URL now serves both dev and prod tokens (2026-07-17)**: every AHQ API call
+  previously used this server's own fixed `AHQ_BASE_URL` setting (dev), so pasting a PROD
+  organization token into the dev-hosted `/consent` flow validated it against DEV's gateway/DB
+  and showed the wrong (or no) project list — confirmed live with a real prod org token. Fixed
+  by resolving the gateway `base_url` from the TOKEN'S OWN `urlDetails` claim instead
+  (`credentials.base_url_from_claims`) — every other AHQ client (standalone local agent, browser
+  locator-spy extension, the frontend's token controller) already does exactly this; ahq-mcp-server
+  was the one place still ignoring it. Restricted to an allowlist (`KNOWN_BASE_URLS` = dev + prod,
+  extendable via `AHQ_MCP_EXTRA_BASE_URLS`) since `decode_ahq_token` does not verify the JWT
+  signature — trusting an arbitrary claim value would make this server an open relay. The
+  resolved base_url is sealed into the authorization code and both OAuth access/refresh token
+  blobs (`AhqAuthorizationCode.base_url` / `AhqAccessToken.base_url` / `AhqRefreshToken.base_url`)
+  so it survives for every subsequent `/mcp` tool call, not just the consent-time project list;
+  `DualAuthMiddleware` uses `access.base_url or self.base_url` (the fallback only matters for
+  tokens issued before this shipped). The legacy `X-API-AUTH-KEY` header path
+  (`AhqCredentials.from_headers`) got the same fix.
 - **Frontend-hosted consent page (2026-07-16)**: `/consent`'s bare-HTML GET/POST pair is now only
   the fallback default. When `AHQ_MCP_CONSENT_FRONTEND_URL` is set,
   `StatelessAhqProvider.authorize()` redirects there instead (a real page in

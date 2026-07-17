@@ -1,12 +1,16 @@
 import base64
 import json
 
-from src.config.credentials import AhqCredentials, decode_ahq_token
+from src.config.credentials import AhqCredentials, base_url_from_claims, decode_ahq_token
 
 
 def _fake_jwt(**claims) -> str:
     payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).rstrip(b"=").decode()
     return f"eyJhbGciOiJub25lIn0.{payload}.fake-signature"
+
+
+def _url_details(base_url: str) -> list[dict]:
+    return [{"key": "baseUrl", "value": base_url}]
 
 
 def test_decode_ahq_token_reads_claims():
@@ -64,3 +68,52 @@ def test_from_headers_missing_headers_default_to_empty_string():
     assert creds.api_token == ""
     assert creds.org_id == ""
     assert creds.project_id == ""
+
+
+def test_base_url_from_claims_resolves_known_prod_host():
+    # A real prod ORGANIZATION token's urlDetails.baseUrl (confirmed live 2026-07-17) — every
+    # other AHQ client (standalone agent, browser extension, frontend) already reads this same
+    # claim to find its own environment's gateway; ahq-mcp-server previously ignored it and
+    # always used its own fixed AHQ_BASE_URL, which broke prod tokens on the dev-hosted server.
+    claims = {"urlDetails": _url_details("https://api.automationhq.ai")}
+    assert base_url_from_claims(claims) == "https://api.automationhq.ai"
+
+
+def test_base_url_from_claims_rejects_url_outside_allowlist():
+    # decode_ahq_token does not verify the signature, so an arbitrary urlDetails.baseUrl value
+    # must NOT be trusted verbatim — that would let a crafted token turn this server into an
+    # open relay to any host.
+    claims = {"urlDetails": _url_details("https://evil.example.com")}
+    assert base_url_from_claims(claims) is None
+
+
+def test_base_url_from_claims_honors_extra_allowlist():
+    claims = {"urlDetails": _url_details("https://api-staging.automationhq.ai")}
+    assert base_url_from_claims(claims) is None
+    assert base_url_from_claims(claims, frozenset({"https://api-staging.automationhq.ai"})) == (
+        "https://api-staging.automationhq.ai"
+    )
+
+
+def test_base_url_from_claims_missing_urldetails_returns_none():
+    assert base_url_from_claims({"organizationId": "org-1"}) is None
+
+
+def test_from_headers_resolves_base_url_from_prod_token_urldetails():
+    # The actual bug this fixes: a prod org token pasted through the dev-hosted consent/legacy
+    # header path must resolve prod's own gateway, not this server's fixed AHQ_BASE_URL.
+    token = _fake_jwt(organizationId="org-1", urlDetails=_url_details("https://api.automationhq.ai"))
+    headers = {"X-API-AUTH-KEY": token, "projectId": "proj-1"}
+
+    creds = AhqCredentials.from_headers(headers, base_url="https://api-dev.automationhq.ai")
+
+    assert creds.base_url == "https://api.automationhq.ai"
+
+
+def test_from_headers_falls_back_to_default_when_token_has_no_urldetails():
+    token = _fake_jwt(organizationId="org-1")
+    headers = {"X-API-AUTH-KEY": token, "projectId": "proj-1"}
+
+    creds = AhqCredentials.from_headers(headers, base_url="https://api-dev.automationhq.ai")
+
+    assert creds.base_url == "https://api-dev.automationhq.ai"

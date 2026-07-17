@@ -140,6 +140,7 @@ async def test_exchange_code_embeds_ahq_token_and_project():
         {
             "ahq_token": ORG_TOKEN,
             "project_id": "proj-1",
+            "base_url": "https://api.automationhq.ai",
             "client_id": "cid",
             "redirect_uri": "http://localhost:1/cb",
             "redirect_uri_provided_explicitly": True,
@@ -152,6 +153,7 @@ async def test_exchange_code_embeds_ahq_token_and_project():
     auth_code = await provider.load_authorization_code(client, code_blob)
     assert auth_code is not None
     assert auth_code.ahq_token == ORG_TOKEN
+    assert auth_code.base_url == "https://api.automationhq.ai"
     tokens = await provider.exchange_authorization_code(client, auth_code)
 
     access = await AhqTokenVerifier(provider).verify_token(tokens.access_token)
@@ -159,7 +161,22 @@ async def test_exchange_code_embeds_ahq_token_and_project():
     assert access.ahq_token == ORG_TOKEN
     assert access.org_id == "org-1"
     assert access.project_id == "proj-1"
+    # base_url (resolved from the AHQ token's own urlDetails at consent time) survives the
+    # code->access-token exchange, so the prod/dev gateway choice made at consent sticks for
+    # every subsequent tool call — see DualAuthMiddleware.
+    assert access.base_url == "https://api.automationhq.ai"
     assert tokens.refresh_token is not None
+
+
+async def test_refresh_carries_base_url_forward():
+    provider = _provider()
+    client = _client_info()
+    first = provider._issue_tokens("cid", ORG_TOKEN, "org-1", "proj-1", [], base_url="https://api.automationhq.ai")
+    refresh = await provider.load_refresh_token(client, first.refresh_token)
+    assert refresh.base_url == "https://api.automationhq.ai"
+    second = await provider.exchange_refresh_token(client, refresh, [])
+    access = await provider.load_access_token(second.access_token)
+    assert access.base_url == "https://api.automationhq.ai"
 
 
 async def test_refresh_rotates_both_tokens():

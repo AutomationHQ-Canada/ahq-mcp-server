@@ -67,6 +67,24 @@ async def test_valid_bearer_stashes_credentials_in_scope():
     assert creds.base_url == "https://api-dev.automationhq.ai"  # never caller-supplied
 
 
+async def test_valid_bearer_honors_base_url_sealed_in_token():
+    # base_url is resolved from the AHQ token's own urlDetails claim at consent time (see
+    # oauth_provider._issue_tokens) and sealed into our access-token blob — DualAuthMiddleware
+    # must use THAT, not its own fixed server-config base_url, so a prod-token session's tool
+    # calls hit prod's gateway even though this server is dev-hosted.
+    rec = _Recorder()
+    mw, codec = _middleware(rec.app)
+    access = codec.encode("access", {
+        "ahq_token": ORG_TOKEN, "org_id": "org-1", "project_id": "proj-1",
+        "base_url": "https://api.automationhq.ai", "client_id": "cid", "scopes": [],
+    }, 60)
+
+    await mw(_scope([(b"authorization", f"Bearer {access}".encode())]), rec.receive, rec.send)
+
+    assert rec.reached_app
+    assert rec.seen_scope["ahq_credentials"].base_url == "https://api.automationhq.ai"
+
+
 async def test_legacy_api_key_header_passes_through():
     rec = _Recorder()
     mw, _ = _middleware(rec.app)
