@@ -15,11 +15,11 @@ _LOGO_DATA_URI = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAANwAAADcCAYAAAAb
 
 _PAGE = """<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Connect to AutomationHQ</title>
+<title>Connect to {partner_name}</title>
 <style>
   :root {{
-    --ahq-primary: #9c27b0;
-    --ahq-primary-dark: #7b1fa2;
+    --ahq-primary: {primary_color};
+    --ahq-primary-focus-ring: {primary_color_focus_ring};
     --ahq-danger: #dc2929;
     --ahq-text: #333333;
     --ahq-muted: #6b6b6b;
@@ -56,7 +56,7 @@ _PAGE = """<!doctype html>
   input[type=password]:focus, input[type=text]:focus {{
     outline: none;
     border-color: var(--ahq-primary);
-    box-shadow: 0 0 0 3px rgba(156, 39, 176, 0.15);
+    box-shadow: 0 0 0 3px var(--ahq-primary-focus-ring);
   }}
   .radio {{ margin: 0.5rem 0; font-weight: 400; }}
   .radio label {{ display: flex; align-items: center; gap: 0.5rem; font-weight: 400; margin: 0; }}
@@ -73,14 +73,14 @@ _PAGE = """<!doctype html>
     border-radius: 4px;
     cursor: pointer;
   }}
-  button:hover {{ background: var(--ahq-primary-dark); }}
+  button:hover {{ filter: brightness(0.87); }}
   .error {{ background: #fdecea; border: 1px solid #f5c6cb; color: var(--ahq-danger); padding: 0.6rem 0.75rem; border-radius: 4px; font-size: 0.9rem; }}
   .org {{ background: #f4e9f6; padding: 0.6rem 0.75rem; border-radius: 4px; font-size: 0.9rem; }}
   .hint {{ color: var(--ahq-muted); font-size: 0.8rem; margin-top: 0.4rem; }}
 </style></head><body>
 <div class="card">
-  <img class="logo" src="{logo}" alt="AutomationHQ">
-  <h1>Connect <strong>{client_name}</strong> to your AutomationHQ account</h1>
+  <img class="logo" src="{logo}" alt="{partner_name}">
+  <h1>Connect <strong>{client_name}</strong> to your {partner_name} account</h1>
   {banner}
   <form method="post" action="consent">
     <input type="hidden" name="txn" value="{txn}">
@@ -91,17 +91,37 @@ _PAGE = """<!doctype html>
 </div>
 </body></html>"""
 
-_TOKEN_INPUT = """<label for="ahq_token">AutomationHQ Organization API token</label>
-<input type="password" id="ahq_token" name="ahq_token" autocomplete="off" required>
-<p class="hint">Create one in the AutomationHQ web app under Administration &rarr; API Tokens (type: Organization).</p>"""
+
+def _token_input(partner_name: str) -> str:
+    escaped = html.escape(partner_name)
+    return (
+        f'<label for="ahq_token">{escaped} Organization API token</label>\n'
+        '<input type="password" id="ahq_token" name="ahq_token" autocomplete="off" required>\n'
+        f'<p class="hint">Create one in the {escaped} web app under Administration '
+        "&rarr; API Tokens (type: Organization).</p>"
+    )
+
+
+def _hex_to_rgba(hex_color: str, alpha: float) -> str:
+    # Used for the input-focus glow, which needs a translucent version of whatever primary
+    # color a deployment configures — not just the AHQ purple this was originally hardcoded to.
+    h = hex_color.lstrip("#")
+    if len(h) != 6:
+        return f"rgba(156, 39, 176, {alpha})"  # fallback: AHQ purple, if a bad value slips through
+    try:
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    except ValueError:
+        return f"rgba(156, 39, 176, {alpha})"
+    return f"rgba({r}, {g}, {b}, {alpha})"
 
 
 def _error_banner(message: str) -> str:
     return f'<p class="error">{html.escape(message)}</p>'
 
 
-def _render(txn: str, client_name: str, banner: str = "", token_value: str = "",
-            projects: list | None = None, status: int = 200) -> Response:
+def _render(txn: str, client_name: str, partner_name: str, logo: str, primary_color: str,
+            banner: str = "", token_value: str = "", projects: list | None = None,
+            status: int = 200) -> Response:
     if projects is not None:
         # Project picker round-trip: the validated token rides along hidden so the user
         # doesn't have to paste it twice (their own browser, their own token, 10-min txn TTL).
@@ -119,11 +139,14 @@ def _render(txn: str, client_name: str, banner: str = "", token_value: str = "",
     else:
         # First screen: token only. No manual project-id entry — the project is always chosen
         # from the live picker after the token is validated (auto-selected if there's only one).
-        token_field = _TOKEN_INPUT
+        token_field = _token_input(partner_name)
         project_field = ""
     return HTMLResponse(
         _PAGE.format(
-            logo=_LOGO_DATA_URI,
+            logo=logo,
+            partner_name=html.escape(partner_name),
+            primary_color=primary_color,
+            primary_color_focus_ring=_hex_to_rgba(primary_color, 0.15),
             client_name=html.escape(client_name),
             banner=banner,
             txn=html.escape(txn, quote=True),
@@ -166,6 +189,15 @@ def make_consent_endpoints(codec: TokenCodec, settings, user_client_factory, htt
     extra_base_urls = frozenset(
         u.strip() for u in (getattr(settings, "ahq_mcp_extra_base_urls", "") or "").split(",") if u.strip()
     )
+    # Per-deployment branding (e.g. a self-hosted client showing their own identity instead of
+    # AutomationHQ's) — empty settings fall back to AHQ's own name/logo/color unchanged.
+    partner_name = getattr(settings, "ahq_mcp_partner_display_name", "") or "AutomationHQ"
+    partner_logo = getattr(settings, "ahq_mcp_partner_logo_url", "") or _LOGO_DATA_URI
+    partner_color = getattr(settings, "ahq_mcp_partner_primary_color", "") or "#9c27b0"
+
+    def _render_page(*args, **kwargs) -> Response:
+        return _render(*args, partner_name=partner_name, logo=partner_logo,
+                       primary_color=partner_color, **kwargs)
 
     def _load_txn(request: Request, form=None):
         txn = (form.get("txn") if form is not None else request.query_params.get("txn")) or ""
@@ -188,7 +220,7 @@ def make_consent_endpoints(codec: TokenCodec, settings, user_client_factory, htt
             return {
                 "ok": False,
                 "message": (
-                    "That doesn't look like an AutomationHQ ORGANIZATION API token. Create one "
+                    f"That doesn't look like a {partner_name} ORGANIZATION API token. Create one "
                     "under Administration → API Tokens (type: Organization) and paste it here."
                 ),
             }
@@ -205,7 +237,7 @@ def make_consent_endpoints(codec: TokenCodec, settings, user_client_factory, htt
             return {
                 "ok": False,
                 "message": (
-                    "AutomationHQ rejected this token — it may be expired or deleted. "
+                    f"{partner_name} rejected this token — it may be expired or deleted. "
                     "Check it in Administration → API Tokens and try again."
                 ),
             }
@@ -250,7 +282,7 @@ def make_consent_endpoints(codec: TokenCodec, settings, user_client_factory, htt
         txn, payload = _load_txn(request)
         if payload is None:
             return HTMLResponse(_EXPIRED_HTML, status_code=400)
-        return _render(txn, payload["client_name"])
+        return _render_page(txn, payload["client_name"])
 
     async def consent_post(request: Request) -> Response:
         form = await request.form()
@@ -263,7 +295,7 @@ def make_consent_endpoints(codec: TokenCodec, settings, user_client_factory, htt
 
         result = await _validate_and_list(token, project_id)
         if not result["ok"]:
-            return _render(
+            return _render_page(
                 txn, client_name, token_value=token, projects=result.get("projects"),
                 status=400, banner=_error_banner(result["message"]),
             )
@@ -273,7 +305,7 @@ def make_consent_endpoints(codec: TokenCodec, settings, user_client_factory, htt
             if len(projects) == 1:
                 project_id = projects[0]["id"]
             else:
-                return _render(
+                return _render_page(
                     txn, client_name, token_value=token, projects=projects,
                     banner=f'<p class="org">Token accepted for organization '
                            f"<strong>{html.escape(result['org_name'])}</strong>.</p>",

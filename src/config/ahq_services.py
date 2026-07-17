@@ -96,6 +96,14 @@ class Settings(BaseSettings):
     ahq_gw_prefix_auth: str = "/ahq-auth-services"
     ahq_gw_prefix_email: str = "/ahq-email-v2-services"
 
+    # Consent-page branding for a self-hosted deployment target — mirrors the
+    # partner.display-name / partner.logo-url pattern other AHQ services already use for PDF
+    # reports (e.g. ahq-test-management-services' application-aviso.properties, "CA UTAP").
+    # Empty -> AutomationHQ's own name/logo/color, unchanged from today.
+    ahq_mcp_partner_display_name: str = ""
+    ahq_mcp_partner_logo_url: str = ""
+    ahq_mcp_partner_primary_color: str = ""
+
     def extra_base_urls(self) -> frozenset[str]:
         return frozenset(u.strip() for u in self.ahq_mcp_extra_base_urls.split(",") if u.strip())
 

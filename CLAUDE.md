@@ -63,6 +63,15 @@ Key facts a future session must not rediscover:
 - The 8 skills are also served as MCP prompts (`src/prompts.py`) so hosted clients get the
   workflows; the gateway needs `/ahq-mcp-server/**` permitAll (like `testbot-mcp-server`)
   before OAuth Bearer tokens can reach us.
+- **Consent-page branding is per-deployment configurable** (`ahq_mcp_partner_display_name`,
+  `ahq_mcp_partner_logo_url`, `ahq_mcp_partner_primary_color` in `src/config/ahq_services.py`,
+  consumed in `src/hosted/consent.py`): empty settings render AHQ's own name/logo/purple
+  unchanged; a self-hosted client sets its own values (mirrors the `partner.display-name` /
+  `partner.logo-url` pattern other AHQ services already use for PDF reports). Verified live: with
+  `AHQ_MCP_PARTNER_DISPLAY_NAME`/`AHQ_MCP_PARTNER_LOGO_URL` set, the page's title, heading,
+  logo, token-field copy, and rejection-message text all switch to the configured partner —
+  color falls back to AHQ purple when unset, since no other AHQ service has an established
+  "brand color" config to source a real value from yet.
 - **VS Code's Copilot Chat MCP OAuth client skips Dynamic Client Registration entirely** —
   confirmed live 2026-07-16, reproduced in a brand-new temporary profile with zero cached state
   (ruling out caching). It goes straight to `/authorize` with a self-constructed, never-registered

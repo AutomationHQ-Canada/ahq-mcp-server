@@ -210,6 +210,42 @@ def test_consent_first_screen_has_no_project_id_field(client):
     assert 'name="ahq_token"' in resp.text
 
 
+def test_consent_page_uses_default_ahq_branding_when_unconfigured(client):
+    reg = _register(client)
+    txn = _authorize_to_txn(client, reg["client_id"])
+    resp = client.get("/consent", params={"txn": txn})
+    assert "AutomationHQ" in resp.text
+    assert "#9c27b0" in resp.text
+    assert "CA UTAP" not in resp.text
+
+
+def test_consent_page_uses_partner_branding_when_configured(monkeypatch):
+    async def fake_list_projects(self):
+        return [{"_id": "proj-1", "projectName": "Project One"}]
+
+    monkeypatch.setattr(UserClient, "list_projects", fake_list_projects)
+    cfg = _cfg(
+        ahq_mcp_partner_display_name="CA UTAP",
+        ahq_mcp_partner_logo_url="https://example.com/ca-utap-logo.svg",
+        ahq_mcp_partner_primary_color="#123456",
+    )
+    with TestClient(create_app(cfg), follow_redirects=False) as c:
+        reg = _register(c)
+        txn = _authorize_to_txn(c, reg["client_id"])
+        resp = c.get("/consent", params={"txn": txn})
+
+        assert resp.status_code == 200
+        assert "CA UTAP" in resp.text
+        assert "AutomationHQ" not in resp.text
+        assert "https://example.com/ca-utap-logo.svg" in resp.text
+        assert "#123456" in resp.text
+        assert "#9c27b0" not in resp.text
+
+        # Rejection message also uses the partner name, not a hardcoded "AutomationHQ".
+        rejected = _consent_to_code(c, txn, token=USER_TOKEN)
+        assert "CA UTAP ORGANIZATION" in rejected.text
+
+
 def test_consent_resolves_prod_gateway_from_token(client):
     # This server is dev-hosted (ahq_base_url=https://api-dev...), but a prod org token's own
     # urlDetails must make list_projects hit prod's gateway instead — the same consent URL
