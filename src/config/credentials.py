@@ -3,6 +3,13 @@ import json
 from dataclasses import dataclass
 from typing import Mapping
 
+# The two AHQ gateway hosts a token's own `urlDetails` claim is allowed to resolve to (plus
+# whatever AHQ_MCP_EXTRA_BASE_URLS adds) — see base_url_from_claims below.
+KNOWN_BASE_URLS = (
+    "https://api-dev.automationhq.ai",
+    "https://api.automationhq.ai",
+)
+
 
 def decode_ahq_token(token: str) -> dict:
     """
@@ -21,6 +28,31 @@ def decode_ahq_token(token: str) -> dict:
         return json.loads(base64.urlsafe_b64decode(payload))
     except (ValueError, UnicodeDecodeError):
         return {}
+
+
+def base_url_from_claims(claims: dict, allowed_extra: frozenset[str] = frozenset()) -> str | None:
+    """
+    Every other AHQ client (standalone local agent, browser locator-spy extension, the
+    frontend's own token controller) resolves its per-environment service URLs from the token's
+    own `urlDetails` claim (a list of {"key": ..., "value": ...} pairs, e.g. key "baseUrl") —
+    confirmed 2026-07-17 from a real prod ORGANIZATION token whose urlDetails.baseUrl was
+    https://api.automationhq.ai. ahq-mcp-server was the one place still resolving AHQ API calls
+    against a single fixed AHQ_BASE_URL setting instead, so a prod token pasted into a
+    dev-hosted consent flow got validated against dev's gateway/DB and showed the wrong (or no)
+    projects for that org.
+
+    Restricted to an allowlist because decode_ahq_token does NOT verify the signature (see its
+    own docstring) — trusting an arbitrary claim value here would let a crafted token turn this
+    server into an open relay to any host. Returns None (caller falls back to its own configured
+    default) if there's no "baseUrl" entry or its value isn't in the allowed set.
+    """
+    allowed = set(KNOWN_BASE_URLS) | allowed_extra
+    for entry in claims.get("urlDetails") or []:
+        if isinstance(entry, dict) and entry.get("key") == "baseUrl":
+            value = str(entry.get("value") or "").rstrip("/")
+            if value in allowed:
+                return value
+    return None
 
 
 @dataclass(frozen=True)
@@ -55,18 +87,24 @@ class AhqCredentials:
         )
 
     @classmethod
-    def from_headers(cls, headers: Mapping[str, str], base_url: str) -> "AhqCredentials":
-        # base_url is never taken from the caller — always the server's own configured
-        # AHQ_BASE_URL, so a header can't turn this into an open relay to an arbitrary host.
+    def from_headers(
+        cls, headers: Mapping[str, str], base_url: str, allowed_extra_base_urls: frozenset[str] = frozenset()
+    ) -> "AhqCredentials":
+        # base_url is never taken from a caller-supplied HEADER — the only way to change it is
+        # via the token's own urlDetails.baseUrl claim (base_url_from_claims), which is checked
+        # against an explicit allowlist, not trusted verbatim.
         token = headers.get("X-API-AUTH-KEY", "")
         org_id = ""
+        resolved_base_url = base_url
         if token:
             try:
-                org_id = decode_ahq_token(token).get("organizationId", "")
+                claims = decode_ahq_token(token)
             except Exception:
-                org_id = ""
+                claims = {}
+            org_id = claims.get("organizationId", "")
+            resolved_base_url = base_url_from_claims(claims, allowed_extra_base_urls) or base_url
         return cls(
-            base_url=base_url,
+            base_url=resolved_base_url,
             api_token=token,
             org_id=org_id,
             project_id=headers.get("projectId", ""),

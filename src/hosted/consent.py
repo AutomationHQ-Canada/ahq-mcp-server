@@ -5,7 +5,7 @@ from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Re
 
 from mcp.server.auth.provider import construct_redirect_uri
 
-from src.config.credentials import AhqCredentials, decode_ahq_token
+from src.config.credentials import AhqCredentials, base_url_from_claims, decode_ahq_token
 from src.hosted.audit import audit_log
 from src.hosted.oauth_provider import CODE_TTL
 from src.hosted.token_codec import TokenCodec
@@ -109,6 +109,9 @@ def make_consent_endpoints(codec: TokenCodec, settings, user_client_factory, htt
     user_client_factory is the UserClient class (injected for tests); http_client_holder is
     mcp_server.app_http_client (shared pooled httpx client).
     """
+    extra_base_urls = frozenset(
+        u.strip() for u in (getattr(settings, "ahq_mcp_extra_base_urls", "") or "").split(",") if u.strip()
+    )
 
     def _load_txn(request: Request, form=None):
         txn = (form.get("txn") if form is not None else request.query_params.get("txn")) or ""
@@ -120,7 +123,10 @@ def make_consent_endpoints(codec: TokenCodec, settings, user_client_factory, htt
         the returned project list IS the org's real project set), shared by both the HTML and
         JSON consent handlers. Returns {"ok": False, "message": ...} on any failure (with
         "projects"/"org_name" also included for the project_not_in_org case, since that one still
-        needs to show a picker), or {"ok": True, "org_id", "org_name", "projects"} on success.
+        needs to show a picker), or {"ok": True, "org_id", "org_name", "projects", "base_url"} on
+        success. base_url is resolved from the TOKEN's own urlDetails claim (dev vs prod gateway,
+        see credentials.base_url_from_claims) — not this server's fixed AHQ_BASE_URL — so a
+        prod org token validates against prod's gateway/DB even though this server is dev-hosted.
         """
         claims = decode_ahq_token(token)
         org_id = claims.get("organizationId", "")
@@ -134,7 +140,8 @@ def make_consent_endpoints(codec: TokenCodec, settings, user_client_factory, htt
                 ),
             }
 
-        creds = AhqCredentials(base_url=settings.ahq_base_url, api_token=token,
+        base_url = base_url_from_claims(claims, extra_base_urls) or settings.ahq_base_url
+        creds = AhqCredentials(base_url=base_url, api_token=token,
                                org_id=org_id, project_id=project_id)
         try:
             raw = await user_client_factory(
@@ -163,15 +170,16 @@ def make_consent_endpoints(codec: TokenCodec, settings, user_client_factory, htt
                     f"'{org_name}'. Pick one of its projects below."
                 ),
             }
-        return {"ok": True, "org_id": org_id, "org_name": org_name, "projects": projects}
+        return {"ok": True, "org_id": org_id, "org_name": org_name, "projects": projects, "base_url": base_url}
 
-    def _issue_code(payload: dict, token: str, project_id: str) -> str:
+    def _issue_code(payload: dict, token: str, project_id: str, base_url: str) -> str:
         params = payload["params"]
         return codec.encode(
             "code",
             {
                 "ahq_token": token,
                 "project_id": project_id,
+                "base_url": base_url,
                 "client_id": payload["client_id"],
                 "redirect_uri": params["redirect_uri"],
                 "redirect_uri_provided_explicitly": params["redirect_uri_provided_explicitly"],
@@ -218,7 +226,7 @@ def make_consent_endpoints(codec: TokenCodec, settings, user_client_factory, htt
                            f"<strong>{html.escape(result['org_name'])}</strong>.</p>",
                 )
 
-        code = _issue_code(payload, token, project_id)
+        code = _issue_code(payload, token, project_id, result["base_url"])
         audit_log("auth.consent_ok", org=result["org_id"], project=project_id)
         return RedirectResponse(
             _redirect_url(payload, code), status_code=302, headers={"Cache-Control": "no-store"},
@@ -239,7 +247,7 @@ def make_consent_endpoints(codec: TokenCodec, settings, user_client_factory, htt
 
         if len(projects) == 1:
             project_id = projects[0]["id"]
-            code = _issue_code(payload, token, project_id)
+            code = _issue_code(payload, token, project_id, result["base_url"])
             audit_log("auth.consent_ok", org=result["org_id"], project=project_id)
             return JSONResponse({"status": "redirect", "redirect_url": _redirect_url(payload, code)})
         return JSONResponse({
@@ -263,7 +271,7 @@ def make_consent_endpoints(codec: TokenCodec, settings, user_client_factory, htt
         if not result["ok"]:
             return JSONResponse({"status": "error", "message": result["message"]}, status_code=400)
 
-        code = _issue_code(payload, token, project_id)
+        code = _issue_code(payload, token, project_id, result["base_url"])
         audit_log("auth.consent_ok", org=result["org_id"], project=project_id)
         return JSONResponse({"status": "redirect", "redirect_url": _redirect_url(payload, code)})
 

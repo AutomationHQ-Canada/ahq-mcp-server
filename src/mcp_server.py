@@ -596,7 +596,7 @@ def _resolve_clients() -> tuple[ClientBundle, bool]:
     # verifies it and stashes the result in the ASGI scope. Legacy header clients fall through
     # to the original X-API-AUTH-KEY/projectId path.
     creds = req.scope.get("ahq_credentials") or AhqCredentials.from_headers(
-        req.headers, base_url=settings.ahq_base_url
+        req.headers, base_url=settings.ahq_base_url, allowed_extra_base_urls=settings.extra_base_urls()
     )
     return ClientBundle.build(credentials=creds, http_client=app_http_client.client), True
 
