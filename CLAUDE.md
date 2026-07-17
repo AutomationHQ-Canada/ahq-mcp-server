@@ -96,19 +96,12 @@ Key facts a future session must not rediscover:
   `DualAuthMiddleware` uses `access.base_url or self.base_url` (the fallback only matters for
   tokens issued before this shipped). The legacy `X-API-AUTH-KEY` header path
   (`AhqCredentials.from_headers`) got the same fix.
-- **Frontend-hosted consent page (2026-07-16)**: `/consent`'s bare-HTML GET/POST pair is now only
-  the fallback default. When `AHQ_MCP_CONSENT_FRONTEND_URL` is set,
-  `StatelessAhqProvider.authorize()` redirects there instead (a real page in
-  `automationhq-frontend-v2`, e.g. `/mcp-consent`), which drives the same flow via two JSON
-  endpoints instead of HTML: `POST /consent/api/start` (`{txn, ahq_token}` →
-  `{status: "redirect", redirect_url}` on a single project, `{status: "pick_project",
-  organization_name, projects}` on multiple, `{status: "error", message}` on failure) and
-  `POST /consent/api/finish` (`{txn, ahq_token, project_id}` → same redirect/error shape). Both
-  share the exact same validation/issuance logic as the HTML handlers
-  (`consent.py`'s `_validate_and_list`/`_issue_code`/`_redirect_url` closures) — not a
-  duplicate — so nothing about the actual OAuth semantics differs between the two UIs. No CORS
-  wiring was needed for this: the app's `CORSMiddleware` (`http_server.py`) was already
-  `allow_origins=["*"]` before this change.
+- **Consent page stays in this repo, styled with AHQ branding**: `/consent`'s HTML GET/POST pair
+  (`consent.py`) is the only consent UI — it is not delegated to a separate frontend app. The
+  page uses the real AHQ palette (`#9c27b0` primary), IBM Plex Sans, and the AutomationHQ mark
+  inlined as a base64 `<img>` so the page has no external asset dependency. Keep `consent.py`'s
+  validation/issuance logic (`_validate_and_list`/`_issue_code`/`_redirect_url`) as the single
+  source of truth if this page ever needs a second UI in front of it.
 
 ## AHQ Platform Knowledge (Aviso-UTAP)
 

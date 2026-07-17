@@ -92,16 +92,12 @@ class StatelessAhqProvider(OAuthAuthorizationServerProvider):
     ORGANIZATION API token, which gets validated live and sealed into the issued tokens.
     """
 
-    def __init__(self, codec: TokenCodec, public_base_url: str, extra_redirect_uris: str = "",
-                 consent_frontend_url: str = ""):
+    def __init__(self, codec: TokenCodec, public_base_url: str, extra_redirect_uris: str = ""):
         self.codec = codec
         self.public_base_url = public_base_url.rstrip("/")
         self.extra_redirect_uris = frozenset(
             u.strip() for u in extra_redirect_uris.split(",") if u.strip()
         )
-        # Frontend-hosted consent page (real AHQ design system) to send users to instead of our
-        # own bare-HTML page — empty means "not wired up yet", keep using the built-in page.
-        self.consent_frontend_url = consent_frontend_url.rstrip("/")
 
     # --- Dynamic client registration (RFC 7591), storage-free ---
 
@@ -166,8 +162,7 @@ class StatelessAhqProvider(OAuthAuthorizationServerProvider):
             },
             TXN_TTL,
         )
-        consent_base = self.consent_frontend_url or f"{self.public_base_url}/consent"
-        return f"{consent_base}?{urlencode({'txn': txn})}"
+        return f"{self.public_base_url}/consent?{urlencode({'txn': txn})}"
 
     # --- Code exchange ---
 

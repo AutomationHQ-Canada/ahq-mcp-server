@@ -69,7 +69,6 @@ def create_app(settings):
     codec = TokenCodec(secret)
     provider = StatelessAhqProvider(
         codec, public_base, extra_redirect_uris=settings.ahq_mcp_extra_redirect_uris,
-        consent_frontend_url=settings.ahq_mcp_consent_frontend_url,
     )
     verifier = AhqTokenVerifier(provider)
     resource_metadata_url = f"{public_base}/.well-known/oauth-protected-resource/mcp"
@@ -86,9 +85,7 @@ def create_app(settings):
         await app_http_client.client.aclose()
         app_http_client.client = None
 
-    consent_get, consent_post, consent_api_start, consent_api_finish = make_consent_endpoints(
-        codec, settings, UserClient, app_http_client
-    )
+    consent_get, consent_post = make_consent_endpoints(codec, settings, UserClient, app_http_client)
 
     # RFC 9728 protected-resource metadata. Registered MANUALLY at the app-local path instead
     # of via the SDK's create_protected_resource_routes: that helper derives the route path
@@ -117,11 +114,6 @@ def create_app(settings):
         ),
         Route("/consent", consent_get, methods=["GET"]),
         Route("/consent", consent_post, methods=["POST"]),
-        # JSON equivalents for the frontend-hosted consent page (automationhq-frontend-v2) —
-        # CORS is already wide-open at the app level (see the CORSMiddleware below), so no
-        # per-route CORS wiring is needed for these.
-        Route("/consent/api/start", consent_api_start, methods=["POST"]),
-        Route("/consent/api/finish", consent_api_finish, methods=["POST"]),
         Mount(
             "/mcp",
             app=DualAuthMiddleware(

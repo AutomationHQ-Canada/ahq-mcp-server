@@ -45,7 +45,6 @@ def _cfg(**overrides):
         ahq_mcp_auth_secret="test-secret",
         ahq_mcp_extra_redirect_uris="",
         ahq_mcp_max_body_bytes=2_000_000,
-        ahq_mcp_consent_frontend_url="",
     )
     base.update(overrides)
     return types.SimpleNamespace(**base)
@@ -211,89 +210,28 @@ def test_consent_first_screen_has_no_project_id_field(client):
     assert 'name="ahq_token"' in resp.text
 
 
-def test_consent_api_start_single_project_redirects_immediately(client):
+def test_consent_resolves_prod_gateway_from_token(client):
+    # This server is dev-hosted (ahq_base_url=https://api-dev...), but a prod org token's own
+    # urlDetails must make list_projects hit prod's gateway instead — the same consent URL
+    # correctly serving both environments.
     reg = _register(client)
     txn = _authorize_to_txn(client, reg["client_id"])
-    resp = client.post("/consent/api/start", json={"txn": txn, "ahq_token": ORG_TOKEN})
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["status"] == "pick_project"  # two projects in the fixture -> no auto-select
-    assert body["organization_name"] == "Org One"
-    assert {p["name"] for p in body["projects"]} == {"Project One", "Project Two"}
-
-
-def test_consent_api_start_auto_redirects_when_exactly_one_project(client, monkeypatch):
-    async def one_project(self):
-        return [{"_id": "proj-1", "projectName": "Project One"}]
-
-    monkeypatch.setattr(UserClient, "list_projects", one_project)
-    reg = _register(client)
-    txn = _authorize_to_txn(client, reg["client_id"])
-    resp = client.post("/consent/api/start", json={"txn": txn, "ahq_token": ORG_TOKEN})
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["status"] == "redirect"
-    assert body["redirect_url"].startswith(REDIRECT_URI)
-    assert "code=" in body["redirect_url"]
-
-
-def test_consent_api_start_rejects_non_organization_token(client):
-    reg = _register(client)
-    txn = _authorize_to_txn(client, reg["client_id"])
-    resp = client.post("/consent/api/start", json={"txn": txn, "ahq_token": USER_TOKEN})
-    assert resp.status_code == 400
-    assert resp.json()["status"] == "error"
-    assert "ORGANIZATION" in resp.json()["message"]
-
-
-def test_consent_api_start_expired_txn(client):
-    resp = client.post("/consent/api/start", json={"txn": "garbage", "ahq_token": ORG_TOKEN})
-    assert resp.status_code == 400
-    assert resp.json()["status"] == "error"
-
-
-def test_consent_api_finish_completes_with_chosen_project(client):
-    reg = _register(client)
-    txn = _authorize_to_txn(client, reg["client_id"])
-    resp = client.post("/consent/api/finish", json={"txn": txn, "ahq_token": ORG_TOKEN, "project_id": "proj-2"})
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["status"] == "redirect"
-    assert body["redirect_url"].startswith(REDIRECT_URI)
-
-
-def test_consent_api_finish_rejects_project_not_in_org(client):
-    reg = _register(client)
-    txn = _authorize_to_txn(client, reg["client_id"])
-    resp = client.post("/consent/api/finish", json={
-        "txn": txn, "ahq_token": ORG_TOKEN, "project_id": "someone-elses-project",
-    })
-    assert resp.status_code == 400
-    assert resp.json()["status"] == "error"
-    assert "does not belong" in resp.json()["message"]
-
-
-def test_consent_api_start_resolves_prod_gateway_from_token(client):
-    # The actual bug: this server is dev-hosted (ahq_base_url=https://api-dev...), but a prod
-    # org token's own urlDetails must make list_projects hit prod's gateway, not dev's — same
-    # single consent URL correctly serving both environments.
-    reg = _register(client)
-    txn = _authorize_to_txn(client, reg["client_id"])
-    resp = client.post("/consent/api/start", json={"txn": txn, "ahq_token": PROD_ORG_TOKEN})
-    assert resp.status_code == 200
+    resp = _consent_to_code(client, txn, token=PROD_ORG_TOKEN, project_id="proj-1")
+    assert resp.status_code == 302, resp.text
     assert client.seen_base_urls[-1] == "https://api.automationhq.ai"
 
 
 def test_prod_token_session_survives_into_mcp_credentials(client):
-    # End-to-end: the base_url resolved at consent time (prod) must still be the one used for
-    # every subsequent /mcp tool call's credentials, not this server's own dev AHQ_BASE_URL.
+    # The base_url resolved at consent time (prod) must still be the one used for every
+    # subsequent /mcp tool call's credentials, not this server's own dev AHQ_BASE_URL. Unit
+    # coverage for the base_url propagation itself lives in test_dual_auth.py and
+    # test_oauth_provider.py; this confirms the prod-sourced token round-trips through the full
+    # register->authorize->consent->token->/mcp pipeline without breaking.
     reg = _register(client)
     txn = _authorize_to_txn(client, reg["client_id"])
-    consent = client.post("/consent/api/finish", json={
-        "txn": txn, "ahq_token": PROD_ORG_TOKEN, "project_id": "proj-1",
-    })
-    assert consent.status_code == 200
-    code = parse_qs(urlparse(consent.json()["redirect_url"]).query)["code"][0]
+    consent = _consent_to_code(client, txn, token=PROD_ORG_TOKEN, project_id="proj-1")
+    assert consent.status_code == 302, consent.text
+    code = parse_qs(urlparse(consent.headers["location"]).query)["code"][0]
 
     token_resp = client.post("/token", data={
         "grant_type": "authorization_code",
@@ -305,10 +243,7 @@ def test_prod_token_session_survives_into_mcp_credentials(client):
     assert token_resp.status_code == 200, token_resp.text
     access_token = token_resp.json()["access_token"]
 
-    # Unit coverage for the actual base_url propagation lives in test_dual_auth.py and
-    # test_oauth_provider.py; this just confirms the prod-sourced token round-trips through the
-    # full register->authorize->consent->token->/mcp pipeline without breaking.
-    verifier_resp = client.post(
+    mcp_resp = client.post(
         "/mcp",
         headers={
             "Authorization": f"Bearer {access_token}",
@@ -321,36 +256,7 @@ def test_prod_token_session_survives_into_mcp_credentials(client):
                        "clientInfo": {"name": "flow-test", "version": "0"}},
         },
     )
-    assert verifier_resp.status_code == 200
-
-
-def test_consent_api_finish_requires_project_id(client):
-    reg = _register(client)
-    txn = _authorize_to_txn(client, reg["client_id"])
-    resp = client.post("/consent/api/finish", json={"txn": txn, "ahq_token": ORG_TOKEN, "project_id": ""})
-    assert resp.status_code == 400
-    assert resp.json()["status"] == "error"
-
-
-def test_authorize_redirects_to_frontend_consent_url_when_configured(monkeypatch):
-    async def fake_list_projects(self):
-        return [{"_id": "proj-1", "projectName": "Project One"}]
-
-    monkeypatch.setattr(UserClient, "list_projects", fake_list_projects)
-    cfg = _cfg(ahq_mcp_consent_frontend_url="https://dev.automationhq.ai/mcp-consent")
-    with TestClient(create_app(cfg), follow_redirects=False) as c:
-        reg = _register(c)
-        resp = c.get("/authorize", params={
-            "client_id": reg["client_id"],
-            "response_type": "code",
-            "code_challenge": CHALLENGE,
-            "code_challenge_method": "S256",
-            "redirect_uri": REDIRECT_URI,
-            "state": "state-xyz",
-        })
-        assert resp.status_code == 302
-        location = resp.headers["location"]
-        assert location.startswith("https://dev.automationhq.ai/mcp-consent?txn=")
+    assert mcp_resp.status_code == 200
 
 
 def test_expired_txn_shows_expired_page(client):

@@ -72,10 +72,6 @@ class Settings(BaseSettings):
     # (e.g. a future Cursor/Windsurf deep-link scheme).
     ahq_mcp_extra_redirect_uris: str = ""
     ahq_mcp_crawl_concurrency: int = 2
-    # Frontend-hosted consent page (automationhq-frontend-v2's real design system) to redirect to
-    # instead of our own bare-HTML /consent page, e.g. https://dev.automationhq.ai/mcp-consent.
-    # Empty -> falls back to the built-in HTML page (local/stdio testing, or before this is wired).
-    ahq_mcp_consent_frontend_url: str = ""
     # Extra allowed AHQ gateway base URLs a token's own urlDetails.baseUrl claim may resolve to,
     # beyond the two known hosts (dev/prod — see credentials.KNOWN_BASE_URLS), comma-separated
     # (e.g. a future staging environment).
