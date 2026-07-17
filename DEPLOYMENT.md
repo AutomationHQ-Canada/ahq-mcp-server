@@ -6,6 +6,9 @@ additionally installs the curated workflow skills.
 > **Just want to install and use it?** Follow the step-by-step handover guide in
 > [`INSTALL.md`](INSTALL.md) — validated end-to-end, with troubleshooting. The sections below
 > are the condensed reference.
+>
+> **Using Claude Desktop, claude.ai, VS Code, Cursor, or Windsurf instead of Claude Code?** No
+> install needed — see [`CONNECT.md`](CONNECT.md) for the step-by-step connector guide.
 
 ## Option A — Claude Code plugin (recommended)
 
