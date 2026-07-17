@@ -102,6 +102,16 @@ Key facts a future session must not rediscover:
   inlined as a base64 `<img>` so the page has no external asset dependency. Keep `consent.py`'s
   validation/issuance logic (`_validate_and_list`/`_issue_code`/`_redirect_url`) as the single
   source of truth if this page ever needs a second UI in front of it.
+- **Gateway route prefixes are overridable per deployment target** (`ahq_gw_prefix_*` settings in
+  `src/config/ahq_services.py`): every module-level `*_SVC` constant (`ASSET_SVC`, `TEST_MGMT_SVC`,
+  etc.) now derives from a `Settings` field defaulting to the shared SaaS gateway's route-id
+  convention. A self-hosted deployment whose gateway uses a different naming convention (e.g. a
+  `${PARTNER_PREFIX}-<svc>-${SUFFIX}` scheme instead of `/ahq-<svc>-services`) overrides only the
+  prefixes it needs via env vars — no code change. `LOCAL_EXEC_SVC` is intentionally excluded
+  (never gateway-routed; targets the caller's own machine). This exists because this service is
+  the only AHQ client that calls every peer service back out through its own gateway rather than
+  via internal service DNS, so its gateway-prefix assumptions can't be hardcoded the way every
+  other backend service's peer-URL config already isn't.
 
 ## AHQ Platform Knowledge (Aviso-UTAP)
 

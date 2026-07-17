@@ -77,25 +77,44 @@ class Settings(BaseSettings):
     # (e.g. a future staging environment).
     ahq_mcp_extra_base_urls: str = ""
 
+    # Gateway route-id prefixes, one per backend service (StripPrefix=1 removes these before the
+    # gateway forwards a request). Defaults match the shared SaaS gateway's naming convention.
+    # A self-hosted deployment whose gateway uses a different naming convention overrides the
+    # ones it needs; everything else keeps working unchanged since these are pure additive
+    # defaults, not a profile/dict switch.
+    ahq_gw_prefix_asset: str = "/ahq-asset-services"
+    ahq_gw_prefix_test_mgmt: str = "/ahq-test-management-services"
+    ahq_gw_prefix_background: str = "/ahq-background-v2-services"
+    ahq_gw_prefix_config: str = "/ahq-config-services"
+    ahq_gw_prefix_user_mgmt: str = "/ahq-user-management-services"
+    ahq_gw_prefix_executor: str = "/ahq-test-bot-executor-services"
+    ahq_gw_prefix_standalone: str = "/ahq-standalone-local-v2-services"
+    ahq_gw_prefix_managed_test: str = "/mtaf-core"
+    ahq_gw_prefix_virt_client: str = "/mtaf-sv-client"
+    ahq_gw_prefix_virt_server: str = "/mtaf-sv-server"
+    ahq_gw_prefix_cdct: str = "/mtaf-cdct"
+    ahq_gw_prefix_auth: str = "/ahq-auth-services"
+    ahq_gw_prefix_email: str = "/ahq-email-v2-services"
+
     def extra_base_urls(self) -> frozenset[str]:
         return frozenset(u.strip() for u in self.ahq_mcp_extra_base_urls.split(",") if u.strip())
 
 
-# Gateway prefix constants — StripPrefix=1 removes these before forwarding
-ASSET_SVC         = "/ahq-asset-services"
-TEST_MGMT_SVC     = "/ahq-test-management-services"
-BACKGROUND_SVC    = "/ahq-background-v2-services"
-CONFIG_SVC        = "/ahq-config-services"
-USER_MGMT_SVC     = "/ahq-user-management-services"
-EXECUTOR_SVC      = "/ahq-test-bot-executor-services"
-LOCAL_EXEC_SVC    = "/test-local-execution-services"  # NOT gateway-routed — runs on the user's machine, see local_exec_client.py
-STANDALONE_SVC    = "/ahq-standalone-local-v2-services"
-MANAGED_TEST_SVC  = "/mtaf-core"          # gateway route id, NOT the repo name "managed-testing-service-core"
-VIRT_CLIENT_SVC   = "/mtaf-sv-client"     # gateway route id, NOT the repo name "managed-testing-virtualization-client"
-VIRT_SERVER_SVC   = "/mtaf-sv-server"     # gateway route id, NOT the repo name "managed-testing-virtualization-server"
-CDCT_SVC          = "/mtaf-cdct"          # gateway route id, NOT the repo name "mtaf-cdct-core"
-AUTH_SVC          = "/ahq-auth-services"
-EMAIL_SVC         = "/ahq-email-v2-services"
-
-
 settings = Settings()
+
+# Gateway prefix constants, derived from settings so a non-SaaS deployment target can override
+# them (see the ahq_gw_prefix_* fields above) without any code change.
+ASSET_SVC         = settings.ahq_gw_prefix_asset
+TEST_MGMT_SVC     = settings.ahq_gw_prefix_test_mgmt
+BACKGROUND_SVC    = settings.ahq_gw_prefix_background
+CONFIG_SVC        = settings.ahq_gw_prefix_config
+USER_MGMT_SVC     = settings.ahq_gw_prefix_user_mgmt
+EXECUTOR_SVC      = settings.ahq_gw_prefix_executor
+LOCAL_EXEC_SVC    = "/test-local-execution-services"  # NOT gateway-routed — runs on the user's machine, see local_exec_client.py
+STANDALONE_SVC    = settings.ahq_gw_prefix_standalone
+MANAGED_TEST_SVC  = settings.ahq_gw_prefix_managed_test   # gateway route id, NOT the repo name "managed-testing-service-core"
+VIRT_CLIENT_SVC   = settings.ahq_gw_prefix_virt_client    # gateway route id, NOT the repo name "managed-testing-virtualization-client"
+VIRT_SERVER_SVC   = settings.ahq_gw_prefix_virt_server    # gateway route id, NOT the repo name "managed-testing-virtualization-server"
+CDCT_SVC          = settings.ahq_gw_prefix_cdct           # gateway route id, NOT the repo name "mtaf-cdct-core"
+AUTH_SVC          = settings.ahq_gw_prefix_auth
+EMAIL_SVC         = settings.ahq_gw_prefix_email
