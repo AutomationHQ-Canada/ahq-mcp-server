@@ -105,6 +105,14 @@ The user has a deployed web application and wants test scripts generated automat
 - Never fabricate `locateBy`/`locatorValue` on a `ui-locator` parameter — pass only `{"locatorId": "..."}` and let the server enrich it
 - Never write a raw guessed selector (e.g. `input[type='email']`) into a step instead of a real `locatorId` — check `get_page_by_url` for an existing locator first, and if none exists, call `crawl_url` to capture real ones before writing the step
 - Never call `create_test_script` without `website_id` and `story_id` — both are validated locally and rejected if missing; resolve or create a story rather than omitting it
+- **After any step that can trigger navigation (a submit/sign-in/link click) and before the next
+  step that verifies the result (URL check, element check on the new page), insert a wait step** —
+  `search_step_templates("Wait")` for `template-id-36` ("Wait for visibility of {{ui-locator}} for
+  {{number}} seconds", preferred when a locator on the destination page is already known — it
+  resolves as soon as the page is ready) or `template-id-35` ("Wait for {{number}} seconds", plain
+  fixed delay, ~5-10s, use when no destination-page locator is known yet). Skipping this causes the
+  verify step to run against the pre-navigation page and fail — confirmed live, see CLAUDE.md's
+  "Post-navigation race" section.
 - Never create a script with 0 steps
 - Script names must be unique — append " (2)", " (3)" if duplicates arise
 - If crawl returns an error for a page, skip it silently and note it in the summary

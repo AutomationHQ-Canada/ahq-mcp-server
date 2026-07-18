@@ -438,6 +438,34 @@ class behind the real User Test Step rename incident (2026-07-09).
   `type` required) are all required; `description` max 600. Nesting is rejected server-side: a
   step's `templateId` must not be another Common Function's ID.
 
+### Post-navigation race: always wait between a navigating action and its verify step
+
+`"Verify current URL contains path {{expected}}"` (`template-id-117`, `ActionLibraryServices.
+verifyUrlContainsText`) does **one immediate, unretried check** — `getCurrentUrl().contains(text)`,
+no polling loop, no timeout param. Confirmed live: a script with `Click {{ui-locator}}` (sign-in)
+immediately followed by this verify step ran too fast for the browser to have navigated yet, so it
+executed against the pre-click URL and failed; the same script passed reliably once a wait step
+was inserted between the click and the verify. Any step that can trigger navigation (a submit
+click, a link click, anything a `Verify current URL`/`Verify page title`/element-visibility check
+runs right after) needs an explicit wait step in between — never assume the next step will find
+the destination page already loaded.
+
+Two built-in templates do this (`ActionLibraryServices.java`, seeded in
+`ahq-user-management-services/src/main/resources/db/taf-db.template.json`):
+- **`template-id-36`, `"Wait for visibility of {{ui-locator}} for {{number}} seconds"`** —
+  polls until a known element on the destination page appears, up to `number` seconds. Prefer this
+  whenever a locator on the destination page is already known (e.g. a dashboard element) — it
+  resolves as soon as the page is actually ready instead of always burning the full duration.
+- **`template-id-35`, `"Wait for {{number}} seconds"`** — plain fixed delay, no locator needed.
+  Simpler but brittle: too short reintroduces the race under real network conditions, too long
+  just slows every run down. Use only when no destination-page locator is known yet.
+
+`template-id-37` (`"Wait for clickability of {{ui-locator}} for {{number}} seconds"`) is the same
+idea for waiting on an element to become interactable rather than a navigation to complete.
+
+**Script-generation skills insert a wait step automatically now** (see `ahq-gen-from-url`/
+`ahq-gen-from-requirements` Rules) — this is not something to re-solve per script by hand.
+
 ### Execution path — create TestBot → execute → results (2026-07-13, proven live end-to-end)
 
 The full conversational chain works: `create_test_script` → `create_suite` → `create_test_bot` →

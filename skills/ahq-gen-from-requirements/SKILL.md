@@ -112,6 +112,12 @@ generated from it — no live app/URL involved.
 - Never fabricate `locateBy`/`locatorValue` on a `ui-locator` parameter — pass only `{"locatorId": "..."}` and let the server enrich it
 - Never call `create_test_script` without `website_id` and `story_id` — both are validated locally and rejected if missing; resolve or create an epic/story rather than omitting it
 - Never create a script with 0 steps
+- **After any step that can trigger navigation (a submit/sign-in/link click) and before the next
+  step that verifies the result, insert a wait step** — `template-id-36` ("Wait for visibility of
+  {{ui-locator}} for {{number}} seconds", preferred when a destination-page locator is known) or
+  `template-id-35` ("Wait for {{number}} seconds", plain fixed delay ~5-10s otherwise). Skipping
+  this causes the verify step to run before the page has navigated and fail — see CLAUDE.md's
+  "Post-navigation race" section.
 - Script names must be unique — append " (2)", " (3)" if duplicates arise
 - Always show the traceability matrix before writing scripts, not just in the final summary
 - If the file has an `error` from `extract_requirements`, do not retry — report it to the user
