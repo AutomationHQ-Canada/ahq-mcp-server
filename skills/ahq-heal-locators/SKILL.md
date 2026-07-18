@@ -14,8 +14,8 @@ and fixed instead of hand-editing a selector.
 
 ## What to collect before starting
 - Nothing required up front — `scan_broken_locators` finds candidates on its own.
-- `website_id` (needed only for `apply_locator_fix`) — get it from `get_ahq_context` or
-  `list_websites` if not already known.
+- `website_id` (needed by both `heal_locator` and `apply_locator_fix`) — get it from
+  `get_ahq_context` or `list_websites` if not already known.
 - Login credentials, only if the broken locator's page requires being signed in to view.
 
 ## Workflow
@@ -23,8 +23,8 @@ and fixed instead of hand-editing a selector.
 1. Call `scan_broken_locators` — lists every locator the platform has already flagged as broken.
    If empty, tell the user nothing is currently flagged and stop here.
 2. For each broken locator (or the one the user asked about by name), call
-   `heal_locator(locator_id)` — this re-crawls the live page and proposes ranked replacement
-   selectors. It changes nothing.
+   `heal_locator(locator_id, website_id)` — this re-crawls the live page and proposes ranked
+   replacement selectors. It changes nothing.
 3. If `found` is false or `candidates` is empty: say so plainly — don't guess a selector as a
    substitute. Suggest the page may require login (`credentials`) or the element may have been
    removed entirely.

@@ -27,10 +27,10 @@ async def test_heal_locator_reports_error_when_locator_missing_from_page():
     from src.tools.heal_locator import heal_locator
 
     class FakeAssetClient:
-        async def get_page_by_locator_id(self, locator_id):
+        async def get_page_by_locator_id(self, website_id, locator_id):
             return {"pageId": "page-1", "pageUrl": "https://example.com", "locators": []}
 
-    result = await heal_locator(FakeAssetClient(), "loc-missing")
+    result = await heal_locator(FakeAssetClient(), "loc-missing", "site-1")
     assert "error" in result
     assert "loc-missing" in result["error"]
 
@@ -39,10 +39,10 @@ async def test_heal_locator_reports_error_when_page_has_no_url():
     from src.tools.heal_locator import heal_locator
 
     class FakeAssetClient:
-        async def get_page_by_locator_id(self, locator_id):
+        async def get_page_by_locator_id(self, website_id, locator_id):
             return {"pageId": "page-1", "pageUrl": "", "locators": [{"locatorId": locator_id, "locatorName": "Submit"}]}
 
-    result = await heal_locator(FakeAssetClient(), "loc-1")
+    result = await heal_locator(FakeAssetClient(), "loc-1", "site-1")
     assert "error" in result
 
 
@@ -50,12 +50,12 @@ async def test_heal_locator_blocks_non_public_url_when_hosted():
     from src.tools.heal_locator import heal_locator
 
     class FakeAssetClient:
-        async def get_page_by_locator_id(self, locator_id):
+        async def get_page_by_locator_id(self, website_id, locator_id):
             return {
                 "pageId": "page-1",
                 "pageUrl": "http://localhost:9202/internal",
                 "locators": [{"locatorId": locator_id, "locatorName": "Submit"}],
             }
 
-    result = await heal_locator(FakeAssetClient(), "loc-1", hosted=True)
+    result = await heal_locator(FakeAssetClient(), "loc-1", "site-1", hosted=True)
     assert "error" in result

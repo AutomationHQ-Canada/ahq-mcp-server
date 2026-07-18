@@ -165,11 +165,13 @@ async def test_update_locator_sends_correct_path_and_body():
     assert result == {"message": "Locator updated successfully"}
 
 
-async def test_list_broken_locators_unwraps_paginated_content():
+async def test_list_broken_locators_unwraps_items_shape():
+    # Confirmed live: {"items": [...], "status": 200, "count": N} — NOT {"content": [...]}
+    # like other paginated list_* endpoints in this client.
     async def fake_request(method, url, **kwargs):
         assert method == "GET"
         assert url == "https://api-dev.automationhq.ai/ahq-asset-services/rest/api/locators/broken"
-        return httpx.Response(200, json={"content": [{"locatorId": "loc-1", "broken": True}]}, request=httpx.Request(method, url))
+        return httpx.Response(200, json={"items": [{"locatorId": "loc-1", "broken": True}], "status": 200, "count": 1}, request=httpx.Request(method, url))
 
     client = _client_with_fake_transport(fake_request)
     result = await client.list_broken_locators()
@@ -177,19 +179,33 @@ async def test_list_broken_locators_unwraps_paginated_content():
     assert result == [{"locatorId": "loc-1", "broken": True}]
 
 
-async def test_get_page_by_locator_id_sends_expected_query_param():
+async def test_list_broken_locators_returns_bare_list_as_is():
+    async def fake_request(method, url, **kwargs):
+        return httpx.Response(200, json=[{"locatorId": "loc-1"}], request=httpx.Request(method, url))
+
+    client = _client_with_fake_transport(fake_request)
+    result = await client.list_broken_locators()
+
+    assert result == [{"locatorId": "loc-1"}]
+
+
+async def test_get_page_by_locator_id_sends_query_param_and_websiteId_header():
+    # Confirmed live: this endpoint 400s ("Required header 'websiteId' is not present") without
+    # the header, even though locatorId is already a query param.
     captured = {}
 
     async def fake_request(method, url, **kwargs):
         captured["url"] = url
         captured["params"] = kwargs["params"]
+        captured["headers"] = kwargs["headers"]
         return httpx.Response(200, json={"pageId": "page-1"}, request=httpx.Request(method, url))
 
     client = _client_with_fake_transport(fake_request)
-    result = await client.get_page_by_locator_id("loc-1")
+    result = await client.get_page_by_locator_id("site-1", "loc-1")
 
     assert captured["url"] == "https://api-dev.automationhq.ai/ahq-asset-services/rest/api/locators/byLocatorId"
     assert captured["params"] == {"locatorId": "loc-1"}
+    assert captured["headers"]["websiteId"] == "site-1"
     assert result == {"pageId": "page-1"}
 
 
@@ -218,16 +234,23 @@ async def test_apply_locator_strategy_keeps_existing_strategies_as_fallback():
         return httpx.Response(200, json={"message": "Locator updated successfully"}, request=httpx.Request(method, url))
 
     client = _client_with_fake_transport(fake_request)
-    new_strategy = {"locateBy": "css", "locatorValue": "[data-testid='env-dev']"}
+    # Candidate shape as heal_locator actually returns it — includes a "confidence" score that
+    # must be stripped before it reaches the backend's LocationStrategy shape.
+    new_strategy = {"locateBy": "css", "locatorValue": "[data-testid='env-dev']", "confidence": 0.92}
     result = await client.apply_locator_strategy("site-1", "loc-1", new_strategy)
 
     assert captured["method"] == "PUT"
     assert captured["url"] == "https://api-dev.automationhq.ai/ahq-asset-services/rest/api/websites/site-1/pages/page-1/locator/loc-1"
     assert captured["json"]["locateBy"] == "css"
     assert captured["json"]["locatorValue"] == "[data-testid='env-dev']"
+    # New strategy MUST be first: PageService.normalizeStrategySelection marks every
+    # same-locateBy-TYPE entry selected=true (it can't distinguish by value), and
+    # ActionLibraryServices.getElementByWithFallback then picks whichever selected entry is
+    # array-first as primary while excluding every OTHER selected=true entry from its fallback
+    # pool — so anything appended after a same-type strategy is never actually tried.
     assert captured["json"]["locationStrategies"] == [
-        {"locateBy": "css", "locatorValue": ".ant-select-item-option-content", "selected": False},
         {"locateBy": "css", "locatorValue": "[data-testid='env-dev']", "selected": True},
+        {"locateBy": "css", "locatorValue": ".ant-select-item-option-content", "selected": False},
     ]
     assert result == {"message": "Locator updated successfully"}
 

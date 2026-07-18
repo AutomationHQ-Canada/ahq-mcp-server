@@ -82,13 +82,13 @@ async def _login(page, credentials: dict) -> None:
     await page.wait_for_load_state("networkidle", timeout=15_000)
 
 
-async def heal_locator(asset_client, locator_id: str, credentials: dict = None, hosted: bool = False) -> dict:
+async def heal_locator(asset_client, locator_id: str, website_id: str, credentials: dict = None, hosted: bool = False) -> dict:
     """
     Propose-only: re-crawls the broken locator's live page and returns ranked replacement
     selector candidates. Never writes anything — apply_locator_fix (a separate tool, backed by
     AssetClient.apply_locator_strategy) is the only path that changes a stored locator.
     """
-    page_doc = await asset_client.get_page_by_locator_id(locator_id)
+    page_doc = await asset_client.get_page_by_locator_id(website_id, locator_id)
     locator = next((l for l in (page_doc.get("locators") or []) if l.get("locatorId") == locator_id), None)
     if locator is None:
         return {"error": f"Locator {locator_id} was not found on its own page — it may already have been deleted or archived."}

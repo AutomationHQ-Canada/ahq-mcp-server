@@ -282,9 +282,10 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "locator_id": {"type": "string"},
+                "website_id": {"type": "string"},
                 "credentials": {"type": "object", "properties": {"username": {"type": "string"}, "password": {"type": "string"}}, "description": "Optional — supply if the page requires login to view the element"},
             },
-            "required": ["locator_id"],
+            "required": ["locator_id", "website_id"],
         },
     ),
     Tool(
@@ -775,7 +776,8 @@ async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: boo
         return await clients.asset.list_broken_locators()
     if name == "heal_locator":
         return await _heal_locator(
-            clients.asset, args["locator_id"], credentials=args.get("credentials"), hosted=is_hosted,
+            clients.asset, args["locator_id"], args["website_id"],
+            credentials=args.get("credentials"), hosted=is_hosted,
         )
     if name == "apply_locator_fix":
         return await clients.asset.apply_locator_strategy(

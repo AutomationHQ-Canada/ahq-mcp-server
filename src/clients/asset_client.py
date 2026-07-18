@@ -208,20 +208,40 @@ class AssetClient(BaseAhqClient):
         # LocatorController's aggregated dashboard view — every Locator across every page with
         # broken == true (set by the executor's brokenLocatorReporter callback once every
         # locationStrategy fails during a real execution). Already live on the backend; this is
-        # the first tool to actually call it.
+        # the first tool to actually call it. Confirmed live: the response is
+        # {"items": [...], "status": 200, "count": N} — NOT {"content": [...]} like the other
+        # paginated list_* endpoints in this client.
         result = await self.get("/rest/api/locators/broken")
-        return result if isinstance(result, list) else result.get("content", result)
+        return result if isinstance(result, list) else result.get("items", result)
 
-    async def get_page_by_locator_id(self, locator_id: str) -> dict:
-        return await self.get("/rest/api/locators/byLocatorId", params={"locatorId": locator_id})
+    async def get_page_by_locator_id(self, website_id: str, locator_id: str) -> dict:
+        # Confirmed live: this endpoint 400s ("Required header 'websiteId' is not present") without
+        # the same websiteId header get_page_by_url already sends — the query param alone isn't enough.
+        return await self.get(
+            "/rest/api/locators/byLocatorId",
+            params={"locatorId": locator_id},
+            extra_headers={"websiteId": website_id},
+        )
 
     async def apply_locator_strategy(self, website_id: str, locator_id: str, new_strategy: dict) -> dict:
         # Self-healing apply path. Deliberately does NOT call update_locator above — that method
         # always collapses locationStrategies to a single entry, which would destroy every
-        # existing fallback strategy. Here the new strategy becomes primary (selected=True) and
-        # every previous strategy is demoted (selected=False) but KEPT, so a locator only ever
-        # gains resilience over time instead of losing history on each heal.
-        page = await self.get_page_by_locator_id(locator_id)
+        # existing fallback strategy. Here the new strategy is kept alongside every existing one
+        # (never discarded) — but it MUST be placed FIRST in the array, not appended.
+        #
+        # Confirmed live against PageService.normalizeStrategySelection (ahq-asset-services): it
+        # marks a strategy "selected" by matching locateBy TYPE only ("css" == "css"), not the
+        # actual locatorValue — so two same-type strategies both end up selected=true regardless
+        # of what this client sends. ActionLibraryServices.getElementByWithFallback then breaks
+        # in a specific way: getSelectedLocationStrategy() takes stream().filter(selected).
+        # findFirst() (array order wins among selected=true entries), while
+        # getFallbackLocationStrategies() excludes every selected=true entry from the fallback
+        # pool. Net effect: whichever same-type strategy sits FIRST in the array is the only one
+        # ever tried — anything after it is neither the chosen primary nor an eligible fallback,
+        # i.e. permanently unreachable. Putting the new (already validated) strategy first is the
+        # only way, without an ahq-asset-services change, to guarantee it's actually exercised at
+        # execution time.
+        page = await self.get_page_by_locator_id(website_id, locator_id)
         page_id = page.get("pageId")
         locator = next((l for l in (page.get("locators") or []) if l.get("locatorId") == locator_id), None)
         if locator is None:
@@ -231,14 +251,21 @@ class AssetClient(BaseAhqClient):
             )
 
         kept = [{**s, "selected": False} for s in (locator.get("locationStrategies") or [])]
-        strategies = kept + [{**new_strategy, "selected": True}]
+        # Whitelist fields — heal_locator's candidates carry a "confidence" score alongside
+        # locateBy/locatorValue that has no place in the backend's LocationStrategy shape.
+        clean_new_strategy = {
+            "locateBy": new_strategy.get("locateBy", ""),
+            "locatorValue": new_strategy.get("locatorValue", ""),
+            "selected": True,
+        }
+        strategies = [clean_new_strategy] + kept
 
         body = {
             "locatorId": locator_id,
             "locatorName": locator.get("locatorName"),
             "locatorType": locator.get("locatorType"),
-            "locateBy": new_strategy.get("locateBy", ""),
-            "locatorValue": new_strategy.get("locatorValue", ""),
+            "locateBy": clean_new_strategy["locateBy"],
+            "locatorValue": clean_new_strategy["locatorValue"],
             "locationStrategies": strategies,
         }
         return await self.put(f"/rest/api/websites/{website_id}/pages/{page_id}/locator/{locator_id}", json=body)

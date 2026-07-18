@@ -665,10 +665,27 @@ tools close that gap without any backend changes:
   **exactly one** element (`count() == 1` — a selector matching several elements is not a fix).
   Writes nothing.
 - `apply_locator_fix` → `AssetClient.apply_locator_strategy()`. Adds the chosen candidate as the
-  new primary (`selected: True`) strategy and demotes every existing strategy to
-  `selected: False` — **never deletes them**. This deliberately does NOT reuse `update_locator`,
-  which always collapses `locationStrategies` down to a single entry and would destroy the
-  fallback history; a future session must not "simplify" the two back together.
+  new primary strategy — **never deletes any existing strategy**. This deliberately does NOT
+  reuse `update_locator`, which always collapses `locationStrategies` down to a single entry and
+  would destroy the fallback history; a future session must not "simplify" the two back together.
+
+**Confirmed live: the new strategy MUST be placed FIRST in `locationStrategies`, not appended.**
+`PageService.normalizeStrategySelection` (`ahq-asset-services`) marks a strategy `selected` by
+matching `locateBy` TYPE only ("css" == "css"), never the actual `locatorValue` — so two
+same-type strategies (the overwhelmingly common case: an old broken CSS selector and a new
+working CSS selector) both end up `selected: true` regardless of what this client sends.
+`ActionLibraryServices.getElementByWithFallback` then breaks in a specific way:
+`getSelectedLocationStrategy()` is `stream().filter(selected).findFirst()` (array order wins among
+`selected=true` entries), while `getFallbackLocationStrategies()` excludes every `selected=true`
+entry from the fallback pool. Net effect: whichever same-type strategy sits first in the array is
+the *only* one ever tried at execution time — anything placed after it is neither the chosen
+primary nor an eligible fallback, i.e. permanently unreachable. Verified live end-to-end against
+`https://the-internet.herokuapp.com/login`: appending the new strategy last left BOTH entries
+marked `selected: true` with the broken one still first (unreachable fix); putting the new one
+first made it the entry `getSelectedLocationStrategy` actually returns. This is a real
+`ahq-asset-services` limitation (it should key selection on `(locateBy, locatorValue)`, not
+`locateBy` alone) — worth a small, separate PR there someday, but out of Track 1's "no backend
+changes" scope, and worked around client-side by ordering alone for now.
 
 This is the MVP track from the self-healing locators plan — the durable, license-gated version
 (new `RemediationSuggestion`/`RemediationCategory` entities, DOM snapshot capture, an approval API
