@@ -223,7 +223,11 @@ TOOLS = [
                         "type": "object",
                         "properties": {
                             "locatorName": {"type": "string", "description": "Human-readable label, e.g. 'Email input'"},
-                            "locatorType": {"type": "string", "description": "Element type, e.g. input, button"},
+                            "locatorType": {
+                                "type": "string",
+                                "description": "Element type — one of the platform's real values (case-sensitive, all-caps): TEXTBOX, BUTTON, HYPERLINK, STATIC_TEXT, TABLE, DROP_DOWN, RADIO_BUTTON, CHECK_BOX, OTHER. A value outside this set (e.g. lowercase 'input'/'button') is stored as-is but the UI's Type dropdown won't recognize it and falls back to a plain, icon-less text display instead of a real selection.",
+                                "enum": ["TEXTBOX", "BUTTON", "HYPERLINK", "STATIC_TEXT", "TABLE", "DROP_DOWN", "RADIO_BUTTON", "CHECK_BOX", "OTHER"],
+                            },
                             "locationStrategies": {
                                 "type": "array",
                                 "description": "One or more locating strategies for this element, in priority order",
@@ -257,7 +261,11 @@ TOOLS = [
                 "page_id": {"type": "string"},
                 "locator_id": {"type": "string"},
                 "locator_name": {"type": "string"},
-                "locator_type": {"type": "string"},
+                "locator_type": {
+                    "type": "string",
+                    "description": "One of the platform's real values (case-sensitive, all-caps): TEXTBOX, BUTTON, HYPERLINK, STATIC_TEXT, TABLE, DROP_DOWN, RADIO_BUTTON, CHECK_BOX, OTHER. Any other value is stored as-is but the UI's Type dropdown won't recognize it.",
+                    "enum": ["TEXTBOX", "BUTTON", "HYPERLINK", "STATIC_TEXT", "TABLE", "DROP_DOWN", "RADIO_BUTTON", "CHECK_BOX", "OTHER"],
+                },
                 "locate_by": {"type": "string", "description": "css, xpath, id, ..."},
                 "locator_value": {"type": "string"},
             },
