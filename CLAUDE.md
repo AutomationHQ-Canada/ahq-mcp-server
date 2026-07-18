@@ -612,6 +612,7 @@ asking to "test my API" or "run a load test" means the mtaf-core tools below, no
 | `crawl_url` | Discover pages + locators from a live URL |
 | `create_website` / `create_page` / `add_locators` | Build UI component library |
 | `search_step_templates` / `list_step_templates` / `get_step_template` | Resolve a real `templateId` before writing any test step |
+| `scan_broken_locators` / `heal_locator` / `apply_locator_fix` | Self-healing locators: find what's already flagged broken, propose a ranked replacement selector (propose-only, re-crawls with Playwright), then apply the approved one (kept as new primary, old strategies demoted not deleted) |
 | `list_epics` / `create_epic` / `list_stories` / `create_story` | Resolve or create the `story_id` a test script requires (`create_epic`/`create_story` added 2026-07-10 — previously dead code with no tool wired up; `list_stories` previously had no tool at all) |
 | `create_test_script` | Add a new test script — `website_id`/`story_id` are now hard-required and validated locally before the API call (see "API Field Reference" above) |
 | `list_recorded_scripts` / `get_recorded_script` / `promote_recorded_script` | Recorder-extension captures; promote turns one into a real Test Script (`story_id` required first time — see Recorded Scripts section) |
@@ -642,6 +643,38 @@ As of 2026-07-12 every §13 backlog slice is built (9a Recorded Script + Common 
 9b Archive Manager, 9c Project Roles, 9d Version Control v1, 9e Tunnel, 9f plugin packaging) —
 still missing: conflict resolution (9d-ii), drift-detection CI (9h, needs GitHub), TestBot
 creation, and a real execution-config/environments source.
+
+## Self-healing locators (`scan_broken_locators` / `heal_locator` / `apply_locator_fix`)
+
+The platform already has a real self-healing subsystem that this repo previously ignored:
+`Locator.locationStrategies` (ahq-data-commons) already models multiple ranked candidate
+selectors per element, `ActionLibraryServices.getElementByWithFallback()` (ahq-actions-commons,
+shared by both cloud and local-agent execution) already tries every strategy before failing, and
+a failure already POSTs to `ahq-asset-services`' AI Brain (`/report-broken`), which already marks
+the `Locator.broken = true` and creates a `MaintenanceAlert`. `GET /rest/api/locators/broken` was
+already live and simply unused by any tool until now.
+
+What was missing was real candidate *generation* — nothing re-scanned the live DOM. These three
+tools close that gap without any backend changes:
+
+- `scan_broken_locators` → `AssetClient.list_broken_locators()`, the existing endpoint above.
+- `heal_locator` (`src/tools/heal_locator.py`) — propose-only. Re-crawls the locator's page with
+  Playwright (same engine as `crawl_url`), extracts ranked candidate selectors per element
+  (id → data-testid → aria-label → name → class fallback), scores them against the broken
+  locator's own `locatorName` via string similarity, and keeps only candidates that resolve to
+  **exactly one** element (`count() == 1` — a selector matching several elements is not a fix).
+  Writes nothing.
+- `apply_locator_fix` → `AssetClient.apply_locator_strategy()`. Adds the chosen candidate as the
+  new primary (`selected: True`) strategy and demotes every existing strategy to
+  `selected: False` — **never deletes them**. This deliberately does NOT reuse `update_locator`,
+  which always collapses `locationStrategies` down to a single entry and would destroy the
+  fallback history; a future session must not "simplify" the two back together.
+
+This is the MVP track from the self-healing locators plan — the durable, license-gated version
+(new `RemediationSuggestion`/`RemediationCategory` entities, DOM snapshot capture, an approval API
+in `ahq-asset-services`) is scoped in `AI_SMART_SCANNER_REMEDIATION.md`
+(`ahq-background-v2-services`) as a follow-up; once that API exists, these three tools should be
+re-pointed at it instead of the direct-PUT approach used here.
 
 ## Never guess a UI locator (2026-07-16)
 

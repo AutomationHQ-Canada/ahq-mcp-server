@@ -202,3 +202,43 @@ class AssetClient(BaseAhqClient):
             "locationStrategies": [{"locateBy": locate_by, "locatorValue": locator_value, "selected": True}],
         }
         return await self.put(f"/rest/api/websites/{website_id}/pages/{page_id}/locator/{locator_id}", json=body)
+
+    # --- Self-healing locators ---
+    async def list_broken_locators(self) -> list:
+        # LocatorController's aggregated dashboard view — every Locator across every page with
+        # broken == true (set by the executor's brokenLocatorReporter callback once every
+        # locationStrategy fails during a real execution). Already live on the backend; this is
+        # the first tool to actually call it.
+        result = await self.get("/rest/api/locators/broken")
+        return result if isinstance(result, list) else result.get("content", result)
+
+    async def get_page_by_locator_id(self, locator_id: str) -> dict:
+        return await self.get("/rest/api/locators/byLocatorId", params={"locatorId": locator_id})
+
+    async def apply_locator_strategy(self, website_id: str, locator_id: str, new_strategy: dict) -> dict:
+        # Self-healing apply path. Deliberately does NOT call update_locator above — that method
+        # always collapses locationStrategies to a single entry, which would destroy every
+        # existing fallback strategy. Here the new strategy becomes primary (selected=True) and
+        # every previous strategy is demoted (selected=False) but KEPT, so a locator only ever
+        # gains resilience over time instead of losing history on each heal.
+        page = await self.get_page_by_locator_id(locator_id)
+        page_id = page.get("pageId")
+        locator = next((l for l in (page.get("locators") or []) if l.get("locatorId") == locator_id), None)
+        if locator is None:
+            raise ValueError(
+                f"Locator {locator_id} was not found on its own page — it may already have been "
+                "deleted or archived."
+            )
+
+        kept = [{**s, "selected": False} for s in (locator.get("locationStrategies") or [])]
+        strategies = kept + [{**new_strategy, "selected": True}]
+
+        body = {
+            "locatorId": locator_id,
+            "locatorName": locator.get("locatorName"),
+            "locatorType": locator.get("locatorType"),
+            "locateBy": new_strategy.get("locateBy", ""),
+            "locatorValue": new_strategy.get("locatorValue", ""),
+            "locationStrategies": strategies,
+        }
+        return await self.put(f"/rest/api/websites/{website_id}/pages/{page_id}/locator/{locator_id}", json=body)

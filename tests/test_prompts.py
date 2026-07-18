@@ -4,6 +4,7 @@ EXPECTED_SKILLS = {
     "ahq-dashboard",
     "ahq-gen-from-requirements",
     "ahq-gen-from-url",
+    "ahq-heal-locators",
     "ahq-run-bot",
     "ahq-schedule-bot",
     "ahq-test-architecture",

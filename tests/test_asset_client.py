@@ -165,6 +165,86 @@ async def test_update_locator_sends_correct_path_and_body():
     assert result == {"message": "Locator updated successfully"}
 
 
+async def test_list_broken_locators_unwraps_paginated_content():
+    async def fake_request(method, url, **kwargs):
+        assert method == "GET"
+        assert url == "https://api-dev.automationhq.ai/ahq-asset-services/rest/api/locators/broken"
+        return httpx.Response(200, json={"content": [{"locatorId": "loc-1", "broken": True}]}, request=httpx.Request(method, url))
+
+    client = _client_with_fake_transport(fake_request)
+    result = await client.list_broken_locators()
+
+    assert result == [{"locatorId": "loc-1", "broken": True}]
+
+
+async def test_get_page_by_locator_id_sends_expected_query_param():
+    captured = {}
+
+    async def fake_request(method, url, **kwargs):
+        captured["url"] = url
+        captured["params"] = kwargs["params"]
+        return httpx.Response(200, json={"pageId": "page-1"}, request=httpx.Request(method, url))
+
+    client = _client_with_fake_transport(fake_request)
+    result = await client.get_page_by_locator_id("loc-1")
+
+    assert captured["url"] == "https://api-dev.automationhq.ai/ahq-asset-services/rest/api/locators/byLocatorId"
+    assert captured["params"] == {"locatorId": "loc-1"}
+    assert result == {"pageId": "page-1"}
+
+
+async def test_apply_locator_strategy_keeps_existing_strategies_as_fallback():
+    # The whole point of the self-healing apply path: it must never behave like update_locator
+    # (which always collapses to a single strategy) — every prior strategy stays, demoted, not
+    # discarded.
+    captured = {}
+
+    async def fake_request(method, url, **kwargs):
+        if method == "GET":
+            return httpx.Response(200, json={
+                "pageId": "page-1",
+                "locators": [{
+                    "locatorId": "loc-1",
+                    "locatorName": "Environment Option - dev",
+                    "locatorType": "option",
+                    "locationStrategies": [
+                        {"locateBy": "css", "locatorValue": ".ant-select-item-option-content", "selected": True},
+                    ],
+                }],
+            }, request=httpx.Request(method, url))
+        captured["method"] = method
+        captured["url"] = url
+        captured["json"] = kwargs["json"]
+        return httpx.Response(200, json={"message": "Locator updated successfully"}, request=httpx.Request(method, url))
+
+    client = _client_with_fake_transport(fake_request)
+    new_strategy = {"locateBy": "css", "locatorValue": "[data-testid='env-dev']"}
+    result = await client.apply_locator_strategy("site-1", "loc-1", new_strategy)
+
+    assert captured["method"] == "PUT"
+    assert captured["url"] == "https://api-dev.automationhq.ai/ahq-asset-services/rest/api/websites/site-1/pages/page-1/locator/loc-1"
+    assert captured["json"]["locateBy"] == "css"
+    assert captured["json"]["locatorValue"] == "[data-testid='env-dev']"
+    assert captured["json"]["locationStrategies"] == [
+        {"locateBy": "css", "locatorValue": ".ant-select-item-option-content", "selected": False},
+        {"locateBy": "css", "locatorValue": "[data-testid='env-dev']", "selected": True},
+    ]
+    assert result == {"message": "Locator updated successfully"}
+
+
+async def test_apply_locator_strategy_raises_when_locator_missing_from_page():
+    async def fake_request(method, url, **kwargs):
+        return httpx.Response(200, json={"pageId": "page-1", "locators": []}, request=httpx.Request(method, url))
+
+    client = _client_with_fake_transport(fake_request)
+
+    try:
+        await client.apply_locator_strategy("site-1", "loc-missing", {"locateBy": "css", "locatorValue": "#x"})
+        assert False, "expected ValueError"
+    except ValueError as e:
+        assert "loc-missing" in str(e)
+
+
 async def test_add_locators_does_not_override_explicit_locateBy():
     captured = {}
 

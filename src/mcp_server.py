@@ -18,6 +18,7 @@ from src.prompts import get_skill_prompt, list_skill_prompts
 from src.schema.asset_kinds import VALIDATORS, format_validation_error, RunExecutionConfiguration
 from src.tools.crawl_url import crawl_url as _crawl_url
 from src.tools.extract_requirements import extract_requirements as _extract_requirements
+from src.tools.heal_locator import heal_locator as _heal_locator
 
 server = Server("ahq-mcp-server")
 
@@ -262,6 +263,54 @@ TOOLS = [
             },
             "required": ["website_id", "page_id", "locator_id", "locator_name", "locator_type", "locate_by", "locator_value"]
         }
+    ),
+
+    # Self-healing locators — detect, propose a fix for, and apply a fix to a locator whose
+    # selectors stopped resolving during a real execution.
+    Tool(name="scan_broken_locators", description="List locators the platform has already flagged as broken — every location strategy failed during a real execution (the same signal behind AI Brain's maintenance alerts). Call this before heal_locator, rather than guessing which locator needs attention.", inputSchema={"type": "object", "properties": {}}),
+    Tool(
+        name="heal_locator",
+        description=(
+            "Re-crawl a broken locator's live page with a headless browser and propose ranked "
+            "replacement selector candidates — PROPOSE ONLY, nothing is changed yet. This is "
+            "crawl_url's discovery mechanism aimed at one specific stale locator instead of a "
+            "whole site. Only candidates that resolve to EXACTLY ONE element are returned. Follow "
+            "up with apply_locator_fix once the user picks a candidate (or none, if the results "
+            "look wrong)."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "locator_id": {"type": "string"},
+                "credentials": {"type": "object", "properties": {"username": {"type": "string"}, "password": {"type": "string"}}, "description": "Optional — supply if the page requires login to view the element"},
+            },
+            "required": ["locator_id"],
+        },
+    ),
+    Tool(
+        name="apply_locator_fix",
+        description=(
+            "Apply a candidate strategy from heal_locator's output to a locator. The new strategy "
+            "becomes primary; every existing strategy is KEPT as a fallback, never discarded — "
+            "this never silently overwrites a locator's history, so a bad fix can always fall "
+            "back to what worked before."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "locator_id": {"type": "string"},
+                "website_id": {"type": "string"},
+                "chosen_strategy": {
+                    "type": "object",
+                    "properties": {
+                        "locateBy": {"type": "string", "description": "css, xpath, id, ..."},
+                        "locatorValue": {"type": "string"},
+                    },
+                    "required": ["locateBy", "locatorValue"],
+                },
+            },
+            "required": ["locator_id", "website_id", "chosen_strategy"],
+        },
     ),
 
     # Test scripts
@@ -721,6 +770,16 @@ async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: boo
         return await clients.asset.update_locator(
             args["website_id"], args["page_id"], args["locator_id"],
             args["locator_name"], args["locator_type"], args["locate_by"], args["locator_value"],
+        )
+    if name == "scan_broken_locators":
+        return await clients.asset.list_broken_locators()
+    if name == "heal_locator":
+        return await _heal_locator(
+            clients.asset, args["locator_id"], credentials=args.get("credentials"), hosted=is_hosted,
+        )
+    if name == "apply_locator_fix":
+        return await clients.asset.apply_locator_strategy(
+            args["website_id"], args["locator_id"], args["chosen_strategy"],
         )
 
     # Test scripts
