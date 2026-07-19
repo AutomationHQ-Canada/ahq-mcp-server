@@ -189,7 +189,14 @@ async def _crawl(url: str, credentials: dict, max_pages: int, hosted: bool) -> d
 
             try:
                 page = await context.new_page()
-                await page.goto(current_url, wait_until="networkidle", timeout=NETWORK_IDLE_TIMEOUT + 20_000)
+                # domcontentloaded is the hard requirement — networkidle is best-effort only.
+                # A page that keeps a persistent connection open (websocket/long-polling) never
+                # goes network-idle, which would otherwise block the crawl on that page forever.
+                await page.goto(current_url, wait_until="domcontentloaded", timeout=NETWORK_IDLE_TIMEOUT + 20_000)
+                try:
+                    await page.wait_for_load_state("networkidle", timeout=NETWORK_IDLE_TIMEOUT)
+                except Exception:
+                    pass
                 await page.wait_for_timeout(1_000)
 
                 title = await page.title()

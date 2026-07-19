@@ -20,11 +20,10 @@ Total time: ~10 minutes. Every step below was validated end-to-end on Windows on
 |---|---|---|
 | Claude Code v2+ | `claude --version` | https://claude.com/claude-code |
 | `uv` on PATH | `uv --version` | Windows: `winget install astral-sh.uv` · macOS/Linux: `curl -LsSf https://astral.sh/uv/install.sh \| sh` — no Python install needed, uv brings its own |
-| GitHub access to `AutomationHQ-Canada` | `gh auth status` | `gh auth login` — the repo is private, so your GitHub account must be in the org |
 | An AHQ **ORGANIZATION** API token | — | AHQ UI → Administration → Settings → API Tokens (ask your admin if you can't create one) |
 
-> If `/plugin marketplace add` fails with a git auth error in Step 1, run `gh auth setup-git`
-> once in a terminal and retry.
+> The `ahq-mcp-server` repo is public, so `/plugin marketplace add` in Step 1 works with no
+> GitHub login required. If it still fails with a git error, install `git` and retry.
 
 ## Step 1 — Add the marketplace
 
@@ -147,7 +146,7 @@ read that message first, it usually IS the fix.
 
 | Symptom | Cause / fix |
 |---|---|
-| `marketplace add` fails with auth/clone error | `gh auth setup-git`, then retry. Your GitHub account must have access to the private repo. |
+| `marketplace add` fails with a clone error | The repo is public, so this is usually just a missing/misconfigured local `git` install — install `git`, then retry. |
 | Tool errors say `ahq-mcp-server is not configured: ... is empty` | The `.env` is missing, in the wrong folder, or missing a value — the message names the variable and the expected file path. Fix, then `/reload-plugins`. |
 | Tool errors say `Got the web frontend's HTML instead of an API response` | The gateway URL is normally decoded from your token automatically. This means either your token predates the `urlDetails` claim (add `AHQ_BASE_URL` to `.env`, pointed at the API gateway, e.g. `https://api-dev.automationhq.ai`, never the web UI) or an `AHQ_BASE_URL` override you added yourself points at the web UI — remove or fix it. |
 | `/mcp` shows `ahq-mcp-server` **failed** | Usually `uv` missing from PATH (`uv --version` to check; restart the terminal/session after installing it). Verify the server itself with: `uv run --project <plugin folder> python -c "from src.mcp_server import TOOLS; print(len(TOOLS))"` → must print `121`. |
