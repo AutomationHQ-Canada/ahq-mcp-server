@@ -19,6 +19,14 @@ version history: `D:\MCP\AHQ_MCP_SERVER_MASTER_DESIGN.md` §14.
 - Gateway URL: `https://api-dev.automationhq.ai` (NOT `https://dev.automationhq.ai`)
 - Org token type: `ORGANIZATION` — signed with a different secret than user JWTs
 - `.env` must never be committed
+- **`AHQ_BASE_URL` is now optional in `.env` (2026-07-19)**: `AhqCredentials.from_settings`
+  (stdio mode) resolves `base_url` from the token's own `urlDetails.baseUrl` claim first via
+  `base_url_from_claims`, same as hosted mode's `from_headers` already did — `AHQ_BASE_URL` is
+  only a fallback for a token issued before that claim existed. `org_id` was already
+  token-derived; `base_url` now is too, `project_id` is the only credential left with no
+  in-token equivalent. `_require_stdio_config`'s fail-fast check now reads the *resolved*
+  `DEFAULT_BUNDLE.asset._credentials.base_url`, not the raw env var, so it only fails if
+  neither the token nor `.env` produce one.
 
 ## Hosted mode authentication (Slice 9m, 2026-07-14)
 

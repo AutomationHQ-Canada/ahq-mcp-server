@@ -92,10 +92,9 @@ uv run playwright install chromium
 > The very first session start after installing/updating takes a little longer while `uv`
 > resolves and installs dependencies; every start after that is instant (cached).
 
-Your `.env` needs exactly three values:
+Your `.env` needs two values:
 
 ```
-AHQ_BASE_URL=https://api-dev.automationhq.ai
 AHQ_API_TOKEN=<your ORGANIZATION token from Administration -> Settings -> API Tokens>
 AHQ_PROJECT_ID=<the UUID of the project to work in>
 ```
@@ -103,9 +102,12 @@ AHQ_PROJECT_ID=<the UUID of the project to work in>
 > **Where to find `AHQ_PROJECT_ID`:** open the AHQ web UI and enter your project — the browser
 > URL is `dev.automationhq.ai/<orgId>/<projectId>/...`; the **second** UUID is the project ID.
 >
-> **Note:** `AHQ_BASE_URL` is the **API gateway** (`api-dev.automationhq.ai`), NOT the web UI
-> (`dev.automationhq.ai`). Your org ID is decoded from the token automatically — do not add it.
-> The `LLM_API_KEY` line in `.env.example` is currently unused — leave it or delete it.
+> **Note:** Your org ID **and** the API gateway URL are both decoded from the token automatically
+> (from its `organizationId` and `urlDetails.baseUrl` claims) — do not add either. `AHQ_BASE_URL`
+> is optional now and only used as a fallback for a token that predates the `urlDetails` claim;
+> set it (to the **API gateway**, e.g. `https://api-dev.automationhq.ai` — NOT the web UI) only if
+> `/mcp` reports the token has no usable base URL. The `LLM_API_KEY` line in `.env.example` is
+> currently unused — leave it or delete it.
 
 ## Step 4 — Verify
 
@@ -147,7 +149,7 @@ read that message first, it usually IS the fix.
 |---|---|
 | `marketplace add` fails with auth/clone error | `gh auth setup-git`, then retry. Your GitHub account must have access to the private repo. |
 | Tool errors say `ahq-mcp-server is not configured: ... is empty` | The `.env` is missing, in the wrong folder, or missing a value — the message names the variable and the expected file path. Fix, then `/reload-plugins`. |
-| Tool errors say `Got the web frontend's HTML instead of an API response` | `AHQ_BASE_URL` points at the web UI — set it to the API gateway (`https://api-dev.automationhq.ai`). |
+| Tool errors say `Got the web frontend's HTML instead of an API response` | The gateway URL is normally decoded from your token automatically. This means either your token predates the `urlDetails` claim (add `AHQ_BASE_URL` to `.env`, pointed at the API gateway, e.g. `https://api-dev.automationhq.ai`, never the web UI) or an `AHQ_BASE_URL` override you added yourself points at the web UI — remove or fix it. |
 | `/mcp` shows `ahq-mcp-server` **failed** | Usually `uv` missing from PATH (`uv --version` to check; restart the terminal/session after installing it). Verify the server itself with: `uv run --project <plugin folder> python -c "from src.mcp_server import TOOLS; print(len(TOOLS))"` → must print `121`. |
 | Tools work but `/ahq` skills don't appear | Restart the Claude Code session — skills register at startup. Full names are namespaced: `/ahq-skills:ahq-dashboard`. |
 | Every AHQ call returns 401 | Wrong/expired token in `.env`, or you used a personal JWT instead of an ORGANIZATION token. |

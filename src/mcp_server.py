@@ -614,11 +614,17 @@ def _require_stdio_config() -> None:
     Fail fast (per tool call) when stdio mode is missing its .env config. Without this, an empty
     token + empty/wrong base URL makes every tool "succeed" against the web frontend's HTML —
     a 10-minute misdiagnosis instead of a 10-second fix (hit live, first teammate install).
+
+    base_url is checked on the RESOLVED credentials (DEFAULT_BUNDLE's, already built via
+    AhqCredentials.from_settings) rather than the raw AHQ_BASE_URL env var directly — the token's
+    own urlDetails.baseUrl claim now resolves base_url the same way hosted mode already did, so
+    AHQ_BASE_URL in .env is only needed as a fallback for a token without that claim.
     """
     from src.config.ahq_services import REPO_ROOT
 
+    resolved_base_url = DEFAULT_BUNDLE.asset._credentials.base_url
     missing = [k for k, v in (
-        ("AHQ_BASE_URL", settings.ahq_base_url),
+        ("AHQ_BASE_URL", resolved_base_url),
         ("AHQ_API_TOKEN", settings.ahq_api_token),
         ("AHQ_PROJECT_ID", settings.ahq_project_id),
     ) if not v]
@@ -1300,7 +1306,7 @@ async def main():
         # showing an opaque "server failed to start"), but say it loudly once up front.
         print(f"[ahq-mcp-server] NOT CONFIGURED: {e}", file=sys.stderr)
     else:
-        print(f"[ahq-mcp-server] base_url={settings.ahq_base_url} "
+        print(f"[ahq-mcp-server] base_url={DEFAULT_BUNDLE.asset._credentials.base_url} "
               f"project={settings.ahq_project_id}", file=sys.stderr)
         try:
             me = await DEFAULT_BUNDLE.asset.validate_token()
