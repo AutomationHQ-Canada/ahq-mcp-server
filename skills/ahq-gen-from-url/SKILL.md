@@ -105,6 +105,7 @@ The user has a deployed web application and wants test scripts generated automat
 - Never fabricate `locateBy`/`locatorValue` on a `ui-locator` parameter — pass only `{"locatorId": "..."}` and let the server enrich it
 - Never write a raw guessed selector (e.g. `input[type='email']`) into a step instead of a real `locatorId` — check `get_page_by_url` for an existing locator first, and if none exists, call `crawl_url` to capture real ones before writing the step
 - Never call `create_test_script` without `website_id` and `story_id` — both are validated locally and rejected if missing; resolve or create a story rather than omitting it
+- **Ask the user which branch the script should land on before creating it** — offer a new branch alongside the real ones from `list_branches`, and pass the answer as `branch_name`. Do not silently default to `main`: it is protected, so a later `commit_branch` returns 403, the edit stays an uncommitted version, and `execute_bot` keeps running the last committed one — the change appears saved but never executes. The same branch is what `execute_bot` needs as `targetBranchName`, so settle it before the bot runs, not after
 - **After any step that can trigger navigation (a submit/sign-in/link click) and before the next
   step that verifies the result (URL check, element check on the new page), insert a wait step** —
   `search_step_templates("Wait")` for `template-id-36` ("Wait for visibility of {{ui-locator}} for

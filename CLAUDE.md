@@ -472,6 +472,51 @@ class behind the real User Test Step rename incident (2026-07-09).
   `type` required) are all required; `description` max 600. Nesting is rejected server-side: a
   step's `templateId` must not be another Common Function's ID.
 
+### A vault secret protects the script document, NOT the execution report
+
+`{"type": 7, "value": "<secretName>"}` (`create_config_vault_secret` + the "From Secrets" value
+type) keeps the real credential out of the stored test script: the step renders as
+`Enter [vault: gfg_password] for the element: "Password input"` and the plaintext appears nowhere
+in the document. That part works.
+
+The executor, however, resolves the secret and writes the **resolved value** into the execution
+report — confirmed live on a local-agent run:
+
+```
+"testStepName":  "Enter Onkar@123 for the element: \"Password input\" on the page: Login",
+"statusMessage": "Entered value Onkar@123"
+```
+
+So anyone who can read an execution report can read the credential, and the vault buys storage-level
+protection only. Tell users this when they supply a real password rather than letting them assume
+the vault covers the whole lifecycle. (Fixing it belongs in the executor's step-title/status
+rendering, not here — the MCP server never sees the resolved value.)
+
+### Ask which branch a new script lands on — `main` is protected and silently strands edits
+
+`create_test_script`'s `branch_name` defaults to `"main"`, and taking that default is a trap
+rather than a safe choice. `main` is a **protected** branch (`list_branches` -> `protected: true`),
+so `commit_branch("main", ...)` returns
+`403 Direct push to protected branch 'main' is restricted. Use a Pull Request.`
+
+The failure this produces is silent, because the edit itself succeeds. `add_test_steps` returns
+`"Test script updated successfully"`, a subsequent GET shows the new step in place, and
+`versionCount` goes to 2 with `commitMessage: null` — but **`execute_bot` runs the last COMMITTED
+version**, which is still version 1. Confirmed live: a `"Wait for 10 seconds"` step inserted
+between a sign-in click and a `Verify current URL` step never appeared in the execution report at
+all (6 step results for a 7-step script), and the run failed on precisely the step the wait was
+meant to fix. Nothing in either the edit response or the report says a version was skipped.
+
+So: **ask the user which branch the script should live on before creating it** — a new branch, or
+one of the real ones from `list_branches` — and pass it as `branch_name`. That same branch is what
+`execute_bot` needs as `targetBranchName`, so deciding it after the script exists means redoing the
+work. To move an existing script onto a branch, `create_branch(..., strategy="FROM_CURRENT",
+script_ids=[id])` forks it across, then `commit_branch` on the new (unprotected) branch.
+
+Note that a commit's `scriptVersionIds` records the version each script was pinned at — check it
+against the script's own `currentVersionId` to confirm the commit actually captured the edit you
+expected rather than an earlier version.
+
 ### Post-navigation race: always wait between a navigating action and its verify step
 
 `"Verify current URL contains path {{expected}}"` (`template-id-117`, `ActionLibraryServices.
