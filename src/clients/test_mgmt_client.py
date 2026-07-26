@@ -94,12 +94,11 @@ class TestMgmtClient(BaseAhqClient):
         return slim
 
     async def list_test_scripts(self, name: str = None) -> list:
-        # This endpoint answers for whatever branch the API token is currently "checked out" to,
-        # and that ambient state moves on its own: the same query minutes apart returned a script
-        # that is a confirmed member of main, then a disjoint set that excluded it and included
-        # scripts main has never had (confirmed live). The `name` filter itself is a fine
-        # case-insensitive substring match — an unexpectedly empty result is the branch scoping,
-        # not the filter. get_scripts_for_branch is the deterministic answer to "what is on X".
+        # `name` is a plain case-insensitive substring match and works as expected. If a script
+        # you just created is missing here, check which PROJECT this client is pointed at before
+        # suspecting the filter or the branch: results are scoped to _credentials.project_id, and
+        # two clients configured from different .env files answer about different projects while
+        # reporting the same org.
         params = dict(_LIST_ALL)
         if name:
             params["name"] = name
