@@ -475,11 +475,51 @@ class TestMgmtClient(BaseAhqClient):
     # A TestStep's `templateId` must reference one of these — there is no static/hardcodable
     # list of action types, since templates include per-org "Common Functions" as well as
     # platform built-ins. Always resolve a real templateId before writing a step.
+    @staticmethod
+    def _slim_template(template: dict) -> dict:
+        """Project a step template down to the fields a caller can actually act on.
+
+        Template listing/search runs once per action while a script is being written, and the
+        raw record is mostly fields nothing downstream reads: full createdBy/updatedBy user
+        objects, create/update timestamps, and templateCategory/projectId/organizationId, which
+        are null on every built-in. Dropping them cuts a typical search response by ~90% with no
+        loss of usable information; get_template still returns the untouched record.
+        """
+        # Absent keys are dropped rather than emitted as null: a null carries no more meaning
+        # than the missing key and still costs tokens in every listing.
+        slim = {
+            key: template[key]
+            for key in ("templateId", "templateTitle", "description", "type")
+            if template.get(key) is not None
+        }
+        # Params are NOT derivable from templateTitle's {{placeholders}} alone — the table-row
+        # templates accept an "action-selector" that never appears in the title.
+        if template.get("params"):
+            slim["params"] = [
+                {
+                    "name": p.get("name"),
+                    "allowed": p.get("allowed"),
+                    "required": bool(p.get("required")),
+                }
+                for p in template["params"]
+            ]
+        for flag in ("ifConditional", "hasSubTestSteps", "encrypted"):
+            if template.get(flag):
+                slim[flag] = True
+        return slim
+
+    @classmethod
+    def _slim_templates(cls, result):
+        if isinstance(result, list):
+            return [cls._slim_template(t) if isinstance(t, dict) else t for t in result]
+        return result
+
     async def list_templates(self, offset: int = 0) -> list:
         result = await self.get(
             f"/rest/api/templates/{self._credentials.project_id}", params={"offset": offset}
         )
-        return result.get("content", result) if isinstance(result, dict) else result
+        result = result.get("content", result) if isinstance(result, dict) else result
+        return self._slim_templates(result)
 
     async def search_templates(self, title: str) -> list:
         # The project-scoped /rest/api/templates/{projectId}/search only returns this org's own
@@ -489,7 +529,9 @@ class TestMgmtClient(BaseAhqClient):
         # endpoint returned real templateIds (e.g. "Navigate" -> 21 results including
         # templateId "template-id-178"). TemplatesController.getSearchedTemplate() (root) merges
         # global built-ins with this org's Common Functions, so it's a strict superset.
-        return await self.get("/rest/api/templates/search", params={"title": title})
+        return self._slim_templates(
+            await self.get("/rest/api/templates/search", params={"title": title})
+        )
 
     async def get_template(self, template_id: str) -> dict:
         return await self.get(f"/rest/api/templates/{template_id}")

@@ -9,6 +9,14 @@ from src.tools.url_guard import validate_public_http_url
 MAX_PAGES = 20
 NETWORK_IDLE_TIMEOUT = 10_000  # ms
 
+
+def _dedup_key(url: str) -> str:
+    """Key for the visited set. A bare origin and its rooted form are one page, and a fragment
+    never identifies a distinct server-rendered page, so both must collapse — otherwise a
+    redirect target or a self-link burns a second slot out of max_pages on the same page."""
+    parsed = urlparse(url)
+    return parsed._replace(path=parsed.path or "/", fragment="").geturl()
+
 # Hosted pods serve many tenants: cap simultaneous headless-Chromium instances so N users
 # crawling at once can't OOM the pod (memory is sized for ~this many browsers, see the Helm
 # values). Waiting callers just queue on the semaphore; the MCP client's own request timeout
@@ -67,27 +75,42 @@ async def _extract_locators(page: Page) -> list[dict]:
     }""")
 
 
+async def _count_matches(page: Page, selector: str, *, is_xpath: bool = False) -> int:
+    try:
+        return await page.locator(f"xpath={selector}" if is_xpath else selector).count()
+    except Exception:
+        return 0
+
+
 async def _validate_locators(page: Page, locators: list[dict]) -> list[dict]:
+    """Keep locators that resolve to EXACTLY ONE element, recording which strategy achieved it.
+
+    Matching at all is not the bar. The extractor falls back to a bare tag selector whenever an
+    element has no id and no usable class — every footer link on saucedemo.com comes back as
+    css "a" — and a `count() > 0` check accepts that happily. A step built from it acts on the
+    first link on the page rather than the intended element, while the crawl reports a 100%
+    resolution rate, so the failure is silent in both directions.
+    """
     valid = []
     for loc in locators:
-        resolved = False
-        try:
-            if loc.get("css"):
-                if await page.locator(loc["css"]).count() > 0:
-                    resolved = True
-        except Exception:
-            pass
+        css_hits = await _count_matches(page, loc["css"]) if loc.get("css") else 0
+        xpath_hits = (
+            await _count_matches(page, loc["xpath"], is_xpath=True) if loc.get("xpath") else 0
+        )
 
-        if not resolved:
-            try:
-                if loc.get("xpath"):
-                    if await page.locator(f"xpath={loc['xpath']}").count() > 0:
-                        resolved = True
-            except Exception:
-                pass
+        if css_hits == 1:
+            loc["preferred"] = "css"
+        elif xpath_hits == 1:
+            loc["preferred"] = "xpath"
+        else:
+            # Neither strategy identifies one element; reporting it as a captured locator
+            # would hand the caller a selector that silently acts on the wrong thing.
+            continue
 
-        if resolved:
-            valid.append(loc)
+        if css_hits != 1:
+            # Explicit so a caller assembling locationStrategies never promotes it to primary.
+            loc["cssAmbiguous"] = True
+        valid.append(loc)
     return valid
 
 
@@ -131,6 +154,7 @@ async def _crawl(url: str, credentials: dict, max_pages: int, hosted: bool) -> d
             raise
         context = await browser.new_context()
 
+        post_login_url = None
         if credentials:
             login_page = await context.new_page()
             await login_page.goto(url, wait_until="networkidle", timeout=30_000)
@@ -171,15 +195,24 @@ async def _crawl(url: str, credentials: dict, max_pages: int, hosted: bool) -> d
                 await login_page.wait_for_load_state("networkidle", timeout=15_000)
             except Exception:
                 pass
+            # Where the login landed is the authenticated entry point, and it has to be crawled
+            # explicitly. Starting the crawl from the caller's original url instead never leaves
+            # the login screen on any app that keeps serving the login form at its pre-auth URL
+            # for an already-signed-in session — confirmed live against saucedemo.com, where
+            # login redirects to /inventory.html but "/" still renders the form, so a
+            # credentialed crawl returned nothing but the three login-page fields.
+            post_login_url = login_page.url
             await login_page.close()
 
         queue = [url]
+        if post_login_url and _dedup_key(post_login_url) != _dedup_key(url):
+            queue.insert(0, post_login_url)
 
         while queue and len(visited) < max_pages:
             current_url = queue.pop(0)
-            if current_url in visited:
+            if _dedup_key(current_url) in visited:
                 continue
-            visited.add(current_url)
+            visited.add(_dedup_key(current_url))
 
             if hosted:
                 blocked = await validate_public_http_url(current_url)
@@ -199,6 +232,12 @@ async def _crawl(url: str, credentials: dict, max_pages: int, hosted: bool) -> d
                     pass
                 await page.wait_for_timeout(1_000)
 
+                # Report where we actually landed, not where we asked to go: add_locators upserts
+                # by page URL, so a redirect (http->https, "/" -> "/home", auth bounce) would
+                # otherwise file the captured locators under a URL that no longer serves them.
+                final_url = page.url
+                visited.add(_dedup_key(final_url))
+
                 title = await page.title()
                 locators = await _extract_locators(page)
                 valid_locators = await _validate_locators(page, locators)
@@ -208,7 +247,7 @@ async def _crawl(url: str, credentials: dict, max_pages: int, hosted: bool) -> d
                 resolution_rate = round(valid / total, 2) if total > 0 else 0.0
 
                 pages_data.append({
-                    "url": current_url,
+                    "url": final_url,
                     "title": title,
                     "locators": valid_locators,
                     "total_found": total,
@@ -223,7 +262,7 @@ async def _crawl(url: str, credentials: dict, max_pages: int, hosted: bool) -> d
                     if (
                         parsed.scheme in ("http", "https")
                         and parsed.netloc == base_domain
-                        and link not in visited
+                        and _dedup_key(link) not in visited
                         and link not in queue
                     ):
                         queue.append(link)
