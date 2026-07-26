@@ -19,7 +19,14 @@ from src.hosted.token_codec import TokenCodec
 # isn't possible — the backstop is that every downstream AHQ call carries the embedded AHQ API
 # token, which the gateway re-validates against Mongo's `tokens` collection on every request;
 # a deleted/revoked AHQ token dies at the caller's next tool call regardless of these TTLs.
-CLIENT_TTL = 90 * 24 * 3600
+# A client_id blob outlives the others on purpose: clients that persist their registration in a
+# deployed artifact (Microsoft 365 Agents Toolkit writes it into the declarative agent's plugin
+# manifest) keep presenting the same one indefinitely, so a short life expires the deployment
+# itself rather than any credential. The blob carries only redirect URIs and client metadata —
+# no AHQ token, which lives in the access token — and each of those URIs already passed
+# redirect_uri_allowed, so its lifetime isn't what bounds access. One year matches the AHQ
+# organization API token's own expiry window.
+CLIENT_TTL = 365 * 24 * 3600
 TXN_TTL = 10 * 60
 CODE_TTL = 5 * 60
 ACCESS_TTL = 8 * 3600
@@ -35,6 +42,10 @@ KNOWN_CLIENT_CALLBACKS = (
     "https://claude.ai/api/mcp/auth_callback",
     "https://claude.com/api/mcp/auth_callback",
     "https://vscode.dev/redirect",
+    # Microsoft 365 Copilot declarative agents: Copilot acquires the user's token through the
+    # Teams platform, which uses this one fixed callback for every agent and tenant (unlike
+    # Copilot Studio's per-connector Power Platform URI below).
+    "https://teams.microsoft.com/api/platform/v1.0/oAuthRedirect",
 )
 
 # Microsoft Copilot Studio reaches MCP servers through Power Platform's connector

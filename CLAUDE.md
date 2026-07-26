@@ -97,6 +97,18 @@ Key facts a future session must not rediscover:
   symptom, check with a direct curl repro of both `/register` AND `/authorize` before assuming
   which one is actually failing — don't guess from the error message alone, it can be a second-hand
   symptom of an earlier silent failure.
+- **Microsoft 365 Copilot declarative agents** (v1.6.5): a third Microsoft path, distinct from
+  both Copilot Chat and Copilot Studio. Built with the M365 Agents Toolkit, which supports
+  "OAuth (with dynamic registration)" — so our DCR works and no static client id/secret is
+  needed — and is NOT restricted to read-only tools (unlike M365 *federated connectors*, which
+  are, and are a different feature). Two server-side requirements, both now met: the fixed Teams
+  callback `https://teams.microsoft.com/api/platform/v1.0/oAuthRedirect` is allowlisted, and an
+  unauthenticated **GET** on `/mcp` must answer 401 with `WWW-Authenticate` (the toolkit probes
+  with GET to discover auth; verified live — `DualAuthMiddleware` already handles every method
+  but OPTIONS). `CLIENT_TTL` was raised 90d → 365d because the toolkit persists the DCR result
+  in the agent's plugin manifest, so a short client life expires the customer's *deployment*
+  months later with no obvious cause; pinned by
+  `test_client_registration_outlives_a_deployed_agent_manifest`.
 - **Microsoft Copilot Studio needs two things VS Code's Copilot Chat did not** (v1.6.4). They are
   different clients despite the shared "Copilot" name: Copilot Chat is a plain MCP client (already
   handled by `_implicit_client`), while Copilot Studio goes through Power Platform's *connector*

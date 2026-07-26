@@ -89,6 +89,33 @@ Copilot Studio supports only the Streamable HTTP transport (SSE was dropped in A
 which is what this server speaks. Access is governed by Power Platform data policies — if a DLP
 policy restricts connectors, it restricts this MCP server's tools too.
 
+## Microsoft 365 Copilot chat (declarative agent)
+
+To get AHQ tools inside M365 Copilot chat (m365.cloud.microsoft/chat), someone builds a
+**declarative agent** that wraps this server, then publishes it to the tenant. This is a build
+step, not a connect-a-URL step — see `DEPLOYMENT.md` for the server side.
+
+In Visual Studio Code with the **Microsoft 365 Agents Toolkit** (6.12.0+):
+
+1. **Create a New Agent/App** → **Declarative Agent** → **Add an Action** → **Start with an
+   MCP Server**.
+2. Enter the server URL above.
+3. Authentication type: **OAuth (with dynamic registration)** — this server supports DCR, so
+   there is no client ID or secret to create. The toolkit writes the registration into the
+   agent's plugin manifest for you.
+4. **Provision** from the Lifecycle pane (needs *Custom App Upload Enabled* and *Copilot Access
+   Enabled* on the M365 account — ask the tenant admin if either is missing).
+5. Open `https://m365.cloud.microsoft/chat`, find the agent in the **Agents** sidebar, and sign
+   in when prompted — the same AutomationHQ consent page appears.
+
+> **Pin a curated tool set.** This server exposes 130+ tools; a declarative agent's orchestrator
+> chooses from tool descriptions alone, so pin the dozen or so the agent actually needs rather
+> than taking all of them via dynamic discovery. Keep destructive tools
+> (`permanently_delete_asset`, `merge_pull_request`) out of an agent aimed at general users.
+
+Note that M365 Copilot **federated connectors** are a *different* feature with a read-only tool
+restriction — declarative agents have no such limit, which is why this is the recommended path.
+
 ## Cursor / Windsurf
 
 Not yet live-validated against this server (as of 2026-07-17), but both follow the same MCP

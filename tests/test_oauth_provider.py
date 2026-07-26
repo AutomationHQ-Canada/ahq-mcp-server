@@ -113,9 +113,18 @@ def test_redirect_policy_allows_loopback_any_port_and_claude_callbacks():
     assert redirect_uri_allowed("https://claude.ai/api/mcp/auth_callback", extra)
     assert redirect_uri_allowed("https://claude.com/api/mcp/auth_callback", extra)
     assert redirect_uri_allowed("https://vscode.dev/redirect", extra)
+    assert redirect_uri_allowed("https://teams.microsoft.com/api/platform/v1.0/oAuthRedirect", extra)
     assert not redirect_uri_allowed("https://localhost:33418/callback", extra)  # https loopback: not RFC 8252
     assert not redirect_uri_allowed("http://192.168.1.5:8000/cb", extra)
     assert redirect_uri_allowed("myapp://oauth/callback", frozenset({"myapp://oauth/callback"}))
+
+
+def test_client_registration_outlives_a_deployed_agent_manifest():
+    """Clients that persist their DCR result in a deployed artifact (M365 Agents Toolkit writes
+    it into the plugin manifest) break silently, months later, if this is shortened."""
+    from src.hosted.oauth_provider import CLIENT_TTL
+
+    assert CLIENT_TTL >= 365 * 24 * 3600
 
 
 def test_redirect_policy_allows_power_platform_consent_callbacks():
