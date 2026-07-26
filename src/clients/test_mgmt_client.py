@@ -610,8 +610,32 @@ class TestMgmtClient(BaseAhqClient):
                 merged.append(template)
         return self._slim_templates(merged)
 
-    async def delete_test_script(self, script_id: str) -> dict:
-        return await self.delete(f"/rest/api/stories/scripts/{script_id}")
+    async def delete_test_script(self, script_id: str, confirmed: bool = False) -> dict:
+        """Delete a script, pausing for confirmation when other assets still reference it.
+
+        The endpoint runs its own preflight: while the script belongs to a Test Set or a TestBot
+        it answers **202 with the list of them and deletes nothing**, and only a repeat call with
+        `force=true` goes through (detaching it on the way). A 202 here is a question, not a
+        success — it is easy to read the 2xx as "deleted" and move on believing the script is
+        gone, so it is reshaped into an explicit NEEDS_CONFIRMATION result for the caller to put
+        to the user, mirroring create_branch's two-phase contract.
+        """
+        result = await self.delete(
+            f"/rest/api/stories/scripts/{script_id}",
+            params={"force": "true"} if confirmed else None,
+        )
+        if isinstance(result, dict) and result.get("status") == 202:
+            return {
+                "status": "NEEDS_CONFIRMATION",
+                "testScriptId": script_id,
+                "message": result.get("message"),
+                "next_step": (
+                    "NOTHING has been deleted. Show the associations above to the user and call "
+                    "delete_test_script again with confirmed=true only if they agree — that "
+                    "detaches the script from every Test Set and TestBot listed."
+                ),
+            }
+        return result
 
     async def get_template(self, template_id: str) -> dict:
         return await self.get(f"/rest/api/templates/{template_id}")
