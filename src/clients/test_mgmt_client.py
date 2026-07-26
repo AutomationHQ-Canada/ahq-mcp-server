@@ -286,6 +286,18 @@ class TestMgmtClient(BaseAhqClient):
         suite["testScripts"] = existing
         return await self.put(f"/rest/api/suites/{suite_id}", json=suite)
 
+    async def remove_scripts_from_suite(self, suite_id: str, script_ids: list) -> dict:
+        # Same GET-modify-PUT as the add path, for the same reason: scripts are embedded in the
+        # suite document and there is no per-script detach endpoint. Sequences are renumbered so
+        # the remaining scripts stay 1..n with no gaps, matching what create/add produce.
+        suite = await self.get_suite(suite_id)
+        removing = set(script_ids)
+        kept = [s for s in (suite.get("testScripts") or []) if s.get("testScriptId") not in removing]
+        for index, script in enumerate(kept, start=1):
+            script["sequence"] = index
+        suite["testScripts"] = kept
+        return await self.put(f"/rest/api/suites/{suite_id}", json=suite)
+
     # --- Recorded Scripts ---
     # RecordedScriptController reads @RequestHeader("organizationId") — NOT the "org-id" header
     # every OTHER controller in this same service uses (TestScriptController, EpicController, ...).
@@ -387,6 +399,13 @@ class TestMgmtClient(BaseAhqClient):
     async def list_branches(self, query: str = None) -> list:
         params = {"q": query} if query else None
         return await self.get(self._branches_base(), params=params)
+
+    async def delete_branch(self, branch_name: str) -> dict:
+        # Scripts living on the deleted branch are moved back to main, and a ProjectState still
+        # pointing at it is reset to main — so this removes the branch, not the work on it.
+        # The default and protected branches are refused server-side with a 400.
+        await self.delete(self._branches_base(), params={"branchName": branch_name})
+        return {"deleted": branch_name, "note": "Scripts that were on this branch are back on main."}
 
     async def get_scripts_for_branch(self, branch_name: str) -> list:
         # THE correct way to answer "which scripts are on branch X" — real membership lives in

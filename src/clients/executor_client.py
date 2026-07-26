@@ -21,12 +21,24 @@ class ExecutorClient(BaseAhqClient):
             body["name"] = name
         if profile_id:
             body["profileId"] = profile_id
-        return await self.post(
+        result = await self.post(
             f"/rest/api/bots/{bot_id}/execute",
             json=body,
             params={"partialExecution": "true"} if partial_execution else None,
             timeout=60,
         )
+        # The bare "id" here is the background JOB id. There is no executionId to return yet —
+        # the execution record is created when the job starts running, so a caller who feeds this
+        # id to get_execution_report gets a 404 and can easily read that as "the run vanished".
+        if isinstance(result, dict) and result.get("id") and "jobId" not in result:
+            result["jobId"] = result["id"]
+            result["next_step"] = (
+                "'id'/'jobId' is the background JOB id, NOT an executionId — the execution record "
+                "does not exist until the job starts. Poll get_job_status(jobId); once it leaves "
+                "PROCESSING, call list_recent_runs(bot_id) to get the executionId, then "
+                "get_execution_report(executionId) for per-step pass/fail."
+            )
+        return result
 
     async def get_bot_execution_status(self, execution_id: str) -> dict:
         return await self.get(f"/rest/api/bots/execution/{execution_id}/status")
