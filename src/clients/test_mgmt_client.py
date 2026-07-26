@@ -95,10 +95,13 @@ class TestMgmtClient(BaseAhqClient):
 
     async def list_test_scripts(self, name: str = None) -> list:
         # `name` is a plain case-insensitive substring match and works as expected. If a script
-        # you just created is missing here, check which PROJECT this client is pointed at before
-        # suspecting the filter or the branch: results are scoped to _credentials.project_id, and
-        # two clients configured from different .env files answer about different projects while
-        # reporting the same org.
+        # you just created is missing here, check the CREDENTIALS this client is using before
+        # suspecting the filter or the branch. Results are scoped to org_id + project_id together,
+        # and two configurations can differ in BOTH: this repo's .env token and the installed
+        # plugin's resolve to different organizations as well as different projects, so each is
+        # blind to the other's assets and neither is wrong. A mismatched org/project PAIR (say,
+        # one config's org header with the other's project id) returns a sparse result rather than
+        # an error, which reads exactly like data going missing.
         params = dict(_LIST_ALL)
         if name:
             params["name"] = name
@@ -138,6 +141,29 @@ class TestMgmtClient(BaseAhqClient):
         # is NOT reliably "main" (confirmed live: two scripts created back-to-back with no explicit
         # branch landed on different branches — one on "main", the next on "Test" — with no payload
         # difference between the two calls). Never rely on that default; always be explicit.
+        # An unrecognised branch name is not rejected — the server forks a NEW branch with that
+        # name and puts the script there, so a typo ("mian") silently creates a branch nobody
+        # looks at and the script is missing from every view the user checks. Confirmed live:
+        # probe values like "definitely-not-a-real-branch-xyz" became real branches in the
+        # project. Creating a branch should be a deliberate create_branch call, never a
+        # side effect of misspelling one here.
+        if branch_name:
+            branches = await self.list_branches()
+            # Never let this check itself become the failure: an unexpected response shape means
+            # "cannot verify", which must fall through to the create rather than block it.
+            known = (
+                {b.get("branchName") for b in branches if isinstance(b, dict)}
+                if isinstance(branches, list)
+                else set()
+            )
+            if known and branch_name not in known:
+                raise ValueError(
+                    f"Branch '{branch_name}' does not exist in this project, and creating a "
+                    f"script against an unknown branch silently forks a new branch with that "
+                    f"name rather than failing. Existing branches: "
+                    f"{sorted(n for n in known if n)}. Call create_branch first if a new branch "
+                    f"is genuinely what you want."
+                )
         payload = {
             "name": name,
             "testSteps": _normalize_step_parameters(steps or []),
