@@ -127,18 +127,50 @@ _CONTEXT_FIELDS = {
     "workflows": ("workflowId", "id", "name"),
     "performance_bots": ("performanceBotId", "id", "name"),
 }
-_CONTEXT_LIST_CAP = 100
+_CONTEXT_LIST_CAP = 25
+# Environments accumulate faster than anything else in a long-lived project — 153 in a real dev
+# org, nearly all of them abandoned one-off URLs — and at the old flat cap of 100 they alone
+# cost this snapshot ~8K characters before any work began. This tool runs first in essentially
+# every session, so its budget is spent on breadth, not depth.
+_CONTEXT_LIST_CAPS = {"environments": 10}
+# Where a caller goes for the entries the snapshot didn't show.
+_CONTEXT_FULL_LIST_TOOL = {
+    "projects": "list_projects",
+    "websites": "list_websites",
+    "environments": "list_environments",
+    "epics": "list_epics",
+    "bots": "list_bots",
+    "suites": "list_suites",
+    "api_collections": "list_api_collections",
+    "workflows": "list_workflows",
+    "performance_bots": "list_performance_bots",
+}
 
 
-def _slim_context_list(items, fields):
+def _slim_context_list(items, fields, cap=_CONTEXT_LIST_CAP, more_tool=None):
     if not isinstance(items, list):
         return items
+
+    shown = list(items[:cap])
+    if len(items) > cap:
+        # The default-flagged entry is the one a caller most often actually wants and it is not
+        # reliably near the front (the real dev org's default environment sorted ~90th), so it
+        # would otherwise be the single most useful row the truncation hides.
+        default_entry = next(
+            (it for it in items[cap:] if isinstance(it, dict) and it.get("isDefault")), None
+        )
+        if default_entry is not None and shown:
+            shown[-1] = default_entry
+
     slimmed = [
         {f: it[f] for f in fields if isinstance(it, dict) and it.get(f) is not None}
-        for it in items[:_CONTEXT_LIST_CAP]
+        for it in shown
     ]
-    if len(items) > _CONTEXT_LIST_CAP:
-        return {"total": len(items), "showing_first": _CONTEXT_LIST_CAP, "items": slimmed}
+    if len(items) > cap:
+        truncated = {"total": len(items), "showing": len(slimmed), "items": slimmed}
+        if more_tool:
+            truncated["more"] = f"truncated for brevity — call {more_tool} for the full list"
+        return truncated
     return slimmed
 
 
@@ -169,7 +201,12 @@ async def _get_ahq_context(clients: ClientBundle) -> dict:
         if isinstance(v, Exception):
             out[k] = str(v)
         elif k in _CONTEXT_FIELDS:
-            out[k] = _slim_context_list(v, _CONTEXT_FIELDS[k])
+            out[k] = _slim_context_list(
+                v,
+                _CONTEXT_FIELDS[k],
+                cap=_CONTEXT_LIST_CAPS.get(k, _CONTEXT_LIST_CAP),
+                more_tool=_CONTEXT_FULL_LIST_TOOL.get(k),
+            )
         else:
             out[k] = v
     if isinstance(results[0], Exception):
@@ -323,8 +360,9 @@ TOOLS = [
     ),
 
     # Test scripts
-    Tool(name="list_test_scripts", description="List or search test scripts by name.", inputSchema={"type": "object", "properties": {"name": {"type": "string", "description": "Optional name filter"}}}),
-    Tool(name="get_test_script", description="Get full details of a test script by ID.", inputSchema={"type": "object", "properties": {"script_id": {"type": "string"}}, "required": ["script_id"]}),
+    Tool(name="list_test_scripts", description="List or search test scripts by name. Returns a summary per script (id, name, status, type, stepCount) — call get_test_script for a script's actual steps. IMPORTANT: results are scoped to the API token's ambient 'checked out' branch, which changes on its own — a script you just created can be absent here minutes later while still existing. The `name` filter is a plain case-insensitive substring match, so an empty result means the branch scoping, not a bad filter. Use get_scripts_for_branch to ask deterministically what is on a given branch.", inputSchema={"type": "object", "properties": {"name": {"type": "string", "description": "Optional case-insensitive substring filter"}}}),
+    Tool(name="get_test_script", description="Get full details of a test script by ID, including every step. NOTE: the returned currentBranchName reflects this request's ambient branch, NOT the script's real branch membership — use get_scripts_for_branch for that.", inputSchema={"type": "object", "properties": {"script_id": {"type": "string"}}, "required": ["script_id"]}),
+    Tool(name="delete_test_script", description="Permanently delete a test script and its associated entities. Irreversible — this is a hard delete, not the Archive/soft-delete that the UI's delete performs, so the script will NOT appear in Administration -> Archive and cannot be restored. Confirm with the user before calling.", inputSchema={"type": "object", "properties": {"script_id": {"type": "string"}}, "required": ["script_id"]}),
     Tool(name="add_test_steps", description="Append (or insert) steps into an EXISTING test script in one call — no manual PUT assembly needed. Steps use the same shape as create_test_script (templateId + templateTitle verbatim for built-ins + parameters). Scalar parameter values accept friendly forms: {\"literal\": \"text\"}, {\"configuration\": \"paramName\"}, {\"vault\": \"secretName\"}, {\"variable\": \"varName\"}, {\"data_column\": \"col\"}, {\"faker\": \"Email\"}, {\"parameter\": \"name\"} — or the raw {\"type\": <code>, \"value\": ...}. Sequences renumber automatically. NOTE: scripts on a protected branch (often 'main') reject direct edits — create a branch or delete+recreate.", inputSchema={"type": "object", "properties": {"script_id": {"type": "string"}, "steps": {"type": "array", "items": {"type": "object"}, "description": "Steps to add"}, "position": {"type": "integer", "description": "0-based insert position; omit to append at the end"}}, "required": ["script_id", "steps"]}),
     Tool(name="update_test_script", description="Update fields of an existing test script (name, status, story_id, testSteps, ...) — GET-merge-PUT, so unspecified fields are preserved. Same protected-branch caveat as add_test_steps.", inputSchema={"type": "object", "properties": {"script_id": {"type": "string"}, "changes": {"type": "object", "description": "Fields to change, using the entity's own field names (e.g. name, status, storyId, testSteps)"}}, "required": ["script_id", "changes"]}),
     Tool(
@@ -386,7 +424,7 @@ TOOLS = [
 
     # Step templates — resolve real templateIds before writing any test step
     Tool(name="list_step_templates", description="List available step templates (built-in action types + org-defined Common Functions) for the current project. Use this or search_step_templates before writing any test step — templateId is never invented.", inputSchema={"type": "object", "properties": {"offset": {"type": "integer", "default": 0}}}),
-    Tool(name="search_step_templates", description="Search step templates by title (e.g. 'Click', 'Navigate', 'Assert Text') to find the real templateId for an action.", inputSchema={"type": "object", "properties": {"title": {"type": "string"}}, "required": ["title"]}),
+    Tool(name="search_step_templates", description="Search step templates by title (e.g. 'Click', 'Navigate', 'Assert Text') to find the real templateId for an action. Matching is a substring search over the platform's own titles, which often differ from the obvious word — common synonyms are expanded automatically (searching 'Navigate' also returns 'Open Web Browser and go to page', 'assert' also returns the 'Verify ...' family), so search by intent rather than guessing the platform's phrasing.", inputSchema={"type": "object", "properties": {"title": {"type": "string"}}, "required": ["title"]}),
     Tool(name="get_step_template", description="Get full detail of a step template by ID, including which params sub-fields it expects.", inputSchema={"type": "object", "properties": {"template_id": {"type": "string"}}, "required": ["template_id"]}),
 
     # Recorded Scripts — browser sessions captured by the TestBot Recorder Chrome Extension.
@@ -818,6 +856,8 @@ async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: boo
         return await clients.test_mgmt.list_test_scripts(args.get("name"))
     if name == "get_test_script":
         return await clients.test_mgmt.get_test_script(args["script_id"])
+    if name == "delete_test_script":
+        return await clients.test_mgmt.delete_test_script(args["script_id"])
     if name == "add_test_steps":
         return await clients.test_mgmt.add_test_steps(
             args["script_id"], args["steps"], args.get("position"))

@@ -1,5 +1,46 @@
+import asyncio
+
 from src.clients.base_client import BaseAhqClient
 from src.config.ahq_services import TEST_MGMT_SVC
+
+# The platform's step titles rarely use the word a caller reaches for first. Searching
+# "Navigate" — the obvious term for opening a URL — matches only "Navigate back" and
+# "Navigate forward"; the step that actually opens one is titled "Open Web Browser and go to
+# page", so the natural query misses it and an agent concludes the action doesn't exist. Search
+# is a plain substring match server-side, so the expansion has to happen here.
+_TEMPLATE_TITLE_ALIASES = {
+    "navigate": ("Open Web Browser", "go to page"),
+    "go to": ("Open Web Browser", "go to page"),
+    "goto": ("Open Web Browser", "go to page"),
+    "open url": ("Open Web Browser", "go to page"),
+    "open page": ("Open Web Browser", "go to page"),
+    "visit": ("Open Web Browser", "go to page"),
+    "launch": ("Open Web Browser",),
+    "browse": ("Open Web Browser",),
+    "type": ("Enter",),
+    "fill": ("Enter",),
+    "input": ("Enter",),
+    "set value": ("Enter",),
+    "assert": ("Verify",),
+    "check": ("Verify",),
+    "expect": ("Verify",),
+    "should": ("Verify",),
+    "validate": ("Verify",),
+    "dropdown": ("Select",),
+    "choose": ("Select",),
+    "hover": ("Mouse",),
+    "screenshot": ("Capture",),
+    "sleep": ("Wait",),
+    "pause": ("Wait",),
+}
+
+# A script listing is for finding the script you want; its steps are what get_test_script is
+# for. Returning every step tree inline made one match cost ~6KB and a 100-script project
+# unreadable.
+_SCRIPT_SUMMARY_FIELDS = (
+    "testScriptId", "name", "status", "type", "storyId", "websiteId", "pageId",
+    "currentBranchName", "updatedDate",
+)
 
 # TypeValuePair.type codes (from typeAwareDisplay() in the backend) — the full table, so nobody
 # has to mine backend source again. The friendly single-key forms below are translated by
@@ -44,12 +85,29 @@ class TestMgmtClient(BaseAhqClient):
         super().__init__(TEST_MGMT_SVC, credentials, http_client)
 
     # --- Test Scripts ---
+    @staticmethod
+    def _slim_script_summary(script: dict) -> dict:
+        slim = {k: script[k] for k in _SCRIPT_SUMMARY_FIELDS if script.get(k) is not None}
+        steps = script.get("testSteps")
+        if isinstance(steps, list):
+            slim["stepCount"] = len(steps)
+        return slim
+
     async def list_test_scripts(self, name: str = None) -> list:
+        # This endpoint answers for whatever branch the API token is currently "checked out" to,
+        # and that ambient state moves on its own: the same query minutes apart returned a script
+        # that is a confirmed member of main, then a disjoint set that excluded it and included
+        # scripts main has never had (confirmed live). The `name` filter itself is a fine
+        # case-insensitive substring match — an unexpectedly empty result is the branch scoping,
+        # not the filter. get_scripts_for_branch is the deterministic answer to "what is on X".
         params = dict(_LIST_ALL)
         if name:
             params["name"] = name
         result = await self.get("/rest/api/stories/scripts/list", params=params)
-        return result.get("content", result) if isinstance(result, dict) else result
+        result = result.get("content", result) if isinstance(result, dict) else result
+        if isinstance(result, list):
+            return [self._slim_script_summary(s) if isinstance(s, dict) else s for s in result]
+        return result
 
     async def get_test_script(self, script_id: str) -> dict:
         return await self.get(f"/rest/api/stories/scripts/{script_id}")
@@ -529,9 +587,32 @@ class TestMgmtClient(BaseAhqClient):
         # endpoint returned real templateIds (e.g. "Navigate" -> 21 results including
         # templateId "template-id-178"). TemplatesController.getSearchedTemplate() (root) merges
         # global built-ins with this org's Common Functions, so it's a strict superset.
-        return self._slim_templates(
-            await self.get("/rest/api/templates/search", params={"title": title})
+        queries = [title]
+        lowered = title.lower()
+        for trigger, expansions in _TEMPLATE_TITLE_ALIASES.items():
+            if trigger in lowered:
+                queries.extend(e for e in expansions if e not in queries)
+
+        responses = await asyncio.gather(
+            *(self.get("/rest/api/templates/search", params={"title": q}) for q in queries),
+            return_exceptions=True,
         )
+        # Literal-query hits stay first: an alias is a safety net for a miss, never a reranking
+        # of a query that already worked.
+        merged, seen = [], set()
+        for response in responses:
+            if not isinstance(response, list):
+                continue  # an alias query failing must not fail the whole search
+            for template in response:
+                template_id = template.get("templateId") if isinstance(template, dict) else None
+                if template_id is None or template_id in seen:
+                    continue
+                seen.add(template_id)
+                merged.append(template)
+        return self._slim_templates(merged)
+
+    async def delete_test_script(self, script_id: str) -> dict:
+        return await self.delete(f"/rest/api/stories/scripts/{script_id}")
 
     async def get_template(self, template_id: str) -> dict:
         return await self.get(f"/rest/api/templates/{template_id}")
