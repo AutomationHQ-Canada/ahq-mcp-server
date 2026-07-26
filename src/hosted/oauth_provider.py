@@ -37,18 +37,40 @@ KNOWN_CLIENT_CALLBACKS = (
     "https://vscode.dev/redirect",
 )
 
+# Microsoft Copilot Studio reaches MCP servers through Power Platform's connector
+# infrastructure, whose OAuth callback is per-connector and per-region:
+# https://<region>.consent.azure-apim.net/redirect/<connector-id> (global, europe, asia, ...).
+# The connector id doesn't exist until after the connector is created, so an exact-match entry
+# in AHQ_MCP_EXTRA_REDIRECT_URIS can't be configured ahead of the Dynamic Client Registration
+# that Copilot Studio's "Dynamic discovery" option performs — hence a host rule rather than a
+# literal. azure-apim.net is Microsoft-owned, so this is the same trust posture as the
+# vscode.dev entry above, not an open wildcard.
+_POWER_PLATFORM_CONSENT_HOST = "consent.azure-apim.net"
+
+
+def _is_power_platform_consent_uri(parsed) -> bool:
+    host = parsed.hostname or ""
+    return (
+        parsed.scheme == "https"
+        and (host == _POWER_PLATFORM_CONSENT_HOST or host.endswith("." + _POWER_PLATFORM_CONSENT_HOST))
+        and (parsed.path == "/redirect" or parsed.path.startswith("/redirect/"))
+    )
+
 
 def redirect_uri_allowed(uri: str, extra: frozenset[str]) -> bool:
     """
     Registration-time redirect-URI policy: loopback http (any port, any path — RFC 8252 native
     clients like Claude Code, Cursor and MCP Inspector listen on a random localhost port), known
-    first-party client web callbacks (Claude web/desktop, VS Code), or an operator-configured
-    extra (AHQ_MCP_EXTRA_REDIRECT_URIS). Everything else is refused — a permissive policy here
-    would let any website register itself and receive authorization codes.
+    first-party client web callbacks (Claude web/desktop, VS Code), a Power Platform connector
+    consent callback (Copilot Studio — see above), or an operator-configured extra
+    (AHQ_MCP_EXTRA_REDIRECT_URIS). Everything else is refused — a permissive policy here would
+    let any website register itself and receive authorization codes.
     """
     if uri in KNOWN_CLIENT_CALLBACKS or uri in extra:
         return True
     parsed = urlparse(uri)
+    if _is_power_platform_consent_uri(parsed):
+        return True
     return parsed.scheme == "http" and parsed.hostname in ("localhost", "127.0.0.1", "::1")
 
 

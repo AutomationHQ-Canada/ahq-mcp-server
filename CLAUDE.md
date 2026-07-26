@@ -97,6 +97,20 @@ Key facts a future session must not rediscover:
   symptom, check with a direct curl repro of both `/register` AND `/authorize` before assuming
   which one is actually failing — don't guess from the error message alone, it can be a second-hand
   symptom of an earlier silent failure.
+- **Microsoft Copilot Studio needs two things VS Code's Copilot Chat did not** (v1.6.4). They are
+  different clients despite the shared "Copilot" name: Copilot Chat is a plain MCP client (already
+  handled by `_implicit_client`), while Copilot Studio goes through Power Platform's *connector*
+  infrastructure. (1) It performs real RFC 7591 DCR with a per-connector, per-region callback
+  `https://<region>.consent.azure-apim.net/redirect/<connector-id>` — the connector id doesn't
+  exist until after the connector is created, so `AHQ_MCP_EXTRA_REDIRECT_URIS` can't hold a
+  literal; `redirect_uri_allowed` matches the `consent.azure-apim.net` host + `/redirect` path
+  instead (Microsoft-owned, same posture as the `vscode.dev` entry). (2) Its API-key auth sends
+  only ONE header, but header auth here needs `X-API-AUTH-KEY` **and** `projectId` —
+  `BaseAhqClient` puts `projectId` on every AHQ request, and an empty one returns 200 with an
+  EMPTY RESULT SET, not an error (confirmed live: `list_websites` → `[]`). `_resolve_clients` now
+  raises on a header-path request with no `projectId` rather than letting an agent report "you
+  have no websites". OAuth is the documented path for Copilot Studio since `/consent` resolves
+  the project itself. Copilot Studio is Streamable-HTTP only (SSE dropped Aug 2025) — already fine.
 - **One consent URL now serves both dev and prod tokens (2026-07-17)**: every AHQ API call
   previously used this server's own fixed `AHQ_BASE_URL` setting (dev), so pasting a PROD
   organization token into the dev-hosted `/consent` flow validated it against DEV's gateway/DB

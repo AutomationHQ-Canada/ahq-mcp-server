@@ -659,9 +659,24 @@ def _resolve_clients() -> tuple[ClientBundle, bool]:
     # OAuth requests carry their credentials sealed inside the Bearer token; DualAuthMiddleware
     # verifies it and stashes the result in the ASGI scope. Legacy header clients fall through
     # to the original X-API-AUTH-KEY/projectId path.
-    creds = req.scope.get("ahq_credentials") or AhqCredentials.from_headers(
-        req.headers, base_url=settings.ahq_base_url, allowed_extra_base_urls=settings.extra_base_urls()
-    )
+    creds = req.scope.get("ahq_credentials")
+    if creds is None:
+        creds = AhqCredentials.from_headers(
+            req.headers, base_url=settings.ahq_base_url, allowed_extra_base_urls=settings.extra_base_urls()
+        )
+        # BaseAhqClient sends projectId as a header on EVERY AHQ request, so an empty one is not
+        # an org-wide fallback — the API answers 200 with an empty result set, which reads as
+        # "you have no websites/scripts/bots" instead of "you are misconfigured". Clients that
+        # can only send a single auth header (Microsoft Copilot Studio's API-key auth is one)
+        # land here by construction, so fail loudly rather than silently answering nothing.
+        # The OAuth path can't hit this: /consent always resolves a project before issuing.
+        if not creds.project_id:
+            raise RuntimeError(
+                "ahq-mcp-server is not configured for this request: the 'projectId' header is "
+                "missing. Header auth requires BOTH 'X-API-AUTH-KEY' and 'projectId'. If your "
+                "client can only send one header, connect via OAuth instead — its consent page "
+                "picks the project for you (see CONNECT.md)."
+            )
     return ClientBundle.build(credentials=creds, http_client=app_http_client.client), True
 
 

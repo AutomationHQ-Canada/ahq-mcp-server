@@ -118,6 +118,30 @@ def test_redirect_policy_allows_loopback_any_port_and_claude_callbacks():
     assert redirect_uri_allowed("myapp://oauth/callback", frozenset({"myapp://oauth/callback"}))
 
 
+def test_redirect_policy_allows_power_platform_consent_callbacks():
+    """Copilot Studio registers via DCR with a per-connector, per-region Power Platform callback."""
+    extra = frozenset()
+    assert redirect_uri_allowed("https://global.consent.azure-apim.net/redirect", extra)
+    assert redirect_uri_allowed("https://europe.consent.azure-apim.net/redirect", extra)
+    assert redirect_uri_allowed(
+        "https://global.consent.azure-apim.net/redirect/ahqmcp-5f98284236d845b802", extra
+    )
+    # http, a look-alike host, and a non-/redirect path on the real host all stay refused.
+    assert not redirect_uri_allowed("http://global.consent.azure-apim.net/redirect", extra)
+    assert not redirect_uri_allowed("https://evil-consent.azure-apim.net/redirect", extra)
+    assert not redirect_uri_allowed("https://consent.azure-apim.net.evil.com/redirect", extra)
+    assert not redirect_uri_allowed("https://global.consent.azure-apim.net/steal", extra)
+
+
+async def test_register_accepts_power_platform_consent_redirect():
+    provider = _provider()
+    info = _client_info(
+        redirect_uris=[AnyUrl("https://global.consent.azure-apim.net/redirect/ahqmcp-abc123")]
+    )
+    await provider.register_client(info)
+    assert await provider.get_client(info.client_id) is not None
+
+
 async def test_authorize_returns_consent_url_with_txn():
     provider = _provider()
     info = _client_info()
