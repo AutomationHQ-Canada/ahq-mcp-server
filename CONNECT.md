@@ -116,6 +116,27 @@ In Visual Studio Code with the **Microsoft 365 Agents Toolkit** (6.12.0+):
 Note that M365 Copilot **federated connectors** are a *different* feature with a read-only tool
 restriction — declarative agents have no such limit, which is why this is the recommended path.
 
+## Lovable (custom MCP chat connector)
+
+Lovable reaches MCP servers as "chat connectors" — the tools are available to Lovable's AI while
+it builds for you, and are deliberately never part of the app it publishes. If you want a
+Lovable-built app to call AHQ at runtime, that's an ordinary API integration in the generated
+code, not this.
+
+1. **Connectors** dashboard → scroll to the bottom → the **Custom MCP** card.
+2. Name the server (e.g. `AutomationHQ`) and enter the server URL above.
+3. Leave the authentication method as **OAuth** (Lovable's default).
+4. **Add & authorize** → the AutomationHQ consent page opens — paste your ORGANIZATION token,
+   pick a project, **Authorize**.
+
+> **Don't use the bearer-token/API-key option.** `Authorization: Bearer` here means this server's
+> own encrypted session blob, not an AHQ token, so a pasted org token fails to decode; and the
+> header path needs `X-API-AUTH-KEY` *and* `projectId`, which that option can't send. OAuth is
+> the only route that works.
+
+Lovable's fixed callback (`https://api.lovable.dev/workspaces/connectors/mcp/oauth/callback`) is
+allowlisted from v1.6.7 onward — an earlier server refuses registration with `invalid_redirect_uri`.
+
 ## Cursor / Windsurf
 
 Not yet live-validated against this server (as of 2026-07-17), but both follow the same MCP
