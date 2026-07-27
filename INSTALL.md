@@ -1,10 +1,10 @@
 # Installing the AutomationHQ Claude Code Plugin (ahq-skills)
 
-Follow this guide to connect Claude Code to AutomationHQ. You get **115 MCP tools** (script
+Follow this guide to connect Claude Code to AutomationHQ. You get **136 MCP tools** (script
 generation, bot execution, reporting, version control, archive, roles, API/load testing, ...)
-plus **8 workflow skills** (`/ahq-test-architecture`, `/ahq-gen-from-url`,
-`/ahq-gen-from-requirements`, `/ahq-run-bot`, `/ahq-schedule-bot`, `/ahq-view-report`,
-`/ahq-view-performance`, `/ahq-dashboard`).
+plus **9 workflow skills** (`/ahq-test-architecture`, `/ahq-gen-from-url`,
+`/ahq-gen-from-requirements`, `/ahq-heal-locators`, `/ahq-run-bot`, `/ahq-schedule-bot`,
+`/ahq-view-report`, `/ahq-view-performance`, `/ahq-dashboard`).
 
 Total time: ~10 minutes. Every step below was validated end-to-end on Windows on 2026-07-13.
 
@@ -66,23 +66,22 @@ folder on the next update):
 
 ```powershell
 mkdir $env:USERPROFILE\.ahq -Force
-notepad $env:USERPROFILE\.ahq\.env   # fill in the three values below
-
-# OPTIONAL — only if you'll use crawl_url (generate scripts by crawling a live URL)
-cd $env:USERPROFILE\.claude\plugins\cache\automationhq\ahq-skills\0.2.1   # adjust to your version
-uv run playwright install chromium
+notepad $env:USERPROFILE\.ahq\.env   # fill in the two values below
 ```
 
 **macOS / Linux:**
 
 ```bash
 mkdir -p ~/.ahq
-nano ~/.ahq/.env   # fill in the three values below
-
-# OPTIONAL — only if you'll use crawl_url (generate scripts by crawling a live URL)
-cd ~/.claude/plugins/cache/automationhq/ahq-skills/0.2.1   # adjust to your version
-uv run playwright install chromium
+nano ~/.ahq/.env   # fill in the two values below
 ```
+
+> **No browser install needed.** `crawl_url` and `heal_locator` drive a real Chromium, and the
+> first call to either downloads it automatically (~150 MB, a few minutes, once per
+> environment — including after a playwright version bump, since the package and browser build
+> are version-locked). Nobody who only runs bots and reads reports ever downloads it. To
+> pre-warm it instead of paying that cost mid-request, run `uv run playwright install chromium`
+> from the plugin folder.
 
 > A `.env` inside the plugin version folder (or real environment variables `AHQ_API_TOKEN` etc.)
 > also works and overrides `~/.ahq/.env` — precedence: env vars > plugin-folder `.env` >
@@ -112,14 +111,14 @@ AHQ_PROJECT_ID=<the UUID of the project to work in>
 
 1. **Restart Claude Code** (or run `/reload-plugins`) — the MCP server starts with the session
    (first start installs dependencies, give it a moment).
-2. Run `/mcp` → `ahq-mcp-server` should show **connected** with 121 tools.
-3. Type `/ahq` → the 8 skills should autocomplete. Plugin skills are **namespaced**, so the full
+2. Run `/mcp` → `ahq-mcp-server` should show **connected** with 136 tools.
+3. Type `/ahq` → the 9 skills should autocomplete. Plugin skills are **namespaced**, so the full
    names are `/ahq-skills:ahq-dashboard`, `/ahq-skills:ahq-gen-from-url`, etc.
 4. Smoke test — ask Claude: *"list my AHQ websites"*. Real data back = you're done.
 
 > Don't be alarmed if `/reload-plugins` reports `0 skills` — that counter only covers standalone
 > (non-plugin) skills. Verify with `claude plugin details ahq-skills@automationhq` in a terminal:
-> it should list **Skills (7)** and **MCP servers (1)**.
+> it should list **Skills (9)** and **MCP servers (1)**.
 
 ## Updating to a newer version
 
@@ -135,8 +134,10 @@ Then restart the session (or `/reload-plugins`) — that's it. If your credentia
 automatically. Only if you keep a `.env` inside the plugin version folder do you have to copy it
 into the new folder yourself.
 
-If the playwright version changed (see `pyproject.toml`), run `uv run playwright install
-chromium` again from the new plugin folder — the package and browser build must match.
+If the playwright version changed (see `pyproject.toml`) the new package needs a matching browser
+build. The first `crawl_url`/`heal_locator` call after the upgrade fetches it automatically; run
+`uv run playwright install chromium` from the new plugin folder only if you'd rather pay that
+cost up front.
 
 ## Troubleshooting
 
@@ -149,10 +150,10 @@ read that message first, it usually IS the fix.
 | `marketplace add` fails with a clone error | The repo is public, so this is usually just a missing/misconfigured local `git` install — install `git`, then retry. |
 | Tool errors say `ahq-mcp-server is not configured: ... is empty` | The `.env` is missing, in the wrong folder, or missing a value — the message names the variable and the expected file path. Fix, then `/reload-plugins`. |
 | Tool errors say `Got the web frontend's HTML instead of an API response` | The gateway URL is normally decoded from your token automatically. This means either your token predates the `urlDetails` claim (add `AHQ_BASE_URL` to `.env`, pointed at the API gateway, e.g. `https://api-dev.automationhq.ai`, never the web UI) or an `AHQ_BASE_URL` override you added yourself points at the web UI — remove or fix it. |
-| `/mcp` shows `ahq-mcp-server` **failed** | Usually `uv` missing from PATH (`uv --version` to check; restart the terminal/session after installing it). Verify the server itself with: `uv run --project <plugin folder> python -c "from src.mcp_server import TOOLS; print(len(TOOLS))"` → must print `121`. |
+| `/mcp` shows `ahq-mcp-server` **failed** | Usually `uv` missing from PATH (`uv --version` to check; restart the terminal/session after installing it). Verify the server itself with: `uv run --project <plugin folder> python -c "from src.mcp_server import TOOLS; print(len(TOOLS))"` → must print `136`. |
 | Tools work but `/ahq` skills don't appear | Restart the Claude Code session — skills register at startup. Full names are namespaced: `/ahq-skills:ahq-dashboard`. |
 | Every AHQ call returns 401 | Wrong/expired token in `.env`, or you used a personal JWT instead of an ORGANIZATION token. |
-| `crawl_url` errors about a missing browser | Run `uv run playwright install chromium` in the plugin folder. Required again after any playwright version bump. |
+| `crawl_url` errors about a missing browser | Since v1.6.8 the first crawl downloads Chromium itself, so this should self-resolve — the first one just takes a few minutes. The error only remains if that download failed (no disk space, no network), and it quotes the real reason. Manual fallback: `uv run playwright install chromium` in the plugin folder. |
 | Data lands in the wrong org | Impossible via token alone — org ID is decoded from the token. Check you were given a token for the right organization. |
 
 ## For developers (working ON the server, not just using it)

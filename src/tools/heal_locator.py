@@ -2,6 +2,7 @@ from difflib import SequenceMatcher
 
 from playwright.async_api import async_playwright
 
+from src.tools.browser_setup import ensure_chromium, is_missing_browser_error
 from src.tools.url_guard import validate_public_http_url
 
 MAX_CANDIDATES = 3
@@ -108,14 +109,12 @@ async def heal_locator(asset_client, locator_id: str, website_id: str, credentia
         try:
             browser = await p.chromium.launch(headless=True)
         except Exception as e:
-            if "Executable doesn't exist" in str(e) or "playwright install" in str(e):
-                return {
-                    "error": (
-                        "Playwright's browser binary is missing or out of date for the installed "
-                        "playwright package. Fix: run `playwright install chromium`, then retry."
-                    )
-                }
-            raise
+            if not is_missing_browser_error(e):
+                raise
+            failure = await ensure_chromium(hosted)
+            if failure:
+                return {"error": failure}
+            browser = await p.chromium.launch(headless=True)
 
         try:
             page = await browser.new_page()
