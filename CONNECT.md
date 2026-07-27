@@ -13,6 +13,37 @@ Microsoft 365 Copilot, Lovable, Cursor and Windsurf**.
 
 ---
 
+## Quick start
+
+**1.** Get an AutomationHQ **Organization** API token — AHQ → Administration → Settings → API
+Tokens → Create, type **Organization**.
+
+**2.** In your AI client, add a custom MCP connector with this URL:
+
+```
+https://api-dev.automationhq.ai/ahq-mcp-server/mcp
+```
+
+| Client | Where |
+|---|---|
+| Claude Desktop / claude.ai | Settings → Connectors → **Add custom connector** |
+| VS Code (Copilot Chat) | `Ctrl+Shift+P` → **MCP: Add Server...** → **HTTP** |
+| Microsoft Copilot Studio | Tools → Add a tool → New tool → **Model Context Protocol** |
+| Lovable | Connectors → **Custom MCP** |
+| Cursor / Windsurf | MCP settings → add remote/HTTP server |
+
+**3.** Leave authentication as **OAuth** (the default everywhere). Not API key.
+
+**4.** Your browser opens AutomationHQ's page — paste the token, pick a project, **Authorize**.
+
+**5.** Ask *"list my AHQ websites"* in a **new** chat.
+
+> VS Code only: switch Copilot Chat to **Agent** mode, or the tools won't appear.
+
+Per-client detail, prerequisites and troubleshooting below.
+
+---
+
 ## Before you start
 
 **1. Your server URL**

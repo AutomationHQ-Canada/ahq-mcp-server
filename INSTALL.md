@@ -17,6 +17,61 @@ Total time: about 10 minutes.
 
 ---
 
+## Quick start
+
+Everything, in order. Details and troubleshooting are below if you need them.
+
+**1. Install `uv`** — once per machine, in a terminal:
+
+```powershell
+winget install astral-sh.uv                        # Windows
+curl -LsSf https://astral.sh/uv/install.sh | sh    # macOS / Linux
+```
+
+**2. Install the plugin** — in Claude Code:
+
+```
+/plugin marketplace add AutomationHQ-Canada/ahq-mcp-server
+/plugin install ahq-skills@automationhq
+```
+
+Choose **"Install for you (user scope)"**.
+
+**3. Add your credentials** — in a terminal:
+
+```powershell
+mkdir $env:USERPROFILE\.ahq -Force                 # Windows
+notepad $env:USERPROFILE\.ahq\.env
+
+mkdir -p ~/.ahq                                    # macOS / Linux
+nano ~/.ahq/.env
+```
+
+Put two lines in that file:
+
+```
+AHQ_API_TOKEN=<your ORGANIZATION token>
+AHQ_PROJECT_ID=<your project UUID>
+```
+
+Token: AHQ → **Administration → Settings → API Tokens → Create**, type **Organization**.
+Project UUID: the **second** UUID in the AHQ web app's URL.
+
+**4. Restart Claude Code**, then check:
+
+```
+/mcp        →  ahq-mcp-server: connected, 136 tools
+/ahq        →  9 skills autocomplete
+```
+
+Ask *"list my AHQ websites"*. Real data back means you're done.
+
+> Nothing else to install — no Python, no `pip`, no browser download. `uv` brings its own Python,
+> dependencies install on first launch, and Chromium downloads itself the first time you crawl a
+> URL (if you ever do).
+
+---
+
 ## Prerequisites
 
 | Requirement | How to check | How to get it |
