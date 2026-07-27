@@ -6,11 +6,14 @@ plus **9 workflow skills** (`/ahq-test-architecture`, `/ahq-gen-from-url`,
 `/ahq-gen-from-requirements`, `/ahq-heal-locators`, `/ahq-run-bot`, `/ahq-schedule-bot`,
 `/ahq-view-report`, `/ahq-view-performance`, `/ahq-dashboard`).
 
-Total time: ~10 minutes. Every step below was validated end-to-end on Windows on 2026-07-13.
+Total time: about 10 minutes.
 
-> Don't want to install anything? Any MCP client (Claude Desktop, claude.ai, VS Code, Cursor,
-> Windsurf) can connect to the hosted server with just a URL — see [`CONNECT.md`](CONNECT.md)
-> for the step-by-step connector guide. This guide is for the Claude Code plugin (stdio) setup.
+> **Don't want to install anything?** Claude Desktop, claude.ai, VS Code, Microsoft Copilot,
+> Lovable, Cursor and Windsurf can all connect to the hosted server with just a URL — see
+> [`CONNECT.md`](CONNECT.md).
+>
+> Choose this plugin instead when you need either of the two things a URL connection cannot do:
+> run tests on a **test agent on your own machine**, or use the **guided workflow skills**.
 
 ---
 
@@ -52,8 +55,8 @@ The plugin clones itself to a fixed location:
 %USERPROFILE%\.claude\plugins\cache\automationhq\ahq-skills\<version>\
 ```
 
-(e.g. `C:\Users\<you>\.claude\plugins\cache\automationhq\ahq-skills\0.2.1` — **the last folder is
-the plugin version; check which one exists and use that in the commands below**).
+(e.g. `C:\Users\<you>\.claude\plugins\cache\automationhq\ahq-skills\1.6.8` — **the last folder is
+the plugin version; check which one exists on your machine and use that below**).
 
 The server launches via `uv run`, which **installs all Python dependencies automatically on the
 first launch** (pinned by `uv.lock`, isolated from your system Python) — there is nothing to
@@ -97,15 +100,13 @@ AHQ_API_TOKEN=<your ORGANIZATION token from Administration -> Settings -> API To
 AHQ_PROJECT_ID=<the UUID of the project to work in>
 ```
 
-> **Where to find `AHQ_PROJECT_ID`:** open the AHQ web UI and enter your project — the browser
-> URL is `dev.automationhq.ai/<orgId>/<projectId>/...`; the **second** UUID is the project ID.
+> **Where to find `AHQ_PROJECT_ID`:** open the AHQ web app and enter your project — the browser
+> URL is `<host>/<orgId>/<projectId>/...`; the **second** UUID is the project ID.
 >
-> **Note:** Your org ID **and** the API gateway URL are both decoded from the token automatically
-> (from its `organizationId` and `urlDetails.baseUrl` claims) — do not add either. `AHQ_BASE_URL`
-> is optional now and only used as a fallback for a token that predates the `urlDetails` claim;
-> set it (to the **API gateway**, e.g. `https://api-dev.automationhq.ai` — NOT the web UI) only if
-> `/mcp` reports the token has no usable base URL. The `LLM_API_KEY` line in `.env.example` is
-> currently unused — leave it or delete it.
+> **Don't add anything else.** Your organization ID and the API gateway URL are both decoded from
+> the token itself. `AHQ_BASE_URL` is only needed as a fallback for an older token, and only if
+> `/mcp` reports the token has no usable base URL — if you do set it, point it at the **API
+> gateway** (e.g. `https://api-dev.automationhq.ai`), never the web app.
 
 ## Step 4 — Verify
 
@@ -139,11 +140,37 @@ build. The first `crawl_url`/`heal_locator` call after the upgrade fetches it au
 `uv run playwright install chromium` from the new plugin folder only if you'd rather pay that
 cost up front.
 
+---
+
+## Please read before storing credentials in a test script
+
+**Passwords used in test steps appear in plaintext in execution reports.**
+
+AutomationHQ's secret vault keeps a credential out of the stored test script — the step displays
+as `Enter [vault: my_password] for "Password field"` and the real value appears nowhere in the
+script document. That part works as expected.
+
+When the test runs, however, the executor resolves the secret and writes the **resolved value**
+into the execution report:
+
+```
+"statusMessage": "Entered value MyRealPassword123"
+```
+
+So anyone who can read an execution report can read that credential. The vault protects storage,
+not the full lifecycle.
+
+**What to do:** use dedicated test accounts with credentials you're willing to have visible in
+report history, and never reuse a production or personal password in a test script. Raise it with
+your AutomationHQ contact if report-level protection matters for your use case.
+
+---
+
 ## Troubleshooting
 
-Since v0.1.1 the server fails **loudly** on misconfiguration: a tool call with a missing/empty
-`.env` returns an error naming the exact variable and the exact path where `.env` is expected —
-read that message first, it usually IS the fix.
+The server fails **loudly** on misconfiguration: a tool call with a missing or empty `.env`
+returns an error naming the exact variable and the exact path where `.env` is expected — read
+that message first, it usually IS the fix.
 
 | Symptom | Cause / fix |
 |---|---|
@@ -153,8 +180,9 @@ read that message first, it usually IS the fix.
 | `/mcp` shows `ahq-mcp-server` **failed** | Usually `uv` missing from PATH (`uv --version` to check; restart the terminal/session after installing it). Verify the server itself with: `uv run --project <plugin folder> python -c "from src.mcp_server import TOOLS; print(len(TOOLS))"` → must print `136`. |
 | Tools work but `/ahq` skills don't appear | Restart the Claude Code session — skills register at startup. Full names are namespaced: `/ahq-skills:ahq-dashboard`. |
 | Every AHQ call returns 401 | Wrong/expired token in `.env`, or you used a personal JWT instead of an ORGANIZATION token. |
-| `crawl_url` errors about a missing browser | Since v1.6.8 the first crawl downloads Chromium itself, so this should self-resolve — the first one just takes a few minutes. The error only remains if that download failed (no disk space, no network), and it quotes the real reason. Manual fallback: `uv run playwright install chromium` in the plugin folder. |
-| Data lands in the wrong org | Impossible via token alone — org ID is decoded from the token. Check you were given a token for the right organization. |
+| `crawl_url` errors about a missing browser | The first crawl downloads Chromium itself, so this normally self-resolves — that one call just takes a few minutes. The error only persists if the download actually failed (no disk space, no network), and it quotes the real reason. Manual fallback: `uv run playwright install chromium` in the plugin folder. |
+| Data lands in the wrong org | Not possible via the token alone — the org ID is decoded from it. Check you were given a token for the right organization. |
+| Assets you created aren't visible in the web app (or vice versa) | Results are scoped to organization **and** project together, and a mismatched pair returns an empty result rather than an error. Check `AHQ_PROJECT_ID` matches the project you're looking at. |
 
 ## For developers (working ON the server, not just using it)
 
@@ -168,6 +196,6 @@ See `DEPLOYMENT.md` (Option B) for registering your checkout as the MCP server, 
 the full platform contract/gotchas reference, and `evals/README.md` for the live golden-task
 suite. Branch + PR for all changes — no direct pushes to the default branch.
 
-*Since v0.2.1 the plugin launches via [`uv`](https://docs.astral.sh/uv/) — dependencies install
-themselves on first run, pinned by `uv.lock`, isolated from your system Python. Only your `.env`
-remains manual, since credentials are personal.*
+*The plugin launches via [`uv`](https://docs.astral.sh/uv/) — dependencies install themselves on
+first run, pinned by `uv.lock` and isolated from your system Python. Only your `.env` stays
+manual, since credentials are personal.*
