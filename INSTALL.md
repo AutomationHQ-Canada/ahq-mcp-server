@@ -162,6 +162,13 @@ AHQ_PROJECT_ID=<the UUID of the project to work in>
 > the token itself. `AHQ_BASE_URL` is only needed as a fallback for an older token, and only if
 > `/mcp` reports the token has no usable base URL — if you do set it, point it at the **API
 > gateway** (e.g. `https://api-dev.automationhq.ai`), never the web app.
+>
+> **Moving between environments? Change BOTH lines.** The same plugin works against any
+> AutomationHQ environment — the gateway and your organization follow the token automatically, so
+> switching is just a matter of pasting a different one. But `AHQ_PROJECT_ID` does *not* follow
+> the token. Leave a project UUID from the old environment in place and every list comes back
+> empty with no error at all, because results are scoped to organization **and** project
+> together. Update the token and the project ID as a pair.
 
 ## Step 4 — Verify
 
