@@ -66,9 +66,11 @@ class AhqCredentials:
     separately-configured value — a stale/mismatched org_id silently writes real data into the
     wrong organization (confirmed live, 2026-07-08: a wrong AHQ_ORG_ID in .env matched neither the
     token's own org nor anything the user could see, and every API call still "succeeded" since the
-    gateway doesn't validate the header against the token's claim). project_id has no equivalent
-    claim in the token (an ORGANIZATION token isn't scoped to one project) and must still be
-    configured explicitly.
+    gateway doesn't validate the header against the token's claim). base_url is likewise resolved
+    from the token's own `urlDetails.baseUrl` claim first (same as hosted mode's from_headers,
+    below) — AHQ_BASE_URL in .env is now only a fallback for tokens that predate that claim or
+    carry a base_url outside the allowlist. project_id has no equivalent claim in the token (an
+    ORGANIZATION token isn't scoped to one project) and must still be configured explicitly.
     """
 
     base_url: str
@@ -79,8 +81,9 @@ class AhqCredentials:
     @classmethod
     def from_settings(cls, settings) -> "AhqCredentials":
         claims = decode_ahq_token(settings.ahq_api_token)
+        resolved_base_url = base_url_from_claims(claims, settings.extra_base_urls()) or settings.ahq_base_url
         return cls(
-            base_url=settings.ahq_base_url,
+            base_url=resolved_base_url,
             api_token=settings.ahq_api_token,
             org_id=claims.get("organizationId", ""),
             project_id=settings.ahq_project_id,

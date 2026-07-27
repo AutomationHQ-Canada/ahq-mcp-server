@@ -28,8 +28,22 @@ class BackgroundClient(BaseAhqClient):
         return await self.delete(f"/background-jobs/execution-jobs/schedule-recurring/{schedule_id}")
 
     # --- Status & Queue ---
+    # A job's status describes DISPATCH, not the test outcome: a run whose script failed every
+    # assertion still finishes SUCCEEDED here, because the job did what it was asked to do
+    # (confirmed live — a bot whose only script FAILED reported SUCCEEDED at this endpoint).
+    # Reporting that as the answer to "did my test pass?" states the exact opposite of the truth,
+    # so terminal responses carry an explicit pointer to the report that does know.
+    _TERMINAL_JOB_STATUSES = {"SUCCEEDED", "FAILED", "DELETED"}
+
     async def get_job_status(self, job_id: str) -> dict:
-        return await self.get(f"/background-jobs/status/{job_id}/details")
+        result = await self.get(f"/background-jobs/status/{job_id}/details")
+        if isinstance(result, dict) and result.get("status") in self._TERMINAL_JOB_STATUSES:
+            result["note"] = (
+                f"'{result['status']}' is the JOB's dispatch outcome, NOT the test result — a run "
+                "whose assertions all failed still reports SUCCEEDED here. Call list_recent_runs "
+                "(for the executionId) then get_execution_report for actual pass/fail."
+            )
+        return result
 
     async def get_queue_status(self) -> dict:
         return await self.get("/background-jobs/queue-status")

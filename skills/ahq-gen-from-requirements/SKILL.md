@@ -111,7 +111,14 @@ generated from it — no live app/URL involved.
 - Never put step values in `params` — use `parameters` (a list); `params` does not drive step titles or execution
 - Never fabricate `locateBy`/`locatorValue` on a `ui-locator` parameter — pass only `{"locatorId": "..."}` and let the server enrich it
 - Never call `create_test_script` without `website_id` and `story_id` — both are validated locally and rejected if missing; resolve or create an epic/story rather than omitting it
+- **Ask the user which branch the scripts should land on before creating them** — offer a new branch alongside the real ones from `list_branches`, and pass the answer as `branch_name`. Do not silently default to `main`: it is protected, so a later `commit_branch` returns 403, the edit stays an uncommitted version, and `execute_bot` keeps running the last committed one — the change appears saved but never executes. The same branch is what `execute_bot` needs as `targetBranchName`, so settle it before the bot runs, not after
 - Never create a script with 0 steps
+- **After any step that can trigger navigation (a submit/sign-in/link click) and before the next
+  step that verifies the result, insert a wait step** — `template-id-36` ("Wait for visibility of
+  {{ui-locator}} for {{number}} seconds", preferred when a destination-page locator is known) or
+  `template-id-35` ("Wait for {{number}} seconds", plain fixed delay ~5-10s otherwise). Skipping
+  this causes the verify step to run before the page has navigated and fail — see CLAUDE.md's
+  "Post-navigation race" section.
 - Script names must be unique — append " (2)", " (3)" if duplicates arise
 - Always show the traceability matrix before writing scripts, not just in the final summary
 - If the file has an `error` from `extract_requirements`, do not retry — report it to the user

@@ -1,5 +1,46 @@
+import asyncio
+
 from src.clients.base_client import BaseAhqClient
 from src.config.ahq_services import TEST_MGMT_SVC
+
+# The platform's step titles rarely use the word a caller reaches for first. Searching
+# "Navigate" — the obvious term for opening a URL — matches only "Navigate back" and
+# "Navigate forward"; the step that actually opens one is titled "Open Web Browser and go to
+# page", so the natural query misses it and an agent concludes the action doesn't exist. Search
+# is a plain substring match server-side, so the expansion has to happen here.
+_TEMPLATE_TITLE_ALIASES = {
+    "navigate": ("Open Web Browser", "go to page"),
+    "go to": ("Open Web Browser", "go to page"),
+    "goto": ("Open Web Browser", "go to page"),
+    "open url": ("Open Web Browser", "go to page"),
+    "open page": ("Open Web Browser", "go to page"),
+    "visit": ("Open Web Browser", "go to page"),
+    "launch": ("Open Web Browser",),
+    "browse": ("Open Web Browser",),
+    "type": ("Enter",),
+    "fill": ("Enter",),
+    "input": ("Enter",),
+    "set value": ("Enter",),
+    "assert": ("Verify",),
+    "check": ("Verify",),
+    "expect": ("Verify",),
+    "should": ("Verify",),
+    "validate": ("Verify",),
+    "dropdown": ("Select",),
+    "choose": ("Select",),
+    "hover": ("Mouse",),
+    "screenshot": ("Capture",),
+    "sleep": ("Wait",),
+    "pause": ("Wait",),
+}
+
+# A script listing is for finding the script you want; its steps are what get_test_script is
+# for. Returning every step tree inline made one match cost ~6KB and a 100-script project
+# unreadable.
+_SCRIPT_SUMMARY_FIELDS = (
+    "testScriptId", "name", "status", "type", "storyId", "websiteId", "pageId",
+    "currentBranchName", "updatedDate",
+)
 
 # TypeValuePair.type codes (from typeAwareDisplay() in the backend) — the full table, so nobody
 # has to mine backend source again. The friendly single-key forms below are translated by
@@ -44,12 +85,31 @@ class TestMgmtClient(BaseAhqClient):
         super().__init__(TEST_MGMT_SVC, credentials, http_client)
 
     # --- Test Scripts ---
+    @staticmethod
+    def _slim_script_summary(script: dict) -> dict:
+        slim = {k: script[k] for k in _SCRIPT_SUMMARY_FIELDS if script.get(k) is not None}
+        steps = script.get("testSteps")
+        if isinstance(steps, list):
+            slim["stepCount"] = len(steps)
+        return slim
+
     async def list_test_scripts(self, name: str = None) -> list:
+        # `name` is a plain case-insensitive substring match and works as expected. If a script
+        # you just created is missing here, check the CREDENTIALS this client is using before
+        # suspecting the filter or the branch. Results are scoped to org_id + project_id together,
+        # and two configurations can differ in BOTH: this repo's .env token and the installed
+        # plugin's resolve to different organizations as well as different projects, so each is
+        # blind to the other's assets and neither is wrong. A mismatched org/project PAIR (say,
+        # one config's org header with the other's project id) returns a sparse result rather than
+        # an error, which reads exactly like data going missing.
         params = dict(_LIST_ALL)
         if name:
             params["name"] = name
         result = await self.get("/rest/api/stories/scripts/list", params=params)
-        return result.get("content", result) if isinstance(result, dict) else result
+        result = result.get("content", result) if isinstance(result, dict) else result
+        if isinstance(result, list):
+            return [self._slim_script_summary(s) if isinstance(s, dict) else s for s in result]
+        return result
 
     async def get_test_script(self, script_id: str) -> dict:
         return await self.get(f"/rest/api/stories/scripts/{script_id}")
@@ -81,6 +141,29 @@ class TestMgmtClient(BaseAhqClient):
         # is NOT reliably "main" (confirmed live: two scripts created back-to-back with no explicit
         # branch landed on different branches — one on "main", the next on "Test" — with no payload
         # difference between the two calls). Never rely on that default; always be explicit.
+        # An unrecognised branch name is not rejected — the server forks a NEW branch with that
+        # name and puts the script there, so a typo ("mian") silently creates a branch nobody
+        # looks at and the script is missing from every view the user checks. Confirmed live:
+        # probe values like "definitely-not-a-real-branch-xyz" became real branches in the
+        # project. Creating a branch should be a deliberate create_branch call, never a
+        # side effect of misspelling one here.
+        if branch_name:
+            branches = await self.list_branches()
+            # Never let this check itself become the failure: an unexpected response shape means
+            # "cannot verify", which must fall through to the create rather than block it.
+            known = (
+                {b.get("branchName") for b in branches if isinstance(b, dict)}
+                if isinstance(branches, list)
+                else set()
+            )
+            if known and branch_name not in known:
+                raise ValueError(
+                    f"Branch '{branch_name}' does not exist in this project, and creating a "
+                    f"script against an unknown branch silently forks a new branch with that "
+                    f"name rather than failing. Existing branches: "
+                    f"{sorted(n for n in known if n)}. Call create_branch first if a new branch "
+                    f"is genuinely what you want."
+                )
         payload = {
             "name": name,
             "testSteps": _normalize_step_parameters(steps or []),
@@ -229,6 +312,18 @@ class TestMgmtClient(BaseAhqClient):
         suite["testScripts"] = existing
         return await self.put(f"/rest/api/suites/{suite_id}", json=suite)
 
+    async def remove_scripts_from_suite(self, suite_id: str, script_ids: list) -> dict:
+        # Same GET-modify-PUT as the add path, for the same reason: scripts are embedded in the
+        # suite document and there is no per-script detach endpoint. Sequences are renumbered so
+        # the remaining scripts stay 1..n with no gaps, matching what create/add produce.
+        suite = await self.get_suite(suite_id)
+        removing = set(script_ids)
+        kept = [s for s in (suite.get("testScripts") or []) if s.get("testScriptId") not in removing]
+        for index, script in enumerate(kept, start=1):
+            script["sequence"] = index
+        suite["testScripts"] = kept
+        return await self.put(f"/rest/api/suites/{suite_id}", json=suite)
+
     # --- Recorded Scripts ---
     # RecordedScriptController reads @RequestHeader("organizationId") — NOT the "org-id" header
     # every OTHER controller in this same service uses (TestScriptController, EpicController, ...).
@@ -330,6 +425,13 @@ class TestMgmtClient(BaseAhqClient):
     async def list_branches(self, query: str = None) -> list:
         params = {"q": query} if query else None
         return await self.get(self._branches_base(), params=params)
+
+    async def delete_branch(self, branch_name: str) -> dict:
+        # Scripts living on the deleted branch are moved back to main, and a ProjectState still
+        # pointing at it is reset to main — so this removes the branch, not the work on it.
+        # The default and protected branches are refused server-side with a 400.
+        await self.delete(self._branches_base(), params={"branchName": branch_name})
+        return {"deleted": branch_name, "note": "Scripts that were on this branch are back on main."}
 
     async def get_scripts_for_branch(self, branch_name: str) -> list:
         # THE correct way to answer "which scripts are on branch X" — real membership lives in
@@ -475,11 +577,51 @@ class TestMgmtClient(BaseAhqClient):
     # A TestStep's `templateId` must reference one of these — there is no static/hardcodable
     # list of action types, since templates include per-org "Common Functions" as well as
     # platform built-ins. Always resolve a real templateId before writing a step.
+    @staticmethod
+    def _slim_template(template: dict) -> dict:
+        """Project a step template down to the fields a caller can actually act on.
+
+        Template listing/search runs once per action while a script is being written, and the
+        raw record is mostly fields nothing downstream reads: full createdBy/updatedBy user
+        objects, create/update timestamps, and templateCategory/projectId/organizationId, which
+        are null on every built-in. Dropping them cuts a typical search response by ~90% with no
+        loss of usable information; get_template still returns the untouched record.
+        """
+        # Absent keys are dropped rather than emitted as null: a null carries no more meaning
+        # than the missing key and still costs tokens in every listing.
+        slim = {
+            key: template[key]
+            for key in ("templateId", "templateTitle", "description", "type")
+            if template.get(key) is not None
+        }
+        # Params are NOT derivable from templateTitle's {{placeholders}} alone — the table-row
+        # templates accept an "action-selector" that never appears in the title.
+        if template.get("params"):
+            slim["params"] = [
+                {
+                    "name": p.get("name"),
+                    "allowed": p.get("allowed"),
+                    "required": bool(p.get("required")),
+                }
+                for p in template["params"]
+            ]
+        for flag in ("ifConditional", "hasSubTestSteps", "encrypted"):
+            if template.get(flag):
+                slim[flag] = True
+        return slim
+
+    @classmethod
+    def _slim_templates(cls, result):
+        if isinstance(result, list):
+            return [cls._slim_template(t) if isinstance(t, dict) else t for t in result]
+        return result
+
     async def list_templates(self, offset: int = 0) -> list:
         result = await self.get(
             f"/rest/api/templates/{self._credentials.project_id}", params={"offset": offset}
         )
-        return result.get("content", result) if isinstance(result, dict) else result
+        result = result.get("content", result) if isinstance(result, dict) else result
+        return self._slim_templates(result)
 
     async def search_templates(self, title: str) -> list:
         # The project-scoped /rest/api/templates/{projectId}/search only returns this org's own
@@ -489,7 +631,56 @@ class TestMgmtClient(BaseAhqClient):
         # endpoint returned real templateIds (e.g. "Navigate" -> 21 results including
         # templateId "template-id-178"). TemplatesController.getSearchedTemplate() (root) merges
         # global built-ins with this org's Common Functions, so it's a strict superset.
-        return await self.get("/rest/api/templates/search", params={"title": title})
+        queries = [title]
+        lowered = title.lower()
+        for trigger, expansions in _TEMPLATE_TITLE_ALIASES.items():
+            if trigger in lowered:
+                queries.extend(e for e in expansions if e not in queries)
+
+        responses = await asyncio.gather(
+            *(self.get("/rest/api/templates/search", params={"title": q}) for q in queries),
+            return_exceptions=True,
+        )
+        # Literal-query hits stay first: an alias is a safety net for a miss, never a reranking
+        # of a query that already worked.
+        merged, seen = [], set()
+        for response in responses:
+            if not isinstance(response, list):
+                continue  # an alias query failing must not fail the whole search
+            for template in response:
+                template_id = template.get("templateId") if isinstance(template, dict) else None
+                if template_id is None or template_id in seen:
+                    continue
+                seen.add(template_id)
+                merged.append(template)
+        return self._slim_templates(merged)
+
+    async def delete_test_script(self, script_id: str, confirmed: bool = False) -> dict:
+        """Delete a script, pausing for confirmation when other assets still reference it.
+
+        The endpoint runs its own preflight: while the script belongs to a Test Set or a TestBot
+        it answers **202 with the list of them and deletes nothing**, and only a repeat call with
+        `force=true` goes through (detaching it on the way). A 202 here is a question, not a
+        success — it is easy to read the 2xx as "deleted" and move on believing the script is
+        gone, so it is reshaped into an explicit NEEDS_CONFIRMATION result for the caller to put
+        to the user, mirroring create_branch's two-phase contract.
+        """
+        result = await self.delete(
+            f"/rest/api/stories/scripts/{script_id}",
+            params={"force": "true"} if confirmed else None,
+        )
+        if isinstance(result, dict) and result.get("status") == 202:
+            return {
+                "status": "NEEDS_CONFIRMATION",
+                "testScriptId": script_id,
+                "message": result.get("message"),
+                "next_step": (
+                    "NOTHING has been deleted. Show the associations above to the user and call "
+                    "delete_test_script again with confirmed=true only if they agree — that "
+                    "detaches the script from every Test Set and TestBot listed."
+                ),
+            }
+        return result
 
     async def get_template(self, template_id: str) -> dict:
         return await self.get(f"/rest/api/templates/{template_id}")

@@ -85,19 +85,60 @@ async def test_list_templates_uses_project_scoped_path():
 
 
 async def test_search_templates_sends_title_param():
-    captured = {}
+    captured = []
 
     async def fake_request(method, url, **kwargs):
-        captured["url"] = url
-        captured["params"] = kwargs["params"]
+        captured.append((url, kwargs["params"]))
         return httpx.Response(200, json=[{"templateId": "tmpl-2", "templateTitle": "Navigate to URL"}], request=httpx.Request(method, url))
 
     client = _client_with_fake_transport(fake_request)
     result = await client.search_templates("Navigate")
 
-    assert captured["url"] == "https://api-dev.automationhq.ai/ahq-test-management-services/rest/api/templates/search"
-    assert captured["params"] == {"title": "Navigate"}
+    search_url = "https://api-dev.automationhq.ai/ahq-test-management-services/rest/api/templates/search"
+    assert all(url == search_url for url, _ in captured)
+    assert {"title": "Navigate"} in [params for _, params in captured]
+    # Every query returned the same record; the caller must see it once, not once per query.
     assert result == [{"templateId": "tmpl-2", "templateTitle": "Navigate to URL"}]
+
+
+async def test_search_templates_expands_synonyms_for_the_platforms_own_wording():
+    """"Navigate" must still reach the step that opens a URL.
+
+    The platform titles that step "Open Web Browser and go to page", and server-side search is a
+    plain substring match, so the literal query returns only "Navigate back"/"Navigate forward".
+    """
+    queried = []
+
+    async def fake_request(method, url, **kwargs):
+        title = kwargs["params"]["title"]
+        queried.append(title)
+        body = {
+            "Navigate": [{"templateId": "template-id-178", "templateTitle": "Navigate back"}],
+            "Open Web Browser": [{"templateId": "template-id-1", "templateTitle": "Open Web Browser and go to page {{text}}"}],
+        }.get(title, [])
+        return httpx.Response(200, json=body, request=httpx.Request(method, url))
+
+    client = _client_with_fake_transport(fake_request)
+    result = await client.search_templates("Navigate")
+
+    assert "Navigate" in queried
+    assert "Open Web Browser" in queried
+    ids = [t["templateId"] for t in result]
+    assert "template-id-1" in ids
+    # The literal query's own hits stay ahead of anything an alias contributed.
+    assert ids.index("template-id-178") < ids.index("template-id-1")
+
+
+async def test_search_templates_survives_a_failing_alias_query():
+    async def fake_request(method, url, **kwargs):
+        if kwargs["params"]["title"] != "Navigate":
+            return httpx.Response(500, json={"error": "boom"}, request=httpx.Request(method, url))
+        return httpx.Response(200, json=[{"templateId": "template-id-178", "templateTitle": "Navigate back"}], request=httpx.Request(method, url))
+
+    client = _client_with_fake_transport(fake_request)
+    result = await client.search_templates("Navigate")
+
+    assert [t["templateId"] for t in result] == ["template-id-178"]
 
 
 async def test_get_template_by_id():

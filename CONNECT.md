@@ -64,6 +64,58 @@ be in a **trusted workspace** — if it's in Restricted Mode, MCP servers won't 
 > ("using the AHQ MCP tools, list my test scripts") — this is Copilot's own tool-selection
 > behavior, not a sign the connection is broken.
 
+## Microsoft Copilot Studio (and Microsoft 365 Copilot agents)
+
+Copilot Studio reaches MCP servers through Power Platform's connector infrastructure, so this is
+a different path from VS Code's Copilot Chat above (that one is the plain MCP client and is
+covered by the section before this).
+
+1. In Copilot Studio, open your agent's **Tools** page → **Add a tool** → **New tool** →
+   **Model Context Protocol**.
+2. Fill in **Server name**, **Server description** (the agent's orchestrator uses this to decide
+   when to call AHQ — describe it as test automation: scripts, bots, execution reports), and the
+   **Server URL** above.
+3. For authentication choose **OAuth 2.0** → **Dynamic discovery**. The server supports dynamic
+   client registration with discovery, so there is no client ID/secret to create.
+4. Select **Create**, then **Add to agent** and create a new connection. You'll be sent to the
+   same AutomationHQ consent page — paste your ORGANIZATION token, pick a project, **Authorize**.
+
+> **Use OAuth, not API key.** Copilot Studio's API-key auth can only send a single header, but
+> header-based auth here needs two (`X-API-AUTH-KEY` *and* `projectId`). OAuth avoids this
+> entirely — the consent page picks the project. If you do try API key, the server now returns a
+> clear error naming the missing `projectId` rather than silently answering with empty results.
+
+Copilot Studio supports only the Streamable HTTP transport (SSE was dropped in August 2025),
+which is what this server speaks. Access is governed by Power Platform data policies — if a DLP
+policy restricts connectors, it restricts this MCP server's tools too.
+
+## Microsoft 365 Copilot chat (declarative agent)
+
+To get AHQ tools inside M365 Copilot chat (m365.cloud.microsoft/chat), someone builds a
+**declarative agent** that wraps this server, then publishes it to the tenant. This is a build
+step, not a connect-a-URL step — see `DEPLOYMENT.md` for the server side.
+
+In Visual Studio Code with the **Microsoft 365 Agents Toolkit** (6.12.0+):
+
+1. **Create a New Agent/App** → **Declarative Agent** → **Add an Action** → **Start with an
+   MCP Server**.
+2. Enter the server URL above.
+3. Authentication type: **OAuth (with dynamic registration)** — this server supports DCR, so
+   there is no client ID or secret to create. The toolkit writes the registration into the
+   agent's plugin manifest for you.
+4. **Provision** from the Lifecycle pane (needs *Custom App Upload Enabled* and *Copilot Access
+   Enabled* on the M365 account — ask the tenant admin if either is missing).
+5. Open `https://m365.cloud.microsoft/chat`, find the agent in the **Agents** sidebar, and sign
+   in when prompted — the same AutomationHQ consent page appears.
+
+> **Pin a curated tool set.** This server exposes 130+ tools; a declarative agent's orchestrator
+> chooses from tool descriptions alone, so pin the dozen or so the agent actually needs rather
+> than taking all of them via dynamic discovery. Keep destructive tools
+> (`permanently_delete_asset`, `merge_pull_request`) out of an agent aimed at general users.
+
+Note that M365 Copilot **federated connectors** are a *different* feature with a read-only tool
+restriction — declarative agents have no such limit, which is why this is the recommended path.
+
 ## Cursor / Windsurf
 
 Not yet live-validated against this server (as of 2026-07-17), but both follow the same MCP
@@ -103,6 +155,8 @@ own `mcp_config.json` in the same shape.) Find the project UUID in the AHQ web a
 | Client shows connected but a tool call fails with a local-agent error | That tool needs your own machine's local agent (`localhost:9202`), which a hosted connector session can't reach — only stdio (the Claude Code plugin) can. Use the plugin for that specific action, or point the bot at a cloud grid instead. |
 | VS Code: registration/connection fails with a confusing client-id error | Fixed server-side 2026-07-16 (VS Code's Copilot Chat client skips standard registration) — make sure you're hitting the current dev server; no client-side workaround needed. |
 | Everything looks connected but no tools appear | In VS Code, confirm Copilot Chat is in **Agent** mode (not Ask/Edit) — MCP tools only surface there. In Claude Desktop, start a *new* chat after connecting. |
+| Copilot Studio: tools return empty lists ("you have no websites") | You connected with **API key** auth, which can only send one header, so `projectId` never arrives. Reconnect using **OAuth 2.0 → Dynamic discovery** instead. |
+| Copilot Studio: adding the server fails on the redirect/callback URL | Power Platform's per-connector callback (`https://<region>.consent.azure-apim.net/redirect/...`) is allowed from v1.6.4 onward — make sure the server you're hitting is running that version or later. |
 
 ## For developers
 

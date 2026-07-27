@@ -127,18 +127,50 @@ _CONTEXT_FIELDS = {
     "workflows": ("workflowId", "id", "name"),
     "performance_bots": ("performanceBotId", "id", "name"),
 }
-_CONTEXT_LIST_CAP = 100
+_CONTEXT_LIST_CAP = 25
+# Environments accumulate faster than anything else in a long-lived project — 153 in a real dev
+# org, nearly all of them abandoned one-off URLs — and at the old flat cap of 100 they alone
+# cost this snapshot ~8K characters before any work began. This tool runs first in essentially
+# every session, so its budget is spent on breadth, not depth.
+_CONTEXT_LIST_CAPS = {"environments": 10}
+# Where a caller goes for the entries the snapshot didn't show.
+_CONTEXT_FULL_LIST_TOOL = {
+    "projects": "list_projects",
+    "websites": "list_websites",
+    "environments": "list_environments",
+    "epics": "list_epics",
+    "bots": "list_bots",
+    "suites": "list_suites",
+    "api_collections": "list_api_collections",
+    "workflows": "list_workflows",
+    "performance_bots": "list_performance_bots",
+}
 
 
-def _slim_context_list(items, fields):
+def _slim_context_list(items, fields, cap=_CONTEXT_LIST_CAP, more_tool=None):
     if not isinstance(items, list):
         return items
+
+    shown = list(items[:cap])
+    if len(items) > cap:
+        # The default-flagged entry is the one a caller most often actually wants and it is not
+        # reliably near the front (the real dev org's default environment sorted ~90th), so it
+        # would otherwise be the single most useful row the truncation hides.
+        default_entry = next(
+            (it for it in items[cap:] if isinstance(it, dict) and it.get("isDefault")), None
+        )
+        if default_entry is not None and shown:
+            shown[-1] = default_entry
+
     slimmed = [
         {f: it[f] for f in fields if isinstance(it, dict) and it.get(f) is not None}
-        for it in items[:_CONTEXT_LIST_CAP]
+        for it in shown
     ]
-    if len(items) > _CONTEXT_LIST_CAP:
-        return {"total": len(items), "showing_first": _CONTEXT_LIST_CAP, "items": slimmed}
+    if len(items) > cap:
+        truncated = {"total": len(items), "showing": len(slimmed), "items": slimmed}
+        if more_tool:
+            truncated["more"] = f"truncated for brevity — call {more_tool} for the full list"
+        return truncated
     return slimmed
 
 
@@ -169,7 +201,12 @@ async def _get_ahq_context(clients: ClientBundle) -> dict:
         if isinstance(v, Exception):
             out[k] = str(v)
         elif k in _CONTEXT_FIELDS:
-            out[k] = _slim_context_list(v, _CONTEXT_FIELDS[k])
+            out[k] = _slim_context_list(
+                v,
+                _CONTEXT_FIELDS[k],
+                cap=_CONTEXT_LIST_CAPS.get(k, _CONTEXT_LIST_CAP),
+                more_tool=_CONTEXT_FULL_LIST_TOOL.get(k),
+            )
         else:
             out[k] = v
     if isinstance(results[0], Exception):
@@ -323,8 +360,9 @@ TOOLS = [
     ),
 
     # Test scripts
-    Tool(name="list_test_scripts", description="List or search test scripts by name.", inputSchema={"type": "object", "properties": {"name": {"type": "string", "description": "Optional name filter"}}}),
-    Tool(name="get_test_script", description="Get full details of a test script by ID.", inputSchema={"type": "object", "properties": {"script_id": {"type": "string"}}, "required": ["script_id"]}),
+    Tool(name="list_test_scripts", description="List or search test scripts by name. Returns a summary per script (id, name, status, type, stepCount) — call get_test_script for a script's actual steps. The `name` filter is a plain case-insensitive substring match. Results cover the configured project only; use get_scripts_for_branch to ask which scripts are on a specific branch.", inputSchema={"type": "object", "properties": {"name": {"type": "string", "description": "Optional case-insensitive substring filter"}}}),
+    Tool(name="get_test_script", description="Get full details of a test script by ID, including every step. NOTE: the returned currentBranchName reflects this request's ambient branch, NOT the script's real branch membership — use get_scripts_for_branch for that.", inputSchema={"type": "object", "properties": {"script_id": {"type": "string"}}, "required": ["script_id"]}),
+    Tool(name="delete_test_script", description="Delete a test script. This is the SAME soft delete the UI performs — the script is archived (isArchived=true), appears under Administration -> Archive, and can be brought back with restore_asset; it is not destroyed. TWO-PHASE: if the script is still referenced by any Test Set or TestBot, the first call deletes NOTHING and returns status NEEDS_CONFIRMATION listing them (the raw API signals this with a 202 that is easily misread as success). Relay that list to the user and only call again with confirmed=true if they agree — that detaches the script from each one as it deletes.", inputSchema={"type": "object", "properties": {"script_id": {"type": "string"}, "confirmed": {"type": "boolean", "default": False, "description": "Set true ONLY to confirm a prior NEEDS_CONFIRMATION response, after the user has agreed"}}, "required": ["script_id"]}),
     Tool(name="add_test_steps", description="Append (or insert) steps into an EXISTING test script in one call — no manual PUT assembly needed. Steps use the same shape as create_test_script (templateId + templateTitle verbatim for built-ins + parameters). Scalar parameter values accept friendly forms: {\"literal\": \"text\"}, {\"configuration\": \"paramName\"}, {\"vault\": \"secretName\"}, {\"variable\": \"varName\"}, {\"data_column\": \"col\"}, {\"faker\": \"Email\"}, {\"parameter\": \"name\"} — or the raw {\"type\": <code>, \"value\": ...}. Sequences renumber automatically. NOTE: scripts on a protected branch (often 'main') reject direct edits — create a branch or delete+recreate.", inputSchema={"type": "object", "properties": {"script_id": {"type": "string"}, "steps": {"type": "array", "items": {"type": "object"}, "description": "Steps to add"}, "position": {"type": "integer", "description": "0-based insert position; omit to append at the end"}}, "required": ["script_id", "steps"]}),
     Tool(name="update_test_script", description="Update fields of an existing test script (name, status, story_id, testSteps, ...) — GET-merge-PUT, so unspecified fields are preserved. Same protected-branch caveat as add_test_steps.", inputSchema={"type": "object", "properties": {"script_id": {"type": "string"}, "changes": {"type": "object", "description": "Fields to change, using the entity's own field names (e.g. name, status, storyId, testSteps)"}}, "required": ["script_id", "changes"]}),
     Tool(
@@ -349,7 +387,7 @@ TOOLS = [
                 "status": {"type": "string", "default": "Not Started", "description": "One of: Not Started, In Progress, Ready, To Be Repaired, On Hold. Sending this as null/absent triggers a UI validation error when the script is opened."},
                 "repair_comment": {"type": "string", "description": "REQUIRED only when status is 'To Be Repaired' (matches the frontend form's conditional rule) — otherwise omit."},
                 "script_type": {"type": "string", "default": "WEB", "description": "e.g. 'WEB'. Sending this as null/absent triggers a UI validation error when the script is opened."},
-                "branch_name": {"type": "string", "default": "main", "description": "Always defaults to 'main' and should stay that way unless the user explicitly asked for a working branch — omitting this field entirely falls back to an unreliable per-session ambient branch that is NOT guaranteed to be main, confirmed live."},
+                "branch_name": {"type": "string", "default": "main", "description": "ASK THE USER which branch this script should live on before creating it — offer a new branch alongside the real ones from list_branches. Do NOT quietly accept the 'main' default: main is protected, so a later commit_branch on it returns 403, the edit stays an uncommitted version, and execute_bot goes on running the last committed one — the change looks saved and never executes (confirmed live: an inserted wait step silently never ran). Whatever branch is chosen is also what execute_bot needs as targetBranchName, so it has to be settled before the bot runs. Always send this field explicitly either way; omitting it falls back to the token's ambient checked-out branch, which is not reliably main."},
                 "steps": {
                     "type": "array",
                     "items": {
@@ -386,7 +424,7 @@ TOOLS = [
 
     # Step templates — resolve real templateIds before writing any test step
     Tool(name="list_step_templates", description="List available step templates (built-in action types + org-defined Common Functions) for the current project. Use this or search_step_templates before writing any test step — templateId is never invented.", inputSchema={"type": "object", "properties": {"offset": {"type": "integer", "default": 0}}}),
-    Tool(name="search_step_templates", description="Search step templates by title (e.g. 'Click', 'Navigate', 'Assert Text') to find the real templateId for an action.", inputSchema={"type": "object", "properties": {"title": {"type": "string"}}, "required": ["title"]}),
+    Tool(name="search_step_templates", description="Search step templates by title (e.g. 'Click', 'Navigate', 'Assert Text') to find the real templateId for an action. Matching is a substring search over the platform's own titles, which often differ from the obvious word — common synonyms are expanded automatically (searching 'Navigate' also returns 'Open Web Browser and go to page', 'assert' also returns the 'Verify ...' family), so search by intent rather than guessing the platform's phrasing.", inputSchema={"type": "object", "properties": {"title": {"type": "string"}}, "required": ["title"]}),
     Tool(name="get_step_template", description="Get full detail of a step template by ID, including which params sub-fields it expects.", inputSchema={"type": "object", "properties": {"template_id": {"type": "string"}}, "required": ["template_id"]}),
 
     # Recorded Scripts — browser sessions captured by the TestBot Recorder Chrome Extension.
@@ -412,10 +450,12 @@ TOOLS = [
     Tool(name="list_environments", description="List all configured environments.", inputSchema={"type": "object", "properties": {}}),
     Tool(name="create_suite", description="Create a new test suite (Test Set). Scripts can be attached now (script_ids) or later via add_scripts_to_suite; a suite feeds create_test_bot.", inputSchema={"type": "object", "properties": {"name": {"type": "string"}, "script_ids": {"type": "array", "items": {"type": "string"}, "description": "Optional test script ids to attach immediately"}}, "required": ["name"]}),
     Tool(name="add_scripts_to_suite", description="Add test scripts to an existing test suite. (Scripts are embedded in the suite document — this fetches the suite, merges, and saves it back; already-attached scripts are skipped.)", inputSchema={"type": "object", "properties": {"suite_id": {"type": "string"}, "script_ids": {"type": "array", "items": {"type": "string"}}}, "required": ["suite_id", "script_ids"]}),
+    Tool(name="remove_scripts_from_suite", description="Detach test scripts from a test suite without deleting the scripts themselves. Also the way to clear the association that makes delete_test_script ask for confirmation. Remaining scripts are renumbered 1..n.", inputSchema={"type": "object", "properties": {"suite_id": {"type": "string"}, "script_ids": {"type": "array", "items": {"type": "string"}}}, "required": ["suite_id", "script_ids"]}),
 
     # Version Control — branches, commits, and Pull Requests over test scripts.
     Tool(name="list_branches", description="List version-control branches in the project, optionally filtered by name.", inputSchema={"type": "object", "properties": {"query": {"type": "string", "description": "Optional name filter"}}}),
     Tool(name="get_scripts_for_branch", description="List the test scripts that are members of a branch. This is the ONLY correct way to answer 'which scripts are on branch X' — TestScript.currentBranchName does NOT reflect real branch membership.", inputSchema={"type": "object", "properties": {"branch_name": {"type": "string"}}, "required": ["branch_name"]}),
+    Tool(name="delete_branch", description="Delete a version-control branch. Scripts that were on it are moved back to main and a project state pointing at it is reset to main, so the work survives — but the branch's own history does not. Refused with 400 for the default branch and for protected branches. Confirm with the user before calling.", inputSchema={"type": "object", "properties": {"branch_name": {"type": "string"}}, "required": ["branch_name"]}),
     Tool(name="create_branch", description="Create a branch (fork from from_branch, default main). TWO-PHASE: the server runs a preflight conflict check and may return status NEEDS_CONFIRMATION with details instead of creating — relay that to the user and only resend with confirmed=true after they agree. strategy: FROM_BRANCH (default, fork from from_branch HEAD) or FROM_CURRENT (include scripts' individual branch work).", inputSchema={"type": "object", "properties": {"branch_name": {"type": "string"}, "from_branch": {"type": "string", "default": "main"}, "strategy": {"type": "string", "enum": ["FROM_BRANCH", "FROM_CURRENT"]}, "confirmed": {"type": "boolean", "default": False, "description": "Set true ONLY to confirm a NEEDS_CONFIRMATION response"}, "script_ids": {"type": "array", "items": {"type": "string"}, "description": "Optional — branch only these scripts (default: all)"}, "is_protected": {"type": "boolean", "default": False, "description": "Require an approved PR to merge into this branch; also blocks deletion"}}, "required": ["branch_name"]}),
     Tool(name="commit_branch", description="Commit all current work on a branch with a message (and optional tag like 'v2.0').", inputSchema={"type": "object", "properties": {"branch_name": {"type": "string"}, "message": {"type": "string"}, "tag": {"type": "string"}}, "required": ["branch_name", "message"]}),
     Tool(name="list_commits", description="List commit history for a branch (paged).", inputSchema={"type": "object", "properties": {"branch_name": {"type": "string"}, "page": {"type": "integer", "default": 0}, "size": {"type": "integer", "default": 20}}, "required": ["branch_name"]}),
@@ -476,7 +516,7 @@ TOOLS = [
     Tool(name="list_execution_types", description="List execution types (e.g. Web/Mobile) and platform options.", inputSchema={"type": "object", "properties": {}}),
     Tool(name="create_environment", description="Create an execution Environment (name + app-under-test URL). execute_bot's executionConfiguration.baseUrl must reference an Environment ID — if list_environments has nothing for the target app, create one here first.", inputSchema={"type": "object", "properties": {"name": {"type": "string"}, "url": {"type": "string", "description": "The app-under-test URL this environment points at"}, "env_type": {"type": "string", "default": "Web"}, "description": {"type": "string"}}, "required": ["name", "url"]}),
     Tool(name="get_grid_capabilities", description="One call returns everything an execute_bot config needs for a grid: valid platforms (osType values), browsers, resolutions, and browser versions (pass browser to get its versions). Use this instead of guessing — values differ per grid ('Grid OS'/'latest' on plain Selenium, real OS/version lists on TestingBot/BrowserStack).", inputSchema={"type": "object", "properties": {"grid_id": {"type": "string"}, "testing_type": {"type": "string", "default": "Web"}, "browser": {"type": "string", "description": "Optional — include to also get this browser's valid versions"}}, "required": ["grid_id"]}),
-    Tool(name="execute_bot", description="Run a TestBot — on the cloud grid pool, or on this machine's own local agent if gridId resolves to it (detected automatically; routed directly to localhost:9202, bypassing the cloud, since the cloud has no way to deliver a job to a specific developer's machine). execution_configuration is validated locally before submission. REQUIRED: baseUrl (an ENVIRONMENT ID from list_environments/create_environment — NOT a URL, despite the name; the backend resolves it via environment lookup and a raw URL kills the run at report time), browser + browserVersion + osType (from get_grid_capabilities), gridId (from list_grids). Returns executionId AND jobId — poll get_execution_status (which falls back to the detailed report when the lightweight status is UNKNOWN), then get_execution_report for per-step results.", inputSchema={"type": "object", "properties": {"bot_id": {"type": "string"}, "execution_configuration": {"type": "object", "description": "Required: baseUrl (Environment ID), browser, browserVersion, osType, gridId. Optional: resolution, type ('Web'), timeout (1-300, default 60), waitForElementTimeout (1-300, default 30), delayBetweenSteps (0-30), numberOfRetries (0-3), screenshot flags, targetBranchName, profileId.", "properties": {"baseUrl": {"type": "string", "description": "Environment ID (NOT a URL)"}, "browser": {"type": "string"}, "browserVersion": {"type": "string"}, "osType": {"type": "string"}, "gridId": {"type": "string"}, "resolution": {"type": "string"}, "timeout": {"type": "integer"}, "targetBranchName": {"type": "string"}}, "required": ["baseUrl", "browser", "browserVersion", "osType", "gridId"]}, "name": {"type": "string", "description": "Execution display name (defaults to the bot's name)"}, "profile_id": {"type": "string"}, "partial_execution": {"type": "boolean", "default": False}}, "required": ["bot_id", "execution_configuration"]}),
+    Tool(name="execute_bot", description="Run a TestBot — on the cloud grid pool, or on this machine's own local agent if gridId resolves to it (detected automatically; routed directly to localhost:9202, bypassing the cloud, since the cloud has no way to deliver a job to a specific developer's machine). execution_configuration is validated locally before submission. REQUIRED: baseUrl (an ENVIRONMENT ID from list_environments/create_environment — NOT a URL, despite the name; the backend resolves it via environment lookup and a raw URL kills the run at report time), browser + browserVersion + osType (from get_grid_capabilities), gridId (from list_grids). Returns the background JOB id only — there is NO executionId yet, because the execution record is not created until the job starts. Poll get_job_status(jobId); when it leaves PROCESSING, call list_recent_runs(bot_id) to get the executionId, then get_execution_report(executionId) for per-step pass/fail. Note that a job reporting SUCCEEDED means it ran, NOT that the tests passed — only the report says that.", inputSchema={"type": "object", "properties": {"bot_id": {"type": "string"}, "execution_configuration": {"type": "object", "description": "Required: baseUrl (Environment ID), browser, browserVersion, osType, gridId. Optional: resolution, type ('Web'), timeout (1-300, default 60), waitForElementTimeout (1-300, default 30), delayBetweenSteps (0-30), numberOfRetries (0-3), screenshot flags, targetBranchName, profileId.", "properties": {"baseUrl": {"type": "string", "description": "Environment ID (NOT a URL)"}, "browser": {"type": "string"}, "browserVersion": {"type": "string"}, "osType": {"type": "string"}, "gridId": {"type": "string"}, "resolution": {"type": "string"}, "timeout": {"type": "integer"}, "targetBranchName": {"type": "string"}}, "required": ["baseUrl", "browser", "browserVersion", "osType", "gridId"]}, "name": {"type": "string", "description": "Execution display name (defaults to the bot's name)"}, "profile_id": {"type": "string"}, "partial_execution": {"type": "boolean", "default": False}}, "required": ["bot_id", "execution_configuration"]}),
     Tool(name="get_execution_status", description="Progress/status poll for a running execution (by executionId from execute_bot). The lightweight endpoint reports UNKNOWN for finished runs — this tool automatically falls back to the detailed report's overall status in that case. For queue-position detail, use get_job_status with the jobId from execute_bot's response.", inputSchema={"type": "object", "properties": {"execution_id": {"type": "string"}}, "required": ["execution_id"]}),
     Tool(name="schedule_bot_recurring", description="Create a recurring schedule for a TestBot — the real scheduler backing both the Scheduler Admin page and each TestBot's own clock-icon dialog (test-management-services). REQUIRED: name (1-120 chars, the schedule's own name — ask the user if not given), cron (a real cron expression — use convert_text_to_cron first if the user described it in plain language, e.g. 'every day at 9am'), execution_configuration (same shape as execute_bot's: baseUrl/browser/browserVersion/osType/gridId required). emails (result-recipient list) is optional but should be asked for — check list_scheduler_recipient_emails for previously-used addresses first.", inputSchema={"type": "object", "properties": {"bot_id": {"type": "string"}, "name": {"type": "string", "description": "The schedule's own name, 1-120 chars"}, "emails": {"type": "array", "items": {"type": "string"}, "description": "Result-notification recipients"}, "cron": {"type": "string", "description": "Cron expression, e.g. '0 9 * * *'. Use convert_text_to_cron to derive one from plain language."}, "execution_configuration": {"type": "object", "properties": {"baseUrl": {"type": "string", "description": "Environment ID (NOT a URL)"}, "browser": {"type": "string"}, "browserVersion": {"type": "string"}, "osType": {"type": "string"}, "gridId": {"type": "string"}}, "required": ["baseUrl", "browser", "browserVersion", "osType", "gridId"]}}, "required": ["bot_id", "name", "cron", "execution_configuration"]}),
     Tool(name="cancel_schedule", description="Delete a recurring schedule created by schedule_bot_recurring (test-management-services' real scheduler).", inputSchema={"type": "object", "properties": {"schedule_id": {"type": "string"}}, "required": ["schedule_id"]}),
@@ -614,11 +654,17 @@ def _require_stdio_config() -> None:
     Fail fast (per tool call) when stdio mode is missing its .env config. Without this, an empty
     token + empty/wrong base URL makes every tool "succeed" against the web frontend's HTML —
     a 10-minute misdiagnosis instead of a 10-second fix (hit live, first teammate install).
+
+    base_url is checked on the RESOLVED credentials (DEFAULT_BUNDLE's, already built via
+    AhqCredentials.from_settings) rather than the raw AHQ_BASE_URL env var directly — the token's
+    own urlDetails.baseUrl claim now resolves base_url the same way hosted mode already did, so
+    AHQ_BASE_URL in .env is only needed as a fallback for a token without that claim.
     """
     from src.config.ahq_services import REPO_ROOT
 
+    resolved_base_url = DEFAULT_BUNDLE.asset._credentials.base_url
     missing = [k for k, v in (
-        ("AHQ_BASE_URL", settings.ahq_base_url),
+        ("AHQ_BASE_URL", resolved_base_url),
         ("AHQ_API_TOKEN", settings.ahq_api_token),
         ("AHQ_PROJECT_ID", settings.ahq_project_id),
     ) if not v]
@@ -653,9 +699,24 @@ def _resolve_clients() -> tuple[ClientBundle, bool]:
     # OAuth requests carry their credentials sealed inside the Bearer token; DualAuthMiddleware
     # verifies it and stashes the result in the ASGI scope. Legacy header clients fall through
     # to the original X-API-AUTH-KEY/projectId path.
-    creds = req.scope.get("ahq_credentials") or AhqCredentials.from_headers(
-        req.headers, base_url=settings.ahq_base_url, allowed_extra_base_urls=settings.extra_base_urls()
-    )
+    creds = req.scope.get("ahq_credentials")
+    if creds is None:
+        creds = AhqCredentials.from_headers(
+            req.headers, base_url=settings.ahq_base_url, allowed_extra_base_urls=settings.extra_base_urls()
+        )
+        # BaseAhqClient sends projectId as a header on EVERY AHQ request, so an empty one is not
+        # an org-wide fallback — the API answers 200 with an empty result set, which reads as
+        # "you have no websites/scripts/bots" instead of "you are misconfigured". Clients that
+        # can only send a single auth header (Microsoft Copilot Studio's API-key auth is one)
+        # land here by construction, so fail loudly rather than silently answering nothing.
+        # The OAuth path can't hit this: /consent always resolves a project before issuing.
+        if not creds.project_id:
+            raise RuntimeError(
+                "ahq-mcp-server is not configured for this request: the 'projectId' header is "
+                "missing. Header auth requires BOTH 'X-API-AUTH-KEY' and 'projectId'. If your "
+                "client can only send one header, connect via OAuth instead — its consent page "
+                "picks the project for you (see CONNECT.md)."
+            )
     return ClientBundle.build(credentials=creds, http_client=app_http_client.client), True
 
 
@@ -797,6 +858,10 @@ async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: boo
         return await clients.test_mgmt.list_test_scripts(args.get("name"))
     if name == "get_test_script":
         return await clients.test_mgmt.get_test_script(args["script_id"])
+    if name == "delete_test_script":
+        return await clients.test_mgmt.delete_test_script(
+            args["script_id"], args.get("confirmed", False)
+        )
     if name == "add_test_steps":
         return await clients.test_mgmt.add_test_steps(
             args["script_id"], args["steps"], args.get("position"))
@@ -889,12 +954,16 @@ async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: boo
         return await clients.test_mgmt.create_suite(args["name"], scripts)
     if name == "add_scripts_to_suite":
         return await clients.test_mgmt.add_scripts_to_suite(args["suite_id"], args["script_ids"])
+    if name == "remove_scripts_from_suite":
+        return await clients.test_mgmt.remove_scripts_from_suite(args["suite_id"], args["script_ids"])
 
     # Version Control
     if name == "list_branches":
         return await clients.test_mgmt.list_branches(args.get("query"))
     if name == "get_scripts_for_branch":
         return await clients.test_mgmt.get_scripts_for_branch(args["branch_name"])
+    if name == "delete_branch":
+        return await clients.test_mgmt.delete_branch(args["branch_name"])
     if name == "create_branch":
         return await clients.test_mgmt.create_branch(
             args["branch_name"],
@@ -1300,7 +1369,7 @@ async def main():
         # showing an opaque "server failed to start"), but say it loudly once up front.
         print(f"[ahq-mcp-server] NOT CONFIGURED: {e}", file=sys.stderr)
     else:
-        print(f"[ahq-mcp-server] base_url={settings.ahq_base_url} "
+        print(f"[ahq-mcp-server] base_url={DEFAULT_BUNDLE.asset._credentials.base_url} "
               f"project={settings.ahq_project_id}", file=sys.stderr)
         try:
             me = await DEFAULT_BUNDLE.asset.validate_token()

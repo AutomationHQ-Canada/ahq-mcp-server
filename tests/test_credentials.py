@@ -21,11 +21,18 @@ def test_decode_ahq_token_reads_claims():
     assert claims == {"organizationId": "org-1", "organizationName": "Acme"}
 
 
+class _FakeSettings:
+    ahq_base_url = "https://api-dev.automationhq.ai"
+    ahq_api_token = ""
+    ahq_project_id = "proj-1"
+
+    def extra_base_urls(self):
+        return frozenset()
+
+
 def test_from_settings_derives_org_id_from_token_not_a_separate_setting():
-    class FakeSettings:
-        ahq_base_url = "https://api-dev.automationhq.ai"
+    class FakeSettings(_FakeSettings):
         ahq_api_token = _fake_jwt(organizationId="org-from-token")
-        ahq_project_id = "proj-1"
 
     creds = AhqCredentials.from_settings(FakeSettings())
 
@@ -35,6 +42,30 @@ def test_from_settings_derives_org_id_from_token_not_a_separate_setting():
         org_id="org-from-token",
         project_id="proj-1",
     )
+
+
+def test_from_settings_resolves_base_url_from_token_urldetails():
+    # Stdio/.env mode must resolve base_url from the token the same way hosted mode's
+    # from_headers already did — AHQ_BASE_URL in .env is only a fallback now, not the source
+    # of truth, so a prod token used with a dev-configured .env still hits prod's own gateway.
+    class FakeSettings(_FakeSettings):
+        ahq_base_url = "https://api-dev.automationhq.ai"
+        ahq_api_token = _fake_jwt(
+            organizationId="org-from-token", urlDetails=_url_details("https://api.automationhq.ai")
+        )
+
+    creds = AhqCredentials.from_settings(FakeSettings())
+
+    assert creds.base_url == "https://api.automationhq.ai"
+
+
+def test_from_settings_falls_back_to_ahq_base_url_when_token_has_no_urldetails():
+    class FakeSettings(_FakeSettings):
+        ahq_api_token = _fake_jwt(organizationId="org-from-token")
+
+    creds = AhqCredentials.from_settings(FakeSettings())
+
+    assert creds.base_url == "https://api-dev.automationhq.ai"
 
 
 def test_from_headers_derives_org_id_from_token_ignoring_org_id_header():

@@ -19,6 +19,14 @@ version history: `D:\MCP\AHQ_MCP_SERVER_MASTER_DESIGN.md` §14.
 - Gateway URL: `https://api-dev.automationhq.ai` (NOT `https://dev.automationhq.ai`)
 - Org token type: `ORGANIZATION` — signed with a different secret than user JWTs
 - `.env` must never be committed
+- **`AHQ_BASE_URL` is now optional in `.env` (2026-07-19)**: `AhqCredentials.from_settings`
+  (stdio mode) resolves `base_url` from the token's own `urlDetails.baseUrl` claim first via
+  `base_url_from_claims`, same as hosted mode's `from_headers` already did — `AHQ_BASE_URL` is
+  only a fallback for a token issued before that claim existed. `org_id` was already
+  token-derived; `base_url` now is too, `project_id` is the only credential left with no
+  in-token equivalent. `_require_stdio_config`'s fail-fast check now reads the *resolved*
+  `DEFAULT_BUNDLE.asset._credentials.base_url`, not the raw env var, so it only fails if
+  neither the token nor `.env` produce one.
 
 ## Hosted mode authentication (Slice 9m, 2026-07-14)
 
@@ -89,6 +97,32 @@ Key facts a future session must not rediscover:
   symptom, check with a direct curl repro of both `/register` AND `/authorize` before assuming
   which one is actually failing — don't guess from the error message alone, it can be a second-hand
   symptom of an earlier silent failure.
+- **Microsoft 365 Copilot declarative agents** (v1.6.5): a third Microsoft path, distinct from
+  both Copilot Chat and Copilot Studio. Built with the M365 Agents Toolkit, which supports
+  "OAuth (with dynamic registration)" — so our DCR works and no static client id/secret is
+  needed — and is NOT restricted to read-only tools (unlike M365 *federated connectors*, which
+  are, and are a different feature). Two server-side requirements, both now met: the fixed Teams
+  callback `https://teams.microsoft.com/api/platform/v1.0/oAuthRedirect` is allowlisted, and an
+  unauthenticated **GET** on `/mcp` must answer 401 with `WWW-Authenticate` (the toolkit probes
+  with GET to discover auth; verified live — `DualAuthMiddleware` already handles every method
+  but OPTIONS). `CLIENT_TTL` was raised 90d → 365d because the toolkit persists the DCR result
+  in the agent's plugin manifest, so a short client life expires the customer's *deployment*
+  months later with no obvious cause; pinned by
+  `test_client_registration_outlives_a_deployed_agent_manifest`.
+- **Microsoft Copilot Studio needs two things VS Code's Copilot Chat did not** (v1.6.4). They are
+  different clients despite the shared "Copilot" name: Copilot Chat is a plain MCP client (already
+  handled by `_implicit_client`), while Copilot Studio goes through Power Platform's *connector*
+  infrastructure. (1) It performs real RFC 7591 DCR with a per-connector, per-region callback
+  `https://<region>.consent.azure-apim.net/redirect/<connector-id>` — the connector id doesn't
+  exist until after the connector is created, so `AHQ_MCP_EXTRA_REDIRECT_URIS` can't hold a
+  literal; `redirect_uri_allowed` matches the `consent.azure-apim.net` host + `/redirect` path
+  instead (Microsoft-owned, same posture as the `vscode.dev` entry). (2) Its API-key auth sends
+  only ONE header, but header auth here needs `X-API-AUTH-KEY` **and** `projectId` —
+  `BaseAhqClient` puts `projectId` on every AHQ request, and an empty one returns 200 with an
+  EMPTY RESULT SET, not an error (confirmed live: `list_websites` → `[]`). `_resolve_clients` now
+  raises on a header-path request with no `projectId` rather than letting an agent report "you
+  have no websites". OAuth is the documented path for Copilot Studio since `/consent` resolves
+  the project itself. Copilot Studio is Streamable-HTTP only (SSE dropped Aug 2025) — already fine.
 - **One consent URL now serves both dev and prod tokens (2026-07-17)**: every AHQ API call
   previously used this server's own fixed `AHQ_BASE_URL` setting (dev), so pasting a PROD
   organization token into the dev-hosted `/consent` flow validated it against DEV's gateway/DB
@@ -437,6 +471,79 @@ class behind the real User Test Step rename incident (2026-07-09).
   (e.g. `"READY"`), and `return_type` (`{"type": "String", "name": "", "array": false}` — only
   `type` required) are all required; `description` max 600. Nesting is rejected server-side: a
   step's `templateId` must not be another Common Function's ID.
+
+### A vault secret protects the script document, NOT the execution report
+
+`{"type": 7, "value": "<secretName>"}` (`create_config_vault_secret` + the "From Secrets" value
+type) keeps the real credential out of the stored test script: the step renders as
+`Enter [vault: gfg_password] for the element: "Password input"` and the plaintext appears nowhere
+in the document. That part works.
+
+The executor, however, resolves the secret and writes the **resolved value** into the execution
+report — confirmed live on a local-agent run:
+
+```
+"testStepName":  "Enter Onkar@123 for the element: \"Password input\" on the page: Login",
+"statusMessage": "Entered value Onkar@123"
+```
+
+So anyone who can read an execution report can read the credential, and the vault buys storage-level
+protection only. Tell users this when they supply a real password rather than letting them assume
+the vault covers the whole lifecycle. (Fixing it belongs in the executor's step-title/status
+rendering, not here — the MCP server never sees the resolved value.)
+
+### Ask which branch a new script lands on — `main` is protected and silently strands edits
+
+`create_test_script`'s `branch_name` defaults to `"main"`, and taking that default is a trap
+rather than a safe choice. `main` is a **protected** branch (`list_branches` -> `protected: true`),
+so `commit_branch("main", ...)` returns
+`403 Direct push to protected branch 'main' is restricted. Use a Pull Request.`
+
+The failure this produces is silent, because the edit itself succeeds. `add_test_steps` returns
+`"Test script updated successfully"`, a subsequent GET shows the new step in place, and
+`versionCount` goes to 2 with `commitMessage: null` — but **`execute_bot` runs the last COMMITTED
+version**, which is still version 1. Confirmed live: a `"Wait for 10 seconds"` step inserted
+between a sign-in click and a `Verify current URL` step never appeared in the execution report at
+all (6 step results for a 7-step script), and the run failed on precisely the step the wait was
+meant to fix. Nothing in either the edit response or the report says a version was skipped.
+
+So: **ask the user which branch the script should live on before creating it** — a new branch, or
+one of the real ones from `list_branches` — and pass it as `branch_name`. That same branch is what
+`execute_bot` needs as `targetBranchName`, so deciding it after the script exists means redoing the
+work. To move an existing script onto a branch, `create_branch(..., strategy="FROM_CURRENT",
+script_ids=[id])` forks it across, then `commit_branch` on the new (unprotected) branch.
+
+Note that a commit's `scriptVersionIds` records the version each script was pinned at — check it
+against the script's own `currentVersionId` to confirm the commit actually captured the edit you
+expected rather than an earlier version.
+
+### Post-navigation race: always wait between a navigating action and its verify step
+
+`"Verify current URL contains path {{expected}}"` (`template-id-117`, `ActionLibraryServices.
+verifyUrlContainsText`) does **one immediate, unretried check** — `getCurrentUrl().contains(text)`,
+no polling loop, no timeout param. Confirmed live: a script with `Click {{ui-locator}}` (sign-in)
+immediately followed by this verify step ran too fast for the browser to have navigated yet, so it
+executed against the pre-click URL and failed; the same script passed reliably once a wait step
+was inserted between the click and the verify. Any step that can trigger navigation (a submit
+click, a link click, anything a `Verify current URL`/`Verify page title`/element-visibility check
+runs right after) needs an explicit wait step in between — never assume the next step will find
+the destination page already loaded.
+
+Two built-in templates do this (`ActionLibraryServices.java`, seeded in
+`ahq-user-management-services/src/main/resources/db/taf-db.template.json`):
+- **`template-id-36`, `"Wait for visibility of {{ui-locator}} for {{number}} seconds"`** —
+  polls until a known element on the destination page appears, up to `number` seconds. Prefer this
+  whenever a locator on the destination page is already known (e.g. a dashboard element) — it
+  resolves as soon as the page is actually ready instead of always burning the full duration.
+- **`template-id-35`, `"Wait for {{number}} seconds"`** — plain fixed delay, no locator needed.
+  Simpler but brittle: too short reintroduces the race under real network conditions, too long
+  just slows every run down. Use only when no destination-page locator is known yet.
+
+`template-id-37` (`"Wait for clickability of {{ui-locator}} for {{number}} seconds"`) is the same
+idea for waiting on an element to become interactable rather than a navigation to complete.
+
+**Script-generation skills insert a wait step automatically now** (see `ahq-gen-from-url`/
+`ahq-gen-from-requirements` Rules) — this is not something to re-solve per script by hand.
 
 ### Execution path — create TestBot → execute → results (2026-07-13, proven live end-to-end)
 
