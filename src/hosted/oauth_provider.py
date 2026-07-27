@@ -46,6 +46,9 @@ KNOWN_CLIENT_CALLBACKS = (
     # Teams platform, which uses this one fixed callback for every agent and tenant (unlike
     # Copilot Studio's per-connector Power Platform URI below).
     "https://teams.microsoft.com/api/platform/v1.0/oAuthRedirect",
+    # Lovable custom MCP "chat connectors": one fixed first-party callback for every workspace
+    # and connection, so a literal entry works where Copilot Studio needed a host rule.
+    "https://api.lovable.dev/workspaces/connectors/mcp/oauth/callback",
 )
 
 # Microsoft Copilot Studio reaches MCP servers through Power Platform's connector

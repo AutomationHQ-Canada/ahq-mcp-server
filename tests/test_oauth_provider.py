@@ -114,6 +114,14 @@ def test_redirect_policy_allows_loopback_any_port_and_claude_callbacks():
     assert redirect_uri_allowed("https://claude.com/api/mcp/auth_callback", extra)
     assert redirect_uri_allowed("https://vscode.dev/redirect", extra)
     assert redirect_uri_allowed("https://teams.microsoft.com/api/platform/v1.0/oAuthRedirect", extra)
+    assert redirect_uri_allowed(
+        "https://api.lovable.dev/workspaces/connectors/mcp/oauth/callback", extra
+    )
+    # A look-alike host and a different path on the real host both stay refused.
+    assert not redirect_uri_allowed(
+        "https://api.lovable.dev.evil.com/workspaces/connectors/mcp/oauth/callback", extra
+    )
+    assert not redirect_uri_allowed("https://api.lovable.dev/steal", extra)
     assert not redirect_uri_allowed("https://localhost:33418/callback", extra)  # https loopback: not RFC 8252
     assert not redirect_uri_allowed("http://192.168.1.5:8000/cb", extra)
     assert redirect_uri_allowed("myapp://oauth/callback", frozenset({"myapp://oauth/callback"}))
