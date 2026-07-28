@@ -50,11 +50,13 @@ nano ~/.ahq/.env
 Put two lines in that file:
 
 ```
-AHQ_API_TOKEN=<your ORGANIZATION token>
+AHQ_API_TOKEN=<your API token>
 AHQ_PROJECT_ID=<your project UUID>
 ```
 
-Token: AHQ → **Administration → Settings → API Tokens → Create**, type **Organization**.
+Token: AHQ → **Administration → Settings → API Tokens → Create**. Either **Organization** or
+**User** type works — but a User token is *not* permission-restricted; it still reaches everything
+in the organization.
 Project UUID: the **second** UUID in the AHQ web app's URL.
 
 **4. Restart Claude Code**, then check:
@@ -78,7 +80,7 @@ Ask *"list my AHQ websites"*. Real data back means you're done.
 |---|---|---|
 | Claude Code v2+ | `claude --version` | https://claude.com/claude-code |
 | `uv` on PATH | `uv --version` | Windows: `winget install astral-sh.uv` · macOS/Linux: `curl -LsSf https://astral.sh/uv/install.sh \| sh` — no Python install needed, uv brings its own |
-| An AHQ **ORGANIZATION** API token | — | AHQ UI → Administration → Settings → API Tokens (ask your admin if you can't create one) |
+| An AHQ API token (Organization or User) | — | AHQ UI → Administration → Settings → API Tokens (ask your admin if you can't create one) |
 
 > The `ahq-mcp-server` repo is public, so `/plugin marketplace add` in Step 1 works with no
 > GitHub login required. If it still fails with a git error, install `git` and retry.
@@ -151,7 +153,7 @@ nano ~/.ahq/.env   # fill in the two values below
 Your `.env` needs two values:
 
 ```
-AHQ_API_TOKEN=<your ORGANIZATION token from Administration -> Settings -> API Tokens>
+AHQ_API_TOKEN=<your API token from Administration -> Settings -> API Tokens>
 AHQ_PROJECT_ID=<the UUID of the project to work in>
 ```
 
@@ -241,7 +243,7 @@ that message first, it usually IS the fix.
 | Tool errors say `Got the web frontend's HTML instead of an API response` | The gateway URL is normally decoded from your token automatically. This means either your token predates the `urlDetails` claim (add `AHQ_BASE_URL` to `.env`, pointed at the API gateway, e.g. `https://api-dev.automationhq.ai`, never the web UI) or an `AHQ_BASE_URL` override you added yourself points at the web UI — remove or fix it. |
 | `/mcp` shows `ahq-mcp-server` **failed** | Usually `uv` missing from PATH (`uv --version` to check; restart the terminal/session after installing it). Verify the server itself with: `uv run --project <plugin folder> python -c "from src.mcp_server import TOOLS; print(len(TOOLS))"` → must print `136`. |
 | Tools work but `/ahq` skills don't appear | Restart the Claude Code session — skills register at startup. Full names are namespaced: `/ahq-skills:ahq-dashboard`. |
-| Every AHQ call returns 401 | Wrong/expired token in `.env`, or you used a personal JWT instead of an ORGANIZATION token. |
+| Every AHQ call returns 401 | Wrong/expired token in `.env`. Both Organization and User API tokens work; a raw browser-session JWT does not. |
 | `crawl_url` errors about a missing browser | The first crawl downloads Chromium itself, so this normally self-resolves — that one call just takes a few minutes. The error only persists if the download actually failed (no disk space, no network), and it quotes the real reason. Manual fallback: `uv run playwright install chromium` in the plugin folder. |
 | Data lands in the wrong org | Not possible via the token alone — the org ID is decoded from it. Check you were given a token for the right organization. |
 | Assets you created aren't visible in the web app (or vice versa) | Results are scoped to organization **and** project together, and a mismatched pair returns an empty result rather than an error. Check `AHQ_PROJECT_ID` matches the project you're looking at. |

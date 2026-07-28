@@ -24,7 +24,16 @@ def _fake_jwt(claims: dict) -> str:
 
 
 ORG_TOKEN = _fake_jwt({"organizationId": "org-1", "organizationName": "Org One", "tokenType": "ORGANIZATION"})
-USER_TOKEN = _fake_jwt({"organizationId": "org-1", "tokenType": "USER"})
+# Claim set matches a real USER token (TokenService.createClaims, verified against a live one
+# 2026-07-28): userId/email/name and organizationId, but NO organizationName — that claim only
+# exists on ORGANIZATION tokens, which is why the banner needs a fallback.
+USER_TOKEN = _fake_jwt({
+    "organizationId": "org-1", "tokenType": "USER",
+    "userId": "user-1", "email": "om@example.com", "name": "om raut",
+})
+# Neither of the two types AHQ mints — the flow must still refuse this.
+UNKNOWN_TYPE_TOKEN = _fake_jwt({"organizationId": "org-1", "tokenType": "SERVICE"})
+NO_TYPE_TOKEN = _fake_jwt({"organizationId": "org-1"})
 # A real prod token embeds urlDetails.baseUrl = https://api.automationhq.ai (confirmed live
 # 2026-07-17) — this dev-hosted server must resolve THAT gateway for this token, not its own
 # fixed AHQ_BASE_URL (dev).
@@ -56,7 +65,7 @@ def client(monkeypatch):
 
     async def fake_list_projects(self):
         seen_base_urls.append(self._credentials.base_url)
-        if self._credentials.api_token not in (ORG_TOKEN, PROD_ORG_TOKEN):
+        if self._credentials.api_token not in (ORG_TOKEN, PROD_ORG_TOKEN, USER_TOKEN):
             raise RuntimeError("401 from gateway")
         # Real /projects/organizations/{orgId}/all shape: `_id` + `projectName`
         # (confirmed live 2026-07-14 — NOT projectId/name).
@@ -163,12 +172,40 @@ def test_pkce_wrong_verifier_rejected(client):
     assert resp.json()["error"] == "invalid_grant"
 
 
-def test_consent_rejects_non_organization_token(client):
+def test_consent_accepts_a_user_token(client):
+    """A personal API token must complete the flow, not just be recognised.
+
+    Both AHQ token types carry organizationId and urlDetails, which is everything consent needs;
+    the type check was the only thing rejecting USER tokens (confirmed against a live one).
+    """
     reg = _register(client)
     txn = _authorize_to_txn(client, reg["client_id"])
     resp = _consent_to_code(client, txn, token=USER_TOKEN)
-    assert resp.status_code == 400
-    assert "ORGANIZATION" in resp.text
+    assert resp.status_code == 302, resp.text
+    assert "code=" in resp.headers["location"]
+
+
+def test_user_token_banner_names_the_person_not_a_raw_org_id(client):
+    """USER tokens carry no organizationName, so the naive fallback prints a bare UUID.
+
+    Reaching the picker requires omitting project_id, which is also the path a real user takes
+    when their org has more than one project.
+    """
+    reg = _register(client)
+    txn = _authorize_to_txn(client, reg["client_id"])
+    resp = client.post("/consent", data={"txn": txn, "ahq_token": USER_TOKEN, "project_id": ""})
+    assert resp.status_code == 200
+    assert "om raut (om@example.com)" in resp.text
+    assert "organization org-1" not in resp.text
+
+
+def test_consent_still_rejects_a_token_of_neither_type(client):
+    for token in (UNKNOWN_TYPE_TOKEN, NO_TYPE_TOKEN):
+        reg = _register(client)
+        txn = _authorize_to_txn(client, reg["client_id"])
+        resp = _consent_to_code(client, txn, token=token)
+        assert resp.status_code == 400, resp.text
+        assert "API token" in resp.text
 
 
 def test_consent_rejects_gateway_invalid_token(client):
@@ -242,8 +279,8 @@ def test_consent_page_uses_partner_branding_when_configured(monkeypatch):
         assert "#9c27b0" not in resp.text
 
         # Rejection message also uses the partner name, not a hardcoded "AutomationHQ".
-        rejected = _consent_to_code(c, txn, token=USER_TOKEN)
-        assert "CA UTAP ORGANIZATION" in rejected.text
+        rejected = _consent_to_code(c, txn, token=UNKNOWN_TYPE_TOKEN)
+        assert "CA UTAP API token" in rejected.text
 
 
 def test_consent_resolves_prod_gateway_from_token(client):

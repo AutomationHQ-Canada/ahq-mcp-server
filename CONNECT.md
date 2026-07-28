@@ -15,8 +15,9 @@ Microsoft 365 Copilot, Lovable, Cursor and Windsurf**.
 
 ## Quick start
 
-**1.** Get an AutomationHQ **Organization** API token — AHQ → Administration → Settings → API
-Tokens → Create, type **Organization**.
+**1.** Get an AutomationHQ API token — AHQ → Administration → Settings → API Tokens → Create.
+Either **Organization** or **User** type works (a User token is *not* permission-restricted — see
+below).
 
 **2.** In your AI client, add a custom MCP connector with this URL:
 
@@ -55,12 +56,17 @@ https://api-dev.automationhq.ai/ahq-mcp-server/mcp
 > **Pilot environment.** If AutomationHQ has given you a different URL for your organization,
 > use that one instead — every instruction below is otherwise identical.
 
-**2. An AutomationHQ ORGANIZATION API token**
+**2. An AutomationHQ API token — Organization or User**
 
-AHQ web app → **Administration → Settings → API Tokens → Create**, type **Organization**.
+AHQ web app → **Administration → Settings → API Tokens → Create**. Either type works.
 
-A personal/user token will not work — the consent page rejects it. Ask your AHQ administrator if
-you can't create one yourself.
+> **A User token is not a restricted token.** It identifies who created it, but it still reaches
+> everything in the organization — every project, every script, every bot. AHQ's gateway checks
+> only that a token exists; it does not apply that person's project roles to API calls. Do not
+> hand someone a User token expecting it to limit what they can reach.
+
+Use an Organization token for a shared or automated setup, and a User token when you want actions
+traceable to a person. Ask your AHQ administrator if you can't create either yourself.
 
 You'll paste this token into a browser page once per client, never into a config file.
 
@@ -72,7 +78,7 @@ The same four steps in every client:
 
 1. You add the server URL to your AI client.
 2. The client opens your browser to AutomationHQ's sign-in page.
-3. You paste your Organization token and pick a project (skipped if your org has only one).
+3. You paste your API token and pick a project (skipped if your org has only one).
 4. The browser returns you to the client, now showing **Connected**.
 
 Your token is validated live against AutomationHQ each time you connect. The client only ever
@@ -86,7 +92,7 @@ stores an encrypted session token, never the token itself in plaintext.
 2. **Add custom connector**
 3. Name it (e.g. `AutomationHQ`) and paste the server URL
 4. **Add**, then **Connect** on the new card
-5. Paste your Organization token on the consent page, choose a project, **Authorize**
+5. Paste your API token on the consent page, choose a project, **Authorize**
 6. Return to Claude — the connector shows **Connected**
 
 Start a **new** chat and ask *"list my AHQ websites"* to confirm. An existing conversation won't
@@ -102,7 +108,7 @@ in a **trusted workspace** — in Restricted Mode, MCP servers don't start.
 3. Paste the server URL
 4. Name it (e.g. `AHQ-MCP`)
 5. **Global** scope, unless you want it in one workspace only
-6. Paste your Organization token on the consent page, pick a project, **Authorize**
+6. Paste your API token on the consent page, pick a project, **Authorize**
 7. Open Copilot Chat, switch the mode dropdown to **Agent**, click the tools icon (🔧) to confirm
    the AHQ tools are listed
 
@@ -195,7 +201,7 @@ step, but you manage the token yourself and it never rotates automatically:
     "ahq": {
       "url": "https://api-dev.automationhq.ai/ahq-mcp-server/mcp",
       "headers": {
-        "X-API-AUTH-KEY": "<your ORGANIZATION token>",
+        "X-API-AUTH-KEY": "<your API token>",
         "projectId": "<the project's UUID>"
       }
     }
@@ -301,7 +307,7 @@ out of any agent aimed at general users.
 
 | Symptom | Cause / fix |
 |---|---|
-| Consent page says the token "doesn't look like an ORGANIZATION token" | You pasted a personal/user token. Create an **Organization**-type token in Administration → API Tokens. |
+| Consent page says the token "doesn't look like an API token" | The token is neither an Organization nor a User token, or it is malformed. Re-copy it from Administration → API Tokens. |
 | Consent page says AutomationHQ "rejected this token" | The token is expired or deleted. Create a fresh one. |
 | "This connection link has expired" | The browser tab sat open more than 10 minutes, or the link was reused. Start the connection again from your client. |
 | Connected, but every list comes back empty | You're connected to a project with no data, or you used header authentication without `projectId`. Reconnect with OAuth, or check the project you selected. |

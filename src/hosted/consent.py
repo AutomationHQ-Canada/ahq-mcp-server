@@ -95,10 +95,11 @@ _PAGE = """<!doctype html>
 def _token_input(partner_name: str) -> str:
     escaped = html.escape(partner_name)
     return (
-        f'<label for="ahq_token">{escaped} Organization API token</label>\n'
+        f'<label for="ahq_token">{escaped} API token</label>\n'
         '<input type="password" id="ahq_token" name="ahq_token" autocomplete="off" required>\n'
         f'<p class="hint">Create one in the {escaped} web app under Administration '
-        "&rarr; API Tokens (type: Organization).</p>"
+        "&rarr; API Tokens. Either type works &mdash; note that a User token still has access "
+        "to everything in its organization.</p>"
     )
 
 
@@ -157,6 +158,34 @@ def _render(txn: str, client_name: str, partner_name: str, logo: str, primary_co
     )
 
 
+# Both AHQ token types work here. They differ only in which identity claims they carry
+# (ORGANIZATION: organizationName + createdByUserId; USER: userId + email + name) — both carry
+# organizationId and urlDetails, which is everything the flow below actually needs.
+#
+# NOTE: accepting a USER token does NOT scope permissions to that user. The gateway's API-key
+# path (SecurityContextRepository.validateApiKey) only checks that the token value exists in the
+# `tokens` collection; it never reads tokenType, expiry or revocation, and attaches no user. So a
+# USER token today has the same org-wide reach as an ORGANIZATION one. Verified live 2026-07-28.
+# Documented in CONNECT.md so nobody reads "user token" as "restricted token".
+_ACCEPTED_TOKEN_TYPES = ("ORGANIZATION", "USER")
+
+
+def _subject_label(claims: dict, org_name: str) -> str:
+    """Who the confirmation banner should name.
+
+    For a USER token the person is the meaningful identity and we have it; for an ORGANIZATION
+    token there is no user, so the org is the only thing to show.
+    """
+    if claims.get("tokenType") == "USER":
+        who = claims.get("name") or claims.get("email")
+        email = claims.get("email")
+        if who and email and who != email:
+            return f"{who} ({email})"
+        if who:
+            return str(who)
+    return org_name
+
+
 def _normalize_projects(raw: list) -> list[dict]:
     # The real projects-list documents use `_id` + `projectName`; other id/name field
     # variants are kept for compatibility with other deployments.
@@ -182,7 +211,9 @@ _EXPIRED_HTML = (
 def make_consent_endpoints(codec: TokenCodec, settings, user_client_factory, http_client_holder):
     """
     Returns (GET, POST) Starlette endpoints for the consent step of the OAuth flow: the page
-    where a user pastes their AHQ Organization API token and picks a project. user_client_factory
+    where a user pastes an AHQ API token (Organization or User) and picks a project. Both types
+    carry the organizationId and urlDetails claims this flow needs; see _ACCEPTED_TOKEN_TYPES for
+    what accepting a USER token does and does not buy. user_client_factory
     is the UserClient class (injected for tests); http_client_holder is mcp_server.app_http_client
     (the shared pooled httpx client).
     """
@@ -205,7 +236,7 @@ def make_consent_endpoints(codec: TokenCodec, settings, user_client_factory, htt
 
     async def _validate_and_list(token: str, project_id: str = "") -> dict:
         """
-        Org-token check plus a live gateway call to list the org's real projects (this also
+        Token-type check plus a live gateway call to list the org's real projects (this also
         confirms project_id, if given, actually belongs to the token's organization). Returns
         {"ok": False, "message": ...} on any failure ("projects"/"org_name" are also included
         for the project_not_in_org case, since that one still needs to show a picker), or
@@ -215,13 +246,15 @@ def make_consent_endpoints(codec: TokenCodec, settings, user_client_factory, htt
         """
         claims = decode_ahq_token(token)
         org_id = claims.get("organizationId", "")
-        if not token or not org_id or claims.get("tokenType") != "ORGANIZATION":
-            audit_log("auth.consent_fail", reason="not_an_organization_token")
+        token_type = claims.get("tokenType", "")
+        if not token or not org_id or token_type not in _ACCEPTED_TOKEN_TYPES:
+            audit_log("auth.consent_fail", reason="unsupported_token_type",
+                      token_type=token_type or "none")
             return {
                 "ok": False,
                 "message": (
-                    f"That doesn't look like a {partner_name} ORGANIZATION API token. Create one "
-                    "under Administration → API Tokens (type: Organization) and paste it here."
+                    f"That doesn't look like a {partner_name} API token. Create one under "
+                    "Administration → API Tokens (type: Organization or User) and paste it here."
                 ),
             }
 
@@ -242,7 +275,10 @@ def make_consent_endpoints(codec: TokenCodec, settings, user_client_factory, htt
                 ),
             }
         projects = _normalize_projects(raw)
-        org_name = claims.get("organizationName", org_id)
+        # ORGANIZATION tokens carry organizationName; USER tokens do not (TokenService's
+        # generateOrgClaims vs createClaims). Without a fallback a user token would show its raw
+        # org UUID on the confirmation banner.
+        org_name = claims.get("organizationName") or org_id
 
         if project_id and project_id not in {p["id"] for p in projects}:
             audit_log("auth.consent_fail", org=org_id, reason="project_not_in_org")
@@ -250,12 +286,15 @@ def make_consent_endpoints(codec: TokenCodec, settings, user_client_factory, htt
                 "ok": False,
                 "projects": projects,
                 "org_name": org_name,
+                "subject": _subject_label(claims, org_name),
                 "message": (
                     f"Project '{project_id}' does not belong to organization "
                     f"'{org_name}'. Pick one of its projects below."
                 ),
             }
-        return {"ok": True, "org_id": org_id, "org_name": org_name, "projects": projects, "base_url": base_url}
+        return {"ok": True, "org_id": org_id, "org_name": org_name,
+                "subject": _subject_label(claims, org_name), "token_type": token_type,
+                "projects": projects, "base_url": base_url}
 
     def _issue_code(payload: dict, token: str, project_id: str, base_url: str) -> str:
         params = payload["params"]
@@ -305,14 +344,16 @@ def make_consent_endpoints(codec: TokenCodec, settings, user_client_factory, htt
             if len(projects) == 1:
                 project_id = projects[0]["id"]
             else:
+                who = "" if result.get("token_type") == "USER" else "organization "
                 return _render_page(
                     txn, client_name, token_value=token, projects=projects,
-                    banner=f'<p class="org">Token accepted for organization '
-                           f"<strong>{html.escape(result['org_name'])}</strong>.</p>",
+                    banner=f'<p class="org">Token accepted for {who}'
+                           f"<strong>{html.escape(result['subject'])}</strong>.</p>",
                 )
 
         code = _issue_code(payload, token, project_id, result["base_url"])
-        audit_log("auth.consent_ok", org=result["org_id"], project=project_id)
+        audit_log("auth.consent_ok", org=result["org_id"], project=project_id,
+                  token_type=result.get("token_type", ""))
         return RedirectResponse(
             _redirect_url(payload, code), status_code=302, headers={"Cache-Control": "no-store"},
         )
