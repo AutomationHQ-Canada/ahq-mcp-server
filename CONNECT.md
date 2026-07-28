@@ -246,19 +246,52 @@ with your AutomationHQ contact if report-level protection matters for your use c
 
 ## Choosing which tools to enable
 
-This server exposes **136 tools**. Clients that let you pick (Copilot Studio, M365 declarative
-agents) will choose badly from all of them at once — an orchestrator selects on tool descriptions
-alone. Enable the dozen or so your agent actually needs.
+This server exposes **136 tools**, and every one of their descriptions is sent to the model on
+every message — MCP has no way to load them on demand. That is roughly 14,500 tokens before your
+question is even read, and more importantly it is 136 near-neighbours for the model to tell apart.
+A wrong pick usually doesn't error; it returns an empty list, and the answer comes back confidently
+wrong.
 
-A reasonable starting set:
+### Ask the server for a smaller set (recommended)
+
+Add `?profile=core` to the MCP URL:
 
 ```
-get_ahq_context        list_test_scripts     get_test_script
-list_bots              execute_bot           get_execution_status
-get_execution_report   list_recent_runs      list_websites
-list_environments      list_suites           list_branches
+https://api-dev.automationhq.ai/ahq-mcp-server/mcp?profile=core
 ```
 
+`core` is **55 tools, about half the payload** — the everyday loop (discover, author, run, report,
+heal) and everything the bundled skills need. All 9 skills are guaranteed to work under it; a test
+enforces that, so a skill can never quietly outgrow the profile.
+
+Compose extra groups onto it when you need them:
+
+| Spec | What you get |
+|---|---|
+| `?profile=core` | The everyday loop — 55 tools |
+| `?profile=core,api` | …plus API/REST testing |
+| `?profile=core,versioning` | …plus branches and pull requests |
+| `?profile=reporting` | A single group on its own — read-only run results |
+| *(omitted)* | All 136 — the default, unchanged |
+
+Groups: `context`, `discovery`, `healing`, `authoring`, `planning`, `execution`, `scheduling`,
+`reporting`, `versioning`, `admin`, `vault`, `api`, `performance`, `contracts`, `mocks`,
+`workflows`, `tunnel`, `utility`.
+
+A client that can't edit the URL can send an `X-AHQ-Tool-Profile` header instead. Running over
+stdio, set `AHQ_MCP_TOOL_PROFILE=core`.
+
+A misspelled profile falls back to all 136 rather than to none — you lose the reduction, never the
+tools.
+
+> Filtering controls what the model is *shown*, not what it is *allowed* to do. Your AHQ token is
+> the security boundary and the gateway re-checks it on every call. Don't use a profile to
+> withhold a destructive tool — use a token with narrower permissions.
+
+### Then narrow further in the client
+
+Clients that let you pick individual tools (Copilot Studio, M365 declarative agents) should still
+do so — an orchestrator choosing from 55 is better than from 136, but a dozen is better again.
 Keep destructive tools — `permanently_delete_asset`, `merge_pull_request`, `delete_test_script` —
 out of any agent aimed at general users.
 

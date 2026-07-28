@@ -56,6 +56,11 @@ class Settings(BaseSettings):
     # chromedriver resolution) can still be in progress even though it already answers /ping.
     # Stdio-only (check_local_agent_status is unavailable in hosted mode).
     ahq_local_agent_warmup_seconds: int = 15
+    # Which slice of the 136-tool surface to advertise, e.g. "core" or "core,api" (see
+    # src/tool_groups.py). Empty = all of them, so nothing changes for anyone who doesn't set it.
+    # Stdio only — hosted clients pass ?profile= on the MCP URL, since they configure a URL and
+    # not this process's environment.
+    ahq_mcp_tool_profile: str = ""
 
     # --- Hosted (HTTP) mode only — all defaulted so stdio users and tests never notice them ---
     # Public URL this service is reachable at THROUGH the gateway, including the route prefix

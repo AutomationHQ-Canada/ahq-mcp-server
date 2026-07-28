@@ -16,6 +16,7 @@ from src.hosted.audit import audit_log
 from src.hosted.rate_limit import OrgRateLimiter
 from src.prompts import get_skill_prompt, list_skill_prompts
 from src.schema.asset_kinds import VALIDATORS, format_validation_error, RunExecutionConfiguration
+from src.tool_groups import resolve_tool_names
 from src.tools.crawl_url import crawl_url as _crawl_url
 from src.tools.extract_requirements import extract_requirements as _extract_requirements
 from src.tools.heal_locator import heal_locator as _heal_locator
@@ -246,7 +247,7 @@ TOOLS = [
     Tool(name="get_page_by_url", description="Check if a page already exists at a given URL, and if so, what locators it already has. Call this BEFORE writing any ui-locator test step for a live URL — if the locator you need isn't in the result, call crawl_url on that URL to capture it (never guess a raw selector instead).", inputSchema={"type": "object", "properties": {"website_id": {"type": "string"}, "url": {"type": "string"}}, "required": ["website_id", "url"]}),
     Tool(
         name="add_locators",
-        description="Batch-create locators for a page.",
+        description="Batch-create NEW locators on a page. Silently no-ops for any locator whose strategy value already exists — to change an existing one use update_locator, and to repair one broken by a UI change use heal_locator.",
         inputSchema={
             "type": "object",
             "properties": {
@@ -430,7 +431,7 @@ TOOLS = [
     # Recorded Scripts — browser sessions captured by the TestBot Recorder Chrome Extension.
     # Read + promote only; recordings themselves are created by the extension, not by tools.
     Tool(name="list_recorded_scripts", description="List recorded scripts (browser sessions captured by the TestBot Recorder extension), optionally filtered by name or branch.", inputSchema={"type": "object", "properties": {"name": {"type": "string", "description": "Optional name filter"}, "branch_name": {"type": "string", "description": "Optional branch filter"}}}),
-    Tool(name="get_recorded_script", description="Get a recorded script by ID, including its captured steps and whether it was already promoted (promotedTestScriptId).", inputSchema={"type": "object", "properties": {"recorded_script_id": {"type": "string"}}, "required": ["recorded_script_id"]}),
+    Tool(name="get_recorded_script", description="Get a browser RECORDING (captured by the Recorder extension) by ID, with its steps and promotedTestScriptId. A recording is not yet a test script — for a real test script use get_test_script, and promote_recorded_script to convert one.", inputSchema={"type": "object", "properties": {"recorded_script_id": {"type": "string"}}, "required": ["recorded_script_id"]}),
     Tool(name="promote_recorded_script", description="Promote a recorded script into a real Test Script. story_id is REQUIRED for a first-time promotion (the server rejects it otherwise, and a script without a story is invisible in the UI's Table View) — resolve via list_epics/list_stories or create_epic/create_story. Re-promoting an already-promoted recording updates the linked Test Script instead.", inputSchema={"type": "object", "properties": {"recorded_script_id": {"type": "string"}, "story_id": {"type": "string"}, "name": {"type": "string", "description": "Optional name override for the resulting Test Script"}, "website_id": {"type": "string", "description": "Optional application override"}, "status": {"type": "string", "description": "Optional status for the resulting Test Script"}, "description": {"type": "string"}, "branch_name": {"type": "string", "default": "main", "description": "Branch for the resulting Test Script — always sent explicitly (defaults to main) because omitting it falls back to the API token's ambient checked-out branch, which is unstable"}}, "required": ["recorded_script_id", "story_id"]}),
 
     # Common Functions (aka User Test Steps) — reusable multi-step components usable as a single
@@ -445,7 +446,7 @@ TOOLS = [
     Tool(name="create_epic", description="Create a new epic. Use this when no existing epic fits a test script you're about to create — create_test_script requires a story_id, which requires a parent epic.", inputSchema={"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}),
     Tool(name="list_stories", description="List all stories under an epic.", inputSchema={"type": "object", "properties": {"epic_id": {"type": "string"}}, "required": ["epic_id"]}),
     Tool(name="create_story", description="Create a new story under an epic. Use this when no existing story fits a test script you're about to create.", inputSchema={"type": "object", "properties": {"epic_id": {"type": "string"}, "name": {"type": "string"}}, "required": ["epic_id", "name"]}),
-    Tool(name="list_bots", description="List all test bots in the project.", inputSchema={"type": "object", "properties": {"name": {"type": "string", "description": "Optional name filter"}}}),
+    Tool(name="list_bots", description="List the project's UI/functional TestBots. This is the tool for 'show me my bots' — list_performance_bots is a SEPARATE JMeter list (a project can have bots here and none there), and list_bot_types returns type metadata for create_test_bot, not bots.", inputSchema={"type": "object", "properties": {"name": {"type": "string", "description": "Optional name filter"}}}),
     Tool(name="list_suites", description="List all test suites in the project.", inputSchema={"type": "object", "properties": {}}),
     Tool(name="list_environments", description="List all configured environments.", inputSchema={"type": "object", "properties": {}}),
     Tool(name="create_suite", description="Create a new test suite (Test Set). Scripts can be attached now (script_ids) or later via add_scripts_to_suite; a suite feeds create_test_bot.", inputSchema={"type": "object", "properties": {"name": {"type": "string"}, "script_ids": {"type": "array", "items": {"type": "string"}, "description": "Optional test script ids to attach immediately"}}, "required": ["name"]}),
@@ -502,7 +503,7 @@ TOOLS = [
     # This is a DIFFERENT vault from list_vault_secrets (that one is mtaf-core's, for API/performance
     # testing only). Values are write-only from here — there is no tool to read a decrypted value
     # back, by design, so a real secret never appears in this conversation.
-    Tool(name="list_config_vault_secrets", description="List vault secret names/metadata for ordinary test-script credentials (never returns decrypted values). Use before create_config_vault_secret to avoid duplicates, and to find the right secret to reference in a test step's 'From Secrets' value type.", inputSchema={"type": "object", "properties": {}}),
+    Tool(name="list_config_vault_secrets", description="List secrets in the UI test-script vault (config-services) — the usual one, backing a test step's 'From Secrets' value type. Metadata only, never decrypted values. Use before create_config_vault_secret to avoid duplicates. The API/perf-testing vault is a DIFFERENT store: list_vault_secrets.", inputSchema={"type": "object", "properties": {}}),
     Tool(name="get_config_vault_secret", description="Get vault secret metadata by ID (never returns the decrypted value).", inputSchema={"type": "object", "properties": {"secret_id": {"type": "string"}}, "required": ["secret_id"]}),
     Tool(name="create_config_vault_secret", description="Store a new secret (e.g. a real login password) for use in test steps via the 'From Secrets' value type. Use this instead of a literal text value for any real credential — never hardcode a real password into a test step.", inputSchema={"type": "object", "properties": {"name": {"type": "string"}, "value": {"type": "string"}, "description": {"type": "string"}}, "required": ["name", "value"]}),
     Tool(name="update_config_vault_secret", description="Update an existing vault secret's value and/or description (e.g. after a password rotation) — existing test steps referencing it by name pick up the new value automatically, no script changes needed.", inputSchema={"type": "object", "properties": {"secret_id": {"type": "string"}, "value": {"type": "string"}, "description": {"type": "string"}}, "required": ["secret_id"]}),
@@ -510,7 +511,7 @@ TOOLS = [
 
     # Execution
     Tool(name="create_test_bot", description="Create a TestBot (execution configuration for a set of Test Suites). A TestBot carries NO browser/grid settings — those are supplied at run time via execute_bot. Attach scripts by first creating a suite (create_suite) and passing its id+name in test_suites (min 1). Bot names must be unique in the project.", inputSchema={"type": "object", "properties": {"name": {"type": "string", "description": "1-120 chars, unique"}, "test_suites": {"type": "array", "items": {"type": "object", "properties": {"testSuiteId": {"type": "string"}, "name": {"type": "string"}}, "required": ["testSuiteId"]}, "description": "At least one suite from create_suite/list_suites"}, "description": {"type": "string"}, "bot_type": {"type": "object", "description": "Optional {type, value} from list_bot_types; server defaults to REGRESSION_TEST"}, "folder_id": {"type": "string"}, "profile_id": {"type": "string"}, "number_of_retries": {"type": "integer", "default": 0}}, "required": ["name", "test_suites"]}),
-    Tool(name="list_bot_types", description="List the available TestBot types ({type, value, color}) for create_test_bot's bot_type.", inputSchema={"type": "object", "properties": {}}),
+    Tool(name="list_bot_types", description="List the available TestBot TYPES ({type, value, color}) for create_test_bot's bot_type. Type metadata, not bots — use list_bots for the project's actual bots.", inputSchema={"type": "object", "properties": {}}),
     Tool(name="list_grids", description="List execution grids (gridId + url). An execute_bot execution_configuration's gridId MUST come from here.", inputSchema={"type": "object", "properties": {}}),
     Tool(name="list_browsers", description="List available browsers for execution. An execute_bot execution_configuration's browser MUST come from here.", inputSchema={"type": "object", "properties": {}}),
     Tool(name="list_execution_types", description="List execution types (e.g. Web/Mobile) and platform options.", inputSchema={"type": "object", "properties": {}}),
@@ -525,13 +526,13 @@ TOOLS = [
     Tool(name="list_schedulers", description="List recurring schedules (the same ones shown in Scheduler Admin). Pass bot_id to reproduce the exact filtered view a TestBot's own scheduler dialog shows — useful to confirm a schedule actually landed against the bot you expected.", inputSchema={"type": "object", "properties": {"bot_id": {"type": "string", "description": "Optional — filter to one TestBot's schedules"}, "offset": {"type": "integer", "default": 0}, "size": {"type": "integer", "default": 100}}}),
     Tool(name="list_scheduler_recipient_emails", description="Previously-used schedule result-notification email addresses, for suggesting values instead of guessing one.", inputSchema={"type": "object", "properties": {}}),
     Tool(name="convert_text_to_cron", description="Convert a plain-language schedule description (e.g. 'every day at 9am', 'every Monday at noon') into a cron expression for schedule_bot_recurring — use this instead of hand-writing cron syntax.", inputSchema={"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}),
-    Tool(name="get_job_status", description="Get the status and details of an execution job.", inputSchema={"type": "object", "properties": {"job_id": {"type": "string"}}, "required": ["job_id"]}),
-    Tool(name="list_recent_runs", description="List recent execution reports. With bot_id: that bot's execution history; without: the report list across bots. (Rewired 2026-07-13 — the old background-jobs path never existed and always 404'd.)", inputSchema={"type": "object", "properties": {"bot_id": {"type": "string"}, "limit": {"type": "integer", "default": 10}}}),
+    Tool(name="get_job_status", description="Queue-level status for a job, by the job_id from execute_bot — answers 'is it still waiting to start' (runs can sit ENQUEUED 2-3 minutes). Once running, use get_execution_status with the executionId instead; the two take different ids.", inputSchema={"type": "object", "properties": {"job_id": {"type": "string"}}, "required": ["job_id"]}),
+    Tool(name="list_recent_runs", description="List recent execution reports. With bot_id: that bot's execution history; without: the report list across bots. Start here to find the execution_id that get_execution_report needs.", inputSchema={"type": "object", "properties": {"bot_id": {"type": "string"}, "limit": {"type": "integer", "default": 10}}}),
 
     # Reporting
-    Tool(name="get_execution_report", description="Get full pass/fail execution report for an execution (bug fix 2026-07-10: previously called a nonexistent background-service method and always threw AttributeError; now calls the executor service's results endpoint — takes execution_id, like get_execution_screenshots/get_performance_report, not job_id).", inputSchema={"type": "object", "properties": {"execution_id": {"type": "string"}}, "required": ["execution_id"]}),
+    Tool(name="get_execution_report", description="Full per-step pass/fail report for a FINISHED execution, by execution_id. This is 'what did the last run do' / 'why did it fail'. Siblings: get_execution_status for a run still in progress, get_performance_report for timing/ROI on this same execution.", inputSchema={"type": "object", "properties": {"execution_id": {"type": "string"}}, "required": ["execution_id"]}),
     Tool(name="get_execution_screenshots", description="Get screenshots from a test execution (useful for failures).", inputSchema={"type": "object", "properties": {"execution_id": {"type": "string"}}, "required": ["execution_id"]}),
-    Tool(name="get_performance_report", description="Get performance/ROI metrics from an execution.", inputSchema={"type": "object", "properties": {"execution_id": {"type": "string"}}, "required": ["execution_id"]}),
+    Tool(name="get_performance_report", description="Duration and ROI/time-saved metrics for an ordinary UI execution, by execution_id. Pass/fail detail is get_execution_report on the same id. Unrelated to get_performance_results, which polls a JMeter load test.", inputSchema={"type": "object", "properties": {"execution_id": {"type": "string"}}, "required": ["execution_id"]}),
 
     # Application context
     Tool(name="crawl_url", description="Crawl a live web application and capture real locators (XPath, CSS, aria-label) for test script generation. Run this whenever a test step needs a ui-locator for a page you haven't already captured locators for — never write a step against a hand-guessed selector (e.g. \"input[type='email']\") instead of calling this first.", inputSchema={"type": "object", "properties": {"url": {"type": "string"}, "credentials": {"type": "object", "properties": {"username": {"type": "string"}, "password": {"type": "string"}}}, "max_pages": {"type": "integer", "default": 20}}, "required": ["url"]}),
@@ -566,12 +567,12 @@ TOOLS = [
     Tool(name="get_workflow", description="Get full details of a workflow by ID.", inputSchema={"type": "object", "properties": {"workflow_id": {"type": "string"}}, "required": ["workflow_id"]}),
     Tool(name="create_workflow", description="Create a chained-API-request workflow (multiple requests run in sequence, e.g. for a user journey).", inputSchema={"type": "object", "properties": {"name": {"type": "string"}, "description": {"type": "string"}, "workflow_list": {"type": "array", "items": {"type": "object"}, "description": "Ordered list of chained requests — if the shape is unclear, use get_service_spec first"}}, "required": ["name"]}),
     Tool(name="test_workflow", description="Run a one-off chained API workflow test (does not need to be saved first).", inputSchema={"type": "object", "properties": {"name": {"type": "string"}, "api_requests": {"type": "array", "items": {"type": "object", "properties": {"id": {"type": "integer"}, "method": {"type": "string"}, "name": {"type": "string"}, "url": {"type": "string"}, "headers": {"type": "object"}, "body": {}}}, "description": "Max 50 requests"}, "description": {"type": "string"}, "load_ratio": {"type": "number"}}, "required": ["name", "api_requests"]}),
-    Tool(name="list_performance_bots", description="List performance/load test bots (JMeter-backed).", inputSchema={"type": "object", "properties": {}}),
+    Tool(name="list_performance_bots", description="List JMeter-backed load/performance bots only. NOT the answer to 'show me my bots' — that is list_bots; these are a separate mtaf-core product surface and this list is empty in most projects.", inputSchema={"type": "object", "properties": {}}),
     Tool(name="get_performance_bot", description="Get full details of a performance bot by ID.", inputSchema={"type": "object", "properties": {"bot_id": {"type": "string"}}, "required": ["bot_id"]}),
     Tool(name="run_performance_bot", description="Run an existing performance bot by ID. Runs async in the background (can take hours) — returns a metrics ID immediately for polling via get_performance_results.", inputSchema={"type": "object", "properties": {"bot_id": {"type": "string"}}, "required": ["bot_id"]}),
     Tool(name="stop_performance_bot", description="Stop a running performance bot.", inputSchema={"type": "object", "properties": {"bot_id": {"type": "string"}}, "required": ["bot_id"]}),
-    Tool(name="get_performance_results", description="Poll dashboard results (throughput, response times, errors) for a performance run by metrics ID.", inputSchema={"type": "object", "properties": {"metrics_id": {"type": "string"}, "polling": {"type": "boolean", "default": True}}, "required": ["metrics_id"]}),
-    Tool(name="list_vault_secrets", description="List vault secret names/keys (metadata only — never returns decrypted values; ask the user to check the UI if the raw value is needed).", inputSchema={"type": "object", "properties": {}}),
+    Tool(name="get_performance_results", description="Poll a running JMeter LOAD test (throughput, response times, error rate) by the metrics ID from run_performance_bot. Not for UI executions — those are get_execution_report / get_performance_report, which take an execution_id.", inputSchema={"type": "object", "properties": {"metrics_id": {"type": "string"}, "polling": {"type": "boolean", "default": True}}, "required": ["metrics_id"]}),
+    Tool(name="list_vault_secrets", description="List secrets in the API/performance-testing vault (mtaf-core), for API requests and workflows. Metadata only — never decrypted values. The vault for UI test-script credentials is a DIFFERENT store: list_config_vault_secrets.", inputSchema={"type": "object", "properties": {}}),
 
     # Local execution agent — for TestBots configured to run on the user's own machine
     # (gridUrlForExecution contains "localhost"), not the cloud grid.
@@ -640,9 +641,36 @@ TOOLS = [
 ]
 
 
+def _requested_tool_profile() -> str | None:
+    """
+    Hosted: `?profile=core` on the MCP URL, or an X-AHQ-Tool-Profile header. The query parameter
+    is the one to document — connector UIs (Claude, ChatGPT, Copilot Studio) take a URL and
+    nothing else, so it is the only lever some clients have.
+
+    Stdio: AHQ_MCP_TOOL_PROFILE, since there is no URL to hang a parameter off.
+
+    Same request-context probe _resolve_clients uses; LookupError is the stdio case, where no
+    Starlette request exists.
+    """
+    try:
+        req = server.request_context.request
+    except LookupError:
+        req = None
+    if req is None:
+        return settings.ahq_mcp_tool_profile or None
+    return req.query_params.get("profile") or req.headers.get("x-ahq-tool-profile")
+
+
 @server.list_tools()
 async def list_tools() -> list[Tool]:
-    return TOOLS
+    # Presentation, not authorization: _dispatch stays permissive, so a hidden tool still runs
+    # if a client calls it anyway. The security boundary is the AHQ token, which the gateway
+    # re-validates on every call — filtering here is about what the model has to read, and a
+    # stale client that cached the full list must not start getting confusing failures.
+    allowed = resolve_tool_names(_requested_tool_profile())
+    if allowed is None:
+        return TOOLS
+    return [t for t in TOOLS if t.name in allowed]
 
 
 # ---------------------------------------------------------------------------

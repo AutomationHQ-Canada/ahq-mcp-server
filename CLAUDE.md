@@ -730,7 +730,7 @@ asking to "test my API" or "run a load test" means the mtaf-core tools below, no
 | `create_pull_request` / `list_pull_requests` / `get_pull_request` / `get_pull_request_diff` / `approve_pull_request` / `request_pr_changes` / `merge_pull_request` / `close_pull_request` | PR lifecycle (no request bodies on lifecycle actions; conflicts → UI) |
 | `get_tunnel_status` / `start_tunnel` / `stop_tunnel` / `execute_tunnel_command` | Tunnel control (see Tunnel Commands note — dev gateway currently 403s all tunnel tokens) |
 | `list_bots` / `execute_bot` | Run a TestBot by name |
-| `get_execution_report` | View pass/fail results by `execution_id` (bug fix 2026-07-10 — previously called a nonexistent client method and always threw `AttributeError`) |
+| `get_execution_report` | Per-step pass/fail for a finished run, by `execution_id` (not `job_id` — that's `get_job_status`, queue-level) |
 | `schedule_bot_recurring` | Set up a cron schedule (one-time scheduling removed 2026-07-15 — see note below) |
 | `test_api_request` / `test_workflow` / `run_performance_bot` | API/load testing — see mtaf-core section above |
 | `get_service_spec` / `call_api` | Discover and call any AHQ endpoint not covered by a hand-written tool |
@@ -799,6 +799,58 @@ This is the MVP track from the self-healing locators plan — the durable, licen
 in `ahq-asset-services`) is scoped in `AI_SMART_SCANNER_REMEDIATION.md`
 (`ahq-background-v2-services`) as a follow-up; once that API exists, these three tools should be
 re-pointed at it instead of the direct-PUT approach used here.
+
+**Known upstream gap — half the executions never feed this.** `scan_broken_locators` can only
+return what the platform already flagged, and only the CLOUD execution path does the flagging:
+`ActionLibraryServices.setBrokenLocatorReporter(...)` is wired in `ahq-background-v2-services`'
+`TestRemoteExecutionRepository.java` and has **zero** occurrences in
+`test-local-execution-services` (re-verified 2026-07-28). A locator that breaks during a
+local-agent run therefore produces no `MaintenanceAlert` and never appears in
+`GET /rest/api/locators/broken`. So an empty `scan_broken_locators` result does NOT mean "nothing
+is broken" for a user who runs locally — say so rather than reporting all-clear. Fixing it is a
+contained one-repo change (add the same wiring at each `ActionLibraryServices` construction site,
+where `setSmartClickRetryEnabled` is already set) and should land before Track 2, which needs both
+paths reporting symmetrically for its failure-category data to mean anything.
+
+## Tool profiles — `src/tool_groups.py` (v1.7.0)
+
+All 136 tool schemas are sent to the model on every request (MCP has no lazy schema loading):
+~14.9k tokens of fixed overhead, and 136 near-neighbours to disambiguate. A wrong pick between
+siblings like `list_bots`/`list_performance_bots` returns an empty list, not an error, so it
+surfaces as a confidently wrong answer rather than a failure.
+
+`list_tools()` now filters by an optional profile. Default is unchanged — omit it and all 136 are
+advertised.
+
+- **Hosted**: `?profile=core` on the MCP URL (the only lever connector clients have — they
+  configure a URL and nothing else), or an `X-AHQ-Tool-Profile` header.
+- **Stdio**: `AHQ_MCP_TOOL_PROFILE=core`. Deliberately NOT read on the hosted path — that process
+  is multi-tenant, and one deployment-wide value must not truncate the list for clients that never
+  asked (pinned by `test_hosted_request_ignores_the_stdio_env_setting`).
+- A spec is comma-separated profiles and/or groups: `core`, `core,api`, `reporting`. Unknown
+  tokens fall back to **all 136**, never to an empty list — a typo costs the reduction, not the
+  tools, since an empty tool list reads as a broken server.
+- `get_ahq_context` is injected into every profile regardless of spec.
+
+**`core` (55 tools, 30,147 chars — half of `full`) is defined as "every bundled skill keeps
+working"**, not as a taste judgment. `test_every_skill_works_under_the_core_profile` reads each
+`SKILL.md`'s own `tools:` frontmatter and fails if any declared tool falls outside `core`. If a
+skill gains a dependency, either bring the tool into `core` or move the skill out — do not delete
+the assertion. A half-running skill is worse than a long tool list.
+
+**Filtering is presentation, not authorization.** `_dispatch` stays permissive, so a hidden tool
+still executes if a client calls it anyway; the security boundary is the AHQ token, which the
+gateway re-validates on every call. Never use a profile to withhold a destructive tool.
+
+`GROUPS` is an exact partition of `TOOLS`, enforced by `test_groups_are_an_exact_partition_of_the_tool_surface`
+— a newly added tool that lands in no group fails CI, because otherwise it would silently never
+appear in any profile. Kept as a name→group table rather than a field on each `Tool` so adding a
+tool is a one-line edit and doesn't conflict with every branch in flight.
+
+Measured: `full` 136 tools / 59,466 chars / ~14.9k tokens; `core` 55 tools / 30,127 chars /
+~7.5k tokens. Measure with `model_dump(exclude_none=True, by_alias=True)` and compact JSON
+separators — a naive `model_dump()` keeps every unset field and overstates the real payload by
+~29%.
 
 ## Never guess a UI locator (2026-07-16)
 
