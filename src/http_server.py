@@ -2,6 +2,7 @@ import contextlib
 import os
 import secrets as _secrets
 import sys
+from importlib.metadata import PackageNotFoundError, version as _pkg_version
 
 import httpx
 import uvicorn
@@ -9,7 +10,7 @@ from pydantic import AnyHttpUrl
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
-from starlette.responses import PlainTextResponse
+from starlette.responses import JSONResponse, PlainTextResponse
 from starlette.routing import Mount, Route
 
 from mcp.server.auth.handlers.metadata import ProtectedResourceMetadataHandler
@@ -18,6 +19,7 @@ from mcp.server.auth.settings import ClientRegistrationOptions, RevocationOption
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.shared.auth import ProtectedResourceMetadata
 
+from src.clients.generic_client import SERVICE_MAP
 from src.clients.user_client import UserClient
 from src.config.ahq_services import settings as _settings
 from src.hosted.body_limit import BodySizeLimitMiddleware
@@ -25,11 +27,45 @@ from src.hosted.consent import make_consent_endpoints
 from src.hosted.dual_auth import DualAuthMiddleware
 from src.hosted.oauth_provider import AhqTokenVerifier, StatelessAhqProvider
 from src.hosted.token_codec import TokenCodec
-from src.mcp_server import server, app_http_client
+from src.mcp_server import server, app_http_client, TOOLS, _HOSTED_UNSUPPORTED
+
+try:
+    _VERSION = _pkg_version("ahq-mcp-server")
+except PackageNotFoundError:
+    _VERSION = "unknown"
 
 
 async def healthz(request):
     return PlainTextResponse("ok")
+
+
+async def status(request):
+    return JSONResponse({
+        "service": "ahq-mcp-server",
+        "version": _VERSION,
+        "mode": "hosted",
+        "tool_count": len(TOOLS) - len(_HOSTED_UNSUPPORTED),
+    })
+
+
+def _canonical_services():
+    # SERVICE_MAP lists each service's canonical long-form name before its short aliases, so
+    # keeping the first name seen per prefix (not per key) naturally dedupes aliases while
+    # still reflecting a self-hosted deployment's overridden ahq_gw_prefix_* values.
+    seen, out = set(), []
+    for name, prefix in SERVICE_MAP.items():
+        if prefix not in seen:
+            seen.add(prefix)
+            out.append({"key": name, "prefix": prefix})
+    return out
+
+
+async def tools_catalog(request):
+    tools = [
+        {"name": t.name, "description": t.description}
+        for t in TOOLS if t.name not in _HOSTED_UNSUPPORTED
+    ]
+    return JSONResponse({"tools": tools, "services": _canonical_services()})
 
 
 class _ExactMcpPath:
@@ -101,6 +137,8 @@ def create_app(settings):
 
     routes = [
         Route("/healthz", healthz),
+        Route("/status", status),
+        Route("/tools", tools_catalog),
         Route(
             "/.well-known/oauth-protected-resource/mcp",
             endpoint=cors_middleware(prm_handler.handle, ["GET", "OPTIONS"]),
