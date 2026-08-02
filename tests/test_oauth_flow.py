@@ -8,6 +8,7 @@ shared httpx client are live.
 import base64
 import hashlib
 import json
+import time
 import types
 from urllib.parse import parse_qs, urlparse
 
@@ -65,7 +66,9 @@ def client(monkeypatch):
 
     async def fake_list_projects(self):
         seen_base_urls.append(self._credentials.base_url)
-        if self._credentials.api_token not in (ORG_TOKEN, PROD_ORG_TOKEN, USER_TOKEN):
+        if self._credentials.api_token not in (
+            ORG_TOKEN, PROD_ORG_TOKEN, USER_TOKEN, SHORT_LIVED_ORG_TOKEN,
+        ):
             raise RuntimeError("401 from gateway")
         # Real /projects/organizations/{orgId}/all shape: `_id` + `projectName`
         # (confirmed live 2026-07-14 — NOT projectId/name).
@@ -365,3 +368,66 @@ def test_oversized_body_rejected_413():
     with TestClient(create_app(_cfg(ahq_mcp_max_body_bytes=100)), follow_redirects=False) as c:
         resp = c.post("/mcp", content=b"x" * 500, headers={"Content-Type": "application/json"})
         assert resp.status_code == 413
+
+
+# --- third field report: two ways a valid token still dead-ends -----------------------------
+
+EMPTY_ORG_TOKEN = _fake_jwt({
+    "organizationId": "org-empty", "organizationName": "Empty Org", "tokenType": "ORGANIZATION",
+})
+# expiryMinutes=480 is an option the platform's own token dialog offers, and 29% of live
+# ORGANIZATION tokens use it. _capped_ttl binds BOTH our access and refresh tokens to this, so the
+# whole connection dies with it — the reported "I have to re-enter the token constantly".
+SHORT_LIVED_ORG_TOKEN = _fake_jwt({
+    "organizationId": "org-1", "organizationName": "Org One", "tokenType": "ORGANIZATION",
+    "exp": int(time.time()) + 8 * 3600,
+})
+
+
+@pytest.fixture
+def client_with_empty_org(monkeypatch):
+    async def fake_list_projects(self):
+        if self._credentials.api_token == EMPTY_ORG_TOKEN:
+            return []
+        return [{"_id": "proj-1", "projectName": "Project One"}]
+
+    monkeypatch.setattr(UserClient, "list_projects", fake_list_projects)
+    with TestClient(create_app(_cfg()), follow_redirects=False) as c:
+        yield c
+
+
+def test_a_valid_token_whose_org_has_no_projects_says_so(client_with_empty_org):
+    """Otherwise: a 'Choose a project' form with no options and a required radio.
+
+    The user cannot submit it and is told nothing, so it reads as "my token is rejected" while a
+    colleague's token on a populated org works — indistinguishable from an auth bug. An
+    organization holding a valid ORGANIZATION token and zero projects exists in live dev data.
+    """
+    reg = _register(client_with_empty_org)
+    txn = _authorize_to_txn(client_with_empty_org, reg["client_id"])
+    resp = client_with_empty_org.post(
+        "/consent", data={"txn": txn, "ahq_token": EMPTY_ORG_TOKEN, "project_id": ""},
+    )
+    assert resp.status_code == 400
+    assert "no projects yet" in resp.text
+    assert 'type="radio"' not in resp.text, "must not offer an empty, unsubmittable picker"
+
+
+def test_a_short_lived_token_warns_before_it_becomes_a_support_ticket(client):
+    """We cannot outlive the credential we wrap — so say so while the user can still act on it."""
+    reg = _register(client)
+    txn = _authorize_to_txn(client, reg["client_id"])
+    resp = client.post(
+        "/consent", data={"txn": txn, "ahq_token": SHORT_LIVED_ORG_TOKEN, "project_id": ""},
+    )
+    assert resp.status_code == 200
+    assert "expires in about 8 hours" in resp.text
+    assert "longer-lived token" in resp.text
+
+
+def test_a_normal_year_long_token_is_not_nagged(client):
+    reg = _register(client)
+    txn = _authorize_to_txn(client, reg["client_id"])
+    resp = client.post("/consent", data={"txn": txn, "ahq_token": ORG_TOKEN, "project_id": ""})
+    assert resp.status_code == 200
+    assert "expires in about" not in resp.text

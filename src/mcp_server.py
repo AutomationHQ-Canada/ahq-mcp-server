@@ -71,6 +71,64 @@ async def _is_local_grid(clients: ClientBundle, grid_id: str) -> bool:
     return isinstance(grid, dict) and grid.get("url") in _LOCAL_GRID_URLS
 
 
+def _named_ids(items, id_keys, name_keys) -> dict[str, str]:
+    """{id: display name} out of a platform list response, tolerating its field-name variants."""
+    out: dict[str, str] = {}
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, dict):
+            continue
+        ident = next((str(item[k]) for k in id_keys if item.get(k)), None)
+        if ident:
+            out[ident] = next((str(item[k]) for k in name_keys if item.get(k)), ident)
+    return out
+
+
+async def _unknown_id_error(fetch, id_keys, name_keys, value: str, label: str, source: str):
+    """
+    Pre-flight one id in an execution configuration against the list it must come from.
+
+    Every one of these is silently accepted by the platform and only surfaces minutes later, at
+    the far end of a real browser session: an id that no longer exists produced a null
+    gridUrlForExecution mid-run, a raw URL in baseUrl killed a run at report time after six
+    minutes, and a mistyped branch ran a script version nobody edited. A list call up front turns
+    all of that into an immediate, correctable answer.
+
+    Returns an error dict, or None if the value is fine OR unverifiable. Fail-open is deliberate
+    and matches create_test_script's branch check: a lookup that itself fails must never become
+    the reason an otherwise-valid run can't start.
+    """
+    try:
+        known = _named_ids(await fetch(), id_keys, name_keys)
+    except Exception:
+        return None
+    if not known or value in known:
+        return None
+    return {"error": (
+        f"{label} '{value}' does not exist in this project — the execution would be accepted and "
+        f"then fail minutes into the run. Available (from {source}): "
+        + ", ".join(f"{name} ({ident})" for ident, name in sorted(known.items(), key=lambda kv: kv[1]))
+    )}
+
+
+async def _preflight_execution_configuration(clients: ClientBundle, config: dict):
+    """Check the three ids in an execution configuration that fail late and opaquely."""
+    checks = (
+        (clients.config.list_grids, ("gridId", "id", "_id"), ("name", "gridName"),
+         config.get("gridId"), "Grid id", "list_grids"),
+        (clients.config.list_environments, ("environmentId", "id", "_id"), ("name", "environmentName"),
+         config.get("baseUrl"), "Environment id (baseUrl)", "list_environments"),
+        (clients.test_mgmt.list_branches, ("branchName",), ("branchName",),
+         config.get("targetBranchName"), "Branch", "list_branches"),
+    )
+    for fetch, id_keys, name_keys, value, label, source in checks:
+        if not value:
+            continue
+        error = await _unknown_id_error(fetch, id_keys, name_keys, str(value), label, source)
+        if error:
+            return error
+    return None
+
+
 def _fill_resolution_default(execution_configuration: dict, is_local: bool) -> dict:
     """
     "Local Machine Resolution" only means something for the local-agent grid ("use whatever
@@ -232,6 +290,17 @@ async def _get_ahq_context(clients: ClientBundle) -> dict:
 # Tool definitions
 # ---------------------------------------------------------------------------
 
+# Shared by add_test_steps/update_test_script: the same trap, worth stating identically on both.
+_BRANCH_PIN_HINT = (
+    "The branch this edit must land on — pass the branch the script was created on (from "
+    "get_scripts_for_branch, or whatever branch_name create_test_script used). Omitting it does "
+    "NOT mean 'the script's own branch': the server applies the edit to the token's ambient "
+    "checked-out branch, which drifts. Confirmed live — a step added to a script created on main "
+    "landed on an unrelated feature branch, the next run silently executed the old version, and "
+    "neither the edit response nor the report mentioned it. The response echoes branchName so you "
+    "can check where the edit actually went."
+)
+
 TOOLS = [
     # Context
     Tool(name="get_ahq_context", description="Load full AHQ project snapshot from all services in parallel. Call this first before any other action.", inputSchema={"type": "object", "properties": {}}),
@@ -244,7 +313,7 @@ TOOLS = [
     # Asset — pages
     Tool(name="list_pages", description="List all pages under a website.", inputSchema={"type": "object", "properties": {"website_id": {"type": "string"}}, "required": ["website_id"]}),
     Tool(name="create_page", description="Create a page under an existing website.", inputSchema={"type": "object", "properties": {"website_id": {"type": "string"}, "name": {"type": "string"}, "url": {"type": "string"}}, "required": ["website_id", "name", "url"]}),
-    Tool(name="get_page_by_url", description="Check if a page already exists at a given URL, and if so, what locators it already has. Call this BEFORE writing any ui-locator test step for a live URL — if the locator you need isn't in the result, call crawl_url on that URL to capture it (never guess a raw selector instead).", inputSchema={"type": "object", "properties": {"website_id": {"type": "string"}, "url": {"type": "string"}}, "required": ["website_id", "url"]}),
+    Tool(name="get_page_by_url", description="Check if a page already exists at a given URL, and if so, what locators it already has. Call this BEFORE writing any ui-locator test step for a live URL — if the locator you need isn't in the result, call crawl_url on that URL to capture it (never guess a raw selector instead). Copy every locatorId straight from this result; do not retype one or recall it from earlier in the conversation. Both failure modes are silent — a locatorId belonging to a different element renders a plausible-looking step that drives the wrong control, and a mistyped id renders '(Pending) uiLocator not found' rather than an error.", inputSchema={"type": "object", "properties": {"website_id": {"type": "string"}, "url": {"type": "string"}}, "required": ["website_id", "url"]}),
     Tool(
         name="add_locators",
         description="Batch-create NEW locators on a page. Silently no-ops for any locator whose strategy value already exists — to change an existing one use update_locator, and to repair one broken by a UI change use heal_locator.",
@@ -364,8 +433,8 @@ TOOLS = [
     Tool(name="list_test_scripts", description="List or search test scripts by name. Returns a summary per script (id, name, status, type, stepCount) — call get_test_script for a script's actual steps. The `name` filter is a plain case-insensitive substring match. Results cover the configured project only; use get_scripts_for_branch to ask which scripts are on a specific branch.", inputSchema={"type": "object", "properties": {"name": {"type": "string", "description": "Optional case-insensitive substring filter"}}}),
     Tool(name="get_test_script", description="Get full details of a test script by ID, including every step. NOTE: the returned currentBranchName reflects this request's ambient branch, NOT the script's real branch membership — use get_scripts_for_branch for that.", inputSchema={"type": "object", "properties": {"script_id": {"type": "string"}}, "required": ["script_id"]}),
     Tool(name="delete_test_script", description="Delete a test script. This is the SAME soft delete the UI performs — the script is archived (isArchived=true), appears under Administration -> Archive, and can be brought back with restore_asset; it is not destroyed. TWO-PHASE: if the script is still referenced by any Test Set or TestBot, the first call deletes NOTHING and returns status NEEDS_CONFIRMATION listing them (the raw API signals this with a 202 that is easily misread as success). Relay that list to the user and only call again with confirmed=true if they agree — that detaches the script from each one as it deletes.", inputSchema={"type": "object", "properties": {"script_id": {"type": "string"}, "confirmed": {"type": "boolean", "default": False, "description": "Set true ONLY to confirm a prior NEEDS_CONFIRMATION response, after the user has agreed"}}, "required": ["script_id"]}),
-    Tool(name="add_test_steps", description="Append (or insert) steps into an EXISTING test script in one call — no manual PUT assembly needed. Steps use the same shape as create_test_script (templateId + templateTitle verbatim for built-ins + parameters). Scalar parameter values accept friendly forms: {\"literal\": \"text\"}, {\"configuration\": \"paramName\"}, {\"vault\": \"secretName\"}, {\"variable\": \"varName\"}, {\"data_column\": \"col\"}, {\"faker\": \"Email\"}, {\"parameter\": \"name\"} — or the raw {\"type\": <code>, \"value\": ...}. Sequences renumber automatically. NOTE: scripts on a protected branch (often 'main') reject direct edits — create a branch or delete+recreate.", inputSchema={"type": "object", "properties": {"script_id": {"type": "string"}, "steps": {"type": "array", "items": {"type": "object"}, "description": "Steps to add"}, "position": {"type": "integer", "description": "0-based insert position; omit to append at the end"}}, "required": ["script_id", "steps"]}),
-    Tool(name="update_test_script", description="Update fields of an existing test script (name, status, story_id, testSteps, ...) — GET-merge-PUT, so unspecified fields are preserved. Same protected-branch caveat as add_test_steps.", inputSchema={"type": "object", "properties": {"script_id": {"type": "string"}, "changes": {"type": "object", "description": "Fields to change, using the entity's own field names (e.g. name, status, storyId, testSteps)"}}, "required": ["script_id", "changes"]}),
+    Tool(name="add_test_steps", description="Append (or insert) steps into an EXISTING test script in one call — no manual PUT assembly needed. Steps use the same shape as create_test_script (templateId + templateTitle verbatim for built-ins + parameters). Scalar parameter values accept friendly forms: {\"literal\": \"text\"}, {\"configuration\": \"paramName\"}, {\"vault\": \"secretName\"}, {\"variable\": \"varName\"}, {\"data_column\": \"col\"}, {\"faker\": \"Email\"}, {\"parameter\": \"name\"} — or the raw {\"type\": <code>, \"value\": ...}. Sequences renumber automatically. ALWAYS pass branch_name — omitting it lets the edit land on whatever branch the token is ambiently pointed at, not the script's own. NOTE: scripts on a protected branch (often 'main') reject direct edits — create a branch or delete+recreate.", inputSchema={"type": "object", "properties": {"script_id": {"type": "string"}, "steps": {"type": "array", "items": {"type": "object"}, "description": "Steps to add"}, "position": {"type": "integer", "description": "0-based insert position; omit to append at the end"}, "branch_name": {"type": "string", "description": _BRANCH_PIN_HINT}}, "required": ["script_id", "steps"]}),
+    Tool(name="update_test_script", description="Update fields of an existing test script (name, status, story_id, testSteps, ...) — GET-merge-PUT, so unspecified fields are preserved. Pass branch_name for the same reason as add_test_steps. Same protected-branch caveat.", inputSchema={"type": "object", "properties": {"script_id": {"type": "string"}, "changes": {"type": "object", "description": "Fields to change, using the entity's own field names (e.g. name, status, storyId, testSteps)"}, "branch_name": {"type": "string", "description": _BRANCH_PIN_HINT}}, "required": ["script_id", "changes"]}),
     Tool(
         name="create_test_script",
         description=(
@@ -444,8 +513,8 @@ TOOLS = [
     # Organization
     Tool(name="list_epics", description="List all epics in the project.", inputSchema={"type": "object", "properties": {}}),
     Tool(name="create_epic", description="Create a new epic. Use this when no existing epic fits a test script you're about to create — create_test_script requires a story_id, which requires a parent epic.", inputSchema={"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}),
-    Tool(name="list_stories", description="List all stories under an epic.", inputSchema={"type": "object", "properties": {"epic_id": {"type": "string"}}, "required": ["epic_id"]}),
-    Tool(name="create_story", description="Create a new story under an epic. Use this when no existing story fits a test script you're about to create.", inputSchema={"type": "object", "properties": {"epic_id": {"type": "string"}, "name": {"type": "string"}}, "required": ["epic_id", "name"]}),
+    Tool(name="list_stories", description="List all stories under an epic. ALWAYS call this before create_story — most epics already contain a story that fits, and adding a near-duplicate fragments the user's test organisation.", inputSchema={"type": "object", "properties": {"epic_id": {"type": "string"}}, "required": ["epic_id"]}),
+    Tool(name="create_story", description="Create a new story under an epic. Only after list_stories has shown that nothing existing fits. Reusing or creating an epic/story is the user's structural decision, not a default to take silently: say which existing one you found and ask before either reusing it or adding a new one alongside it.", inputSchema={"type": "object", "properties": {"epic_id": {"type": "string"}, "name": {"type": "string"}}, "required": ["epic_id", "name"]}),
     Tool(name="list_bots", description="List the project's UI/functional TestBots. This is the tool for 'show me my bots' — list_performance_bots is a SEPARATE JMeter list (a project can have bots here and none there), and list_bot_types returns type metadata for create_test_bot, not bots.", inputSchema={"type": "object", "properties": {"name": {"type": "string", "description": "Optional name filter"}}}),
     Tool(name="list_suites", description="List all test suites in the project.", inputSchema={"type": "object", "properties": {}}),
     Tool(name="list_environments", description="List all configured environments.", inputSchema={"type": "object", "properties": {}}),
@@ -510,14 +579,14 @@ TOOLS = [
     Tool(name="delete_config_vault_secret", description="Permanently delete a vault secret.", inputSchema={"type": "object", "properties": {"secret_id": {"type": "string"}}, "required": ["secret_id"]}),
 
     # Execution
-    Tool(name="create_test_bot", description="Create a TestBot (execution configuration for a set of Test Suites). A TestBot carries NO browser/grid settings — those are supplied at run time via execute_bot. Attach scripts by first creating a suite (create_suite) and passing its id+name in test_suites (min 1). Bot names must be unique in the project.", inputSchema={"type": "object", "properties": {"name": {"type": "string", "description": "1-120 chars, unique"}, "test_suites": {"type": "array", "items": {"type": "object", "properties": {"testSuiteId": {"type": "string"}, "name": {"type": "string"}}, "required": ["testSuiteId"]}, "description": "At least one suite from create_suite/list_suites"}, "description": {"type": "string"}, "bot_type": {"type": "object", "description": "Optional {type, value} from list_bot_types; server defaults to REGRESSION_TEST"}, "folder_id": {"type": "string"}, "profile_id": {"type": "string"}, "number_of_retries": {"type": "integer", "default": 0}}, "required": ["name", "test_suites"]}),
+    Tool(name="create_test_bot", description="Create a TestBot (execution configuration for a set of Test Suites). A TestBot carries NO browser/grid settings — those are supplied at run time via execute_bot. Attach scripts by first creating a suite (create_suite) and passing its id+name in test_suites (min 1). Bot names must be unique in the project. For DEBUGGING, do not create a bot per script or per attempt: check list_bots for a debug bot that already exists and swap its suite's scripts with add_scripts_to_suite/remove_scripts_from_suite. One-off bots accumulate permanently in the user's project and are never used again.", inputSchema={"type": "object", "properties": {"name": {"type": "string", "description": "1-120 chars, unique"}, "test_suites": {"type": "array", "items": {"type": "object", "properties": {"testSuiteId": {"type": "string"}, "name": {"type": "string"}}, "required": ["testSuiteId"]}, "description": "At least one suite from create_suite/list_suites"}, "description": {"type": "string"}, "bot_type": {"type": "object", "description": "Optional {type, value} from list_bot_types; server defaults to REGRESSION_TEST"}, "folder_id": {"type": "string"}, "profile_id": {"type": "string"}, "number_of_retries": {"type": "integer", "default": 0}}, "required": ["name", "test_suites"]}),
     Tool(name="list_bot_types", description="List the available TestBot TYPES ({type, value, color}) for create_test_bot's bot_type. Type metadata, not bots — use list_bots for the project's actual bots.", inputSchema={"type": "object", "properties": {}}),
-    Tool(name="list_grids", description="List execution grids (gridId + url). An execute_bot execution_configuration's gridId MUST come from here.", inputSchema={"type": "object", "properties": {}}),
+    Tool(name="list_grids", description="List execution grids (gridId + url). An execute_bot execution_configuration's gridId MUST come from a call made in THIS session — grids differ per project and are deleted over time, so a gridId carried over from an earlier conversation is a common cause of a run that fails minutes in.", inputSchema={"type": "object", "properties": {}}),
     Tool(name="list_browsers", description="List available browsers for execution. An execute_bot execution_configuration's browser MUST come from here.", inputSchema={"type": "object", "properties": {}}),
     Tool(name="list_execution_types", description="List execution types (e.g. Web/Mobile) and platform options.", inputSchema={"type": "object", "properties": {}}),
     Tool(name="create_environment", description="Create an execution Environment (name + app-under-test URL). execute_bot's executionConfiguration.baseUrl must reference an Environment ID — if list_environments has nothing for the target app, create one here first.", inputSchema={"type": "object", "properties": {"name": {"type": "string"}, "url": {"type": "string", "description": "The app-under-test URL this environment points at"}, "env_type": {"type": "string", "default": "Web"}, "description": {"type": "string"}}, "required": ["name", "url"]}),
     Tool(name="get_grid_capabilities", description="One call returns everything an execute_bot config needs for a grid: valid platforms (osType values), browsers, resolutions, and browser versions (pass browser to get its versions). Use this instead of guessing — values differ per grid ('Grid OS'/'latest' on plain Selenium, real OS/version lists on TestingBot/BrowserStack).", inputSchema={"type": "object", "properties": {"grid_id": {"type": "string"}, "testing_type": {"type": "string", "default": "Web"}, "browser": {"type": "string", "description": "Optional — include to also get this browser's valid versions"}}, "required": ["grid_id"]}),
-    Tool(name="execute_bot", description="Run a TestBot — on the cloud grid pool, or on this machine's own local agent if gridId resolves to it (detected automatically; routed directly to localhost:9202, bypassing the cloud, since the cloud has no way to deliver a job to a specific developer's machine). execution_configuration is validated locally before submission. REQUIRED: baseUrl (an ENVIRONMENT ID from list_environments/create_environment — NOT a URL, despite the name; the backend resolves it via environment lookup and a raw URL kills the run at report time), browser + browserVersion + osType (from get_grid_capabilities), gridId (from list_grids). Returns the background JOB id only — there is NO executionId yet, because the execution record is not created until the job starts. Poll get_job_status(jobId); when it leaves PROCESSING, call list_recent_runs(bot_id) to get the executionId, then get_execution_report(executionId) for per-step pass/fail. Note that a job reporting SUCCEEDED means it ran, NOT that the tests passed — only the report says that.", inputSchema={"type": "object", "properties": {"bot_id": {"type": "string"}, "execution_configuration": {"type": "object", "description": "Required: baseUrl (Environment ID), browser, browserVersion, osType, gridId. Optional: resolution, type ('Web'), timeout (1-300, default 60), waitForElementTimeout (1-300, default 30), delayBetweenSteps (0-30), numberOfRetries (0-3), screenshot flags, targetBranchName, profileId.", "properties": {"baseUrl": {"type": "string", "description": "Environment ID (NOT a URL)"}, "browser": {"type": "string"}, "browserVersion": {"type": "string"}, "osType": {"type": "string"}, "gridId": {"type": "string"}, "resolution": {"type": "string"}, "timeout": {"type": "integer"}, "targetBranchName": {"type": "string"}}, "required": ["baseUrl", "browser", "browserVersion", "osType", "gridId"]}, "name": {"type": "string", "description": "Execution display name (defaults to the bot's name)"}, "profile_id": {"type": "string"}, "partial_execution": {"type": "boolean", "default": False}}, "required": ["bot_id", "execution_configuration"]}),
+    Tool(name="execute_bot", description="Run a TestBot — on the cloud grid pool, or on this machine's own local agent if gridId resolves to it (detected automatically; routed directly to localhost:9202, bypassing the cloud, since the cloud has no way to deliver a job to a specific developer's machine). execution_configuration is validated locally before submission. REQUIRED: baseUrl (an ENVIRONMENT ID from list_environments/create_environment — NOT a URL, despite the name; the backend resolves it via environment lookup and a raw URL kills the run at report time), browser + browserVersion + osType (from get_grid_capabilities), gridId (from list_grids). Returns the background JOB id only — there is NO executionId yet, because the execution record is not created until the job starts. Poll get_job_status(jobId) with widening gaps (~30s, then 60s, then 120s) rather than a fixed long sleep; when it leaves PROCESSING, call list_recent_runs(bot_id) to get the executionId, then get_execution_report(executionId) for per-step pass/fail. Note that a job reporting SUCCEEDED means it ran, NOT that the tests passed — only the report says that. TO RUN A SCRIPT THAT LIVES ON A BRANCH, set execution_configuration.targetBranchName to that branch — this is the run-time branch selector (the same one the UI's run dialog offers). NEVER propose merging a branch into main just to run or verify a script; a merge is only for making a version permanent, and suggesting one as a prerequisite to testing sends the user through a PR they did not need.", inputSchema={"type": "object", "properties": {"bot_id": {"type": "string"}, "execution_configuration": {"type": "object", "description": "Required: baseUrl (Environment ID), browser, browserVersion, osType, gridId. Optional: resolution, type ('Web'), timeout (1-300, default 60), waitForElementTimeout (1-300, default 30), delayBetweenSteps (0-30), numberOfRetries (0-3), screenshot flags, targetBranchName, profileId.", "properties": {"baseUrl": {"type": "string", "description": "Environment ID (NOT a URL)"}, "browser": {"type": "string"}, "browserVersion": {"type": "string"}, "osType": {"type": "string"}, "gridId": {"type": "string", "description": "From list_grids, fetched THIS session — a grid id remembered from an earlier conversation may have been deleted since, and the run fails minutes in with a null gridUrlForExecution."}, "resolution": {"type": "string"}, "timeout": {"type": "integer"}, "targetBranchName": {"type": "string", "description": "Which branch's committed version to run. This is how you test a script on a branch — no merge required. Confirm it with get_scripts_for_branch when a recent edit is supposed to be included; execute_bot runs the last COMMITTED version, so an uncommitted edit will not appear."}}, "required": ["baseUrl", "browser", "browserVersion", "osType", "gridId"]}, "name": {"type": "string", "description": "Execution display name (defaults to the bot's name)"}, "profile_id": {"type": "string"}, "partial_execution": {"type": "boolean", "default": False}}, "required": ["bot_id", "execution_configuration"]}),
     Tool(name="get_execution_status", description="Progress/status poll for a running execution (by executionId from execute_bot). The lightweight endpoint reports UNKNOWN for finished runs — this tool automatically falls back to the detailed report's overall status in that case. For queue-position detail, use get_job_status with the jobId from execute_bot's response.", inputSchema={"type": "object", "properties": {"execution_id": {"type": "string"}}, "required": ["execution_id"]}),
     Tool(name="schedule_bot_recurring", description="Create a recurring schedule for a TestBot — the real scheduler backing both the Scheduler Admin page and each TestBot's own clock-icon dialog (test-management-services). REQUIRED: name (1-120 chars, the schedule's own name — ask the user if not given), cron (a real cron expression — use convert_text_to_cron first if the user described it in plain language, e.g. 'every day at 9am'), execution_configuration (same shape as execute_bot's: baseUrl/browser/browserVersion/osType/gridId required). emails (result-recipient list) is optional but should be asked for — check list_scheduler_recipient_emails for previously-used addresses first.", inputSchema={"type": "object", "properties": {"bot_id": {"type": "string"}, "name": {"type": "string", "description": "The schedule's own name, 1-120 chars"}, "emails": {"type": "array", "items": {"type": "string"}, "description": "Result-notification recipients"}, "cron": {"type": "string", "description": "Cron expression, e.g. '0 9 * * *'. Use convert_text_to_cron to derive one from plain language."}, "execution_configuration": {"type": "object", "properties": {"baseUrl": {"type": "string", "description": "Environment ID (NOT a URL)"}, "browser": {"type": "string"}, "browserVersion": {"type": "string"}, "osType": {"type": "string"}, "gridId": {"type": "string"}}, "required": ["baseUrl", "browser", "browserVersion", "osType", "gridId"]}}, "required": ["bot_id", "name", "cron", "execution_configuration"]}),
     Tool(name="cancel_schedule", description="Delete a recurring schedule created by schedule_bot_recurring (test-management-services' real scheduler).", inputSchema={"type": "object", "properties": {"schedule_id": {"type": "string"}}, "required": ["schedule_id"]}),
@@ -526,7 +595,7 @@ TOOLS = [
     Tool(name="list_schedulers", description="List recurring schedules (the same ones shown in Scheduler Admin). Pass bot_id to reproduce the exact filtered view a TestBot's own scheduler dialog shows — useful to confirm a schedule actually landed against the bot you expected.", inputSchema={"type": "object", "properties": {"bot_id": {"type": "string", "description": "Optional — filter to one TestBot's schedules"}, "offset": {"type": "integer", "default": 0}, "size": {"type": "integer", "default": 100}}}),
     Tool(name="list_scheduler_recipient_emails", description="Previously-used schedule result-notification email addresses, for suggesting values instead of guessing one.", inputSchema={"type": "object", "properties": {}}),
     Tool(name="convert_text_to_cron", description="Convert a plain-language schedule description (e.g. 'every day at 9am', 'every Monday at noon') into a cron expression for schedule_bot_recurring — use this instead of hand-writing cron syntax.", inputSchema={"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}),
-    Tool(name="get_job_status", description="Queue-level status for a job, by the job_id from execute_bot — answers 'is it still waiting to start' (runs can sit ENQUEUED 2-3 minutes). Once running, use get_execution_status with the executionId instead; the two take different ids.", inputSchema={"type": "object", "properties": {"job_id": {"type": "string"}}, "required": ["job_id"]}),
+    Tool(name="get_job_status", description="Queue-level status for a job, by the job_id from execute_bot — answers 'is it still waiting to start' (runs can sit ENQUEUED 2-3 minutes). Once running, use get_execution_status with the executionId instead; the two take different ids. Poll with WIDENING gaps — check at ~30s, then 60s, then 120s — rather than repeating a long fixed sleep: most runs finish well inside a fixed 150-180s wait, so a fixed interval spends the whole budget on a run that was already done.", inputSchema={"type": "object", "properties": {"job_id": {"type": "string"}}, "required": ["job_id"]}),
     Tool(name="list_recent_runs", description="List recent execution reports. With bot_id: that bot's execution history; without: the report list across bots. Start here to find the execution_id that get_execution_report needs.", inputSchema={"type": "object", "properties": {"bot_id": {"type": "string"}, "limit": {"type": "integer", "default": 10}}}),
 
     # Reporting
@@ -892,9 +961,13 @@ async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: boo
         )
     if name == "add_test_steps":
         return await clients.test_mgmt.add_test_steps(
-            args["script_id"], args["steps"], args.get("position"))
+            args["script_id"], args["steps"], args.get("position"),
+            branch_name=args.get("branch_name"))
     if name == "update_test_script":
-        return await clients.test_mgmt.update_test_script(args["script_id"], **args["changes"])
+        # branch_name is a sibling of `changes`, not one of the entity fields inside it — it
+        # selects WHERE the edit lands rather than what the document says.
+        return await clients.test_mgmt.update_test_script(
+            args["script_id"], branch_name=args.get("branch_name"), **args["changes"])
     if name == "create_test_script":
         kwargs = {}
         if "status" in args:
@@ -1132,6 +1205,11 @@ async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: boo
         # 0/false/blank rather than a working value (confirmed live: an omitted timeout/
         # waitForElementTimeout produced a 0-second timeout, dooming the run).
         execution_configuration = RunExecutionConfiguration(**args["execution_configuration"]).model_dump(exclude_none=True)
+        # Every id below is accepted by the API and only fails once a browser session is already
+        # being set up, so a doomed run costs the same 2-6 minutes a real one does. Check first.
+        preflight = await _preflight_execution_configuration(clients, execution_configuration)
+        if preflight:
+            return preflight
         execution_configuration = await _fill_custom_properties(clients, execution_configuration)
         is_local = await _is_local_grid(clients, execution_configuration["gridId"])
         execution_configuration = _fill_resolution_default(execution_configuration, is_local)
@@ -1185,6 +1263,11 @@ async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: boo
         # actually runs, and disappears from status lookup). Same defaulting fix as execute_bot
         # for the nested execution_configuration (see its comment).
         execution_configuration = RunExecutionConfiguration(**args["execution_configuration"]).model_dump(exclude_none=True)
+        # Worth even more here than on execute_bot: a schedule with a dead grid/environment id
+        # fails on its own, unattended, every time it fires.
+        preflight = await _preflight_execution_configuration(clients, execution_configuration)
+        if preflight:
+            return preflight
         execution_configuration = await _fill_custom_properties(clients, execution_configuration)
         execution_configuration = _fill_resolution_default(
             execution_configuration, await _is_local_grid(clients, execution_configuration["gridId"]))
@@ -1197,6 +1280,9 @@ async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: boo
         execution_configuration = None
         if args.get("execution_configuration"):
             execution_configuration = RunExecutionConfiguration(**args["execution_configuration"]).model_dump(exclude_none=True)
+            preflight = await _preflight_execution_configuration(clients, execution_configuration)
+            if preflight:
+                return preflight
             execution_configuration = await _fill_custom_properties(clients, execution_configuration)
             execution_configuration = _fill_resolution_default(
                 execution_configuration, await _is_local_grid(clients, execution_configuration["gridId"]))

@@ -48,6 +48,22 @@ Key facts a future session must not rediscover:
   credentials into `scope["ahq_credentials"]`; legacy `X-API-AUTH-KEY`+`projectId` headers →
   pass-through to the original `from_headers` path. The SDK's `RequireAuthMiddleware` is NOT
   used (it would 401 the header clients).
+- **The connection can never outlive the AHQ token sealed inside it.** `_capped_ttl` binds BOTH
+  the access and the refresh token to the embedded AHQ token's `exp`, necessarily — every
+  downstream call re-presents that token to the gateway, so an expired one is useless whatever we
+  say about it. The consequence is a support question that looks like an OAuth bug: AHQ's token
+  dialog offers an 8-hour expiry and it is popular (29% of live ORGANIZATION tokens use
+  `expiryMinutes=480`), so those users must create a NEW AHQ token and re-paste it at consent
+  roughly once a working day. Refresh is not broken — there is simply nothing left to refresh
+  against. `/consent` now warns when a pasted token has under a week left, tells everyone to pick
+  the longest expiry available, and records `short_lived_token` on the `auth.consent_ok` audit
+  line so the question is answerable from logs.
+- **A token whose organization has no projects used to dead-end silently** — the picker rendered
+  with zero options and a `required` radio, unsubmittable and unexplained, which reads as "this
+  token is rejected" while a colleague's token works. Now a stated error. Reachable in live dev
+  data (one org holds a valid ORGANIZATION token and zero projects), and a plausible explanation
+  for any "works with account X's token, not account Y's" report — check the org's project list
+  before assuming the token type or the creating account's role is what differs.
 - **No token revocation by design** — no storage; the gateway re-validates the embedded AHQ
   token on every downstream call, so a revoked AHQ token dies at the next tool call anyway.
 - **Public URLs vs app paths**: the gateway's `StripPrefix=1` removes `/ahq-mcp-server` before
@@ -811,6 +827,41 @@ is broken" for a user who runs locally — say so rather than reporting all-clea
 contained one-repo change (add the same wiring at each `ActionLibraryServices` construction site,
 where `setSmartClickRetryEnabled` is already set) and should land before Track 2, which needs both
 paths reporting symmetrically for its failure-category data to mean anything.
+
+## Third field report — the "accepted, then wrong" class (v1.9.0)
+
+Three separate reported failures turned out to be the same shape: the platform **accepts** the
+call, so the tool returns success, and the consequence only appears minutes later or never. That
+is why each one cost a full execution cycle before anyone noticed.
+
+- **A script edit lands on the token's ambient branch, not the script's.** `add_test_steps` /
+  `update_test_script` are GET-merge-PUT, and the GET returns `currentBranchName` set to *this
+  request's* ambient checked-out branch (this was already documented on `get_test_script`'s own
+  tool description) — PUTting it straight back is what moved a step onto an unrelated feature
+  branch. Both tools now take `branch_name`, which pins `currentBranchName` on the outgoing
+  document, and both always echo `branchName` in the response so an unpinned edit's destination is
+  at least visible. Pass the branch the script was created on; do not rely on the default.
+- **`execute_bot` accepted ids that no longer exist.** `_is_local_grid` swallowed a failed
+  `get_grid` lookup and returned False ("cloud grid"), so a stale gridId enqueued a doomed run that
+  died mid-flight on a null `gridUrlForExecution`. `_preflight_execution_configuration` now checks
+  `gridId`, `baseUrl` (the environment id) and `targetBranchName` against their own list endpoints
+  before submitting, on `execute_bot`, `schedule_bot_recurring` and `update_schedule` — the
+  scheduler cases matter most, since a dead id there fails unattended on every fire. It is
+  deliberately **fail-open**: a lookup that itself errors, or returns an empty list, is treated as
+  unverifiable and lets the run through (same discipline as `create_test_script`'s branch check —
+  the check must never become the failure).
+- **A credentialed `crawl_url` never captured the login form.** It filled and closed the login page
+  without extracting anything, then crawled from the original URL — by which point the context held
+  a session, so that URL rendered the authenticated app. Result: the whole product and none of the
+  email/password/submit locators, forcing a second credential-less crawl. `_capture_page` (extracted
+  from the crawl loop, now shared) runs against the login page *before* submitting, and its URL is
+  marked visited so the authenticated pass can't overwrite it.
+
+The remaining items in that report were model-behaviour, not code, and are addressed where the
+model actually reads them — tool descriptions and skill Rules, not here: run a branch via
+`targetBranchName` instead of proposing a merge, re-fetch ids in the current session instead of
+recalling them, poll with widening gaps, reuse one debug bot, diagnose with a cheap check before
+spending another execution, and confirm epic/story reuse and script granularity with the user.
 
 ## Tool profiles — `src/tool_groups.py` (v1.7.0)
 

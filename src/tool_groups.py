@@ -235,6 +235,10 @@ _CORE_EXTRA = (
     "execute_bot",
     "get_execution_status",
     "get_job_status",
+    # The one versioning tool the run path can't do without: execute_bot runs a branch's last
+    # COMMITTED version, so "did my edit actually make it into this run" is unanswerable without
+    # it. A field report traced a wasted execution cycle to exactly that blind spot.
+    "get_scripts_for_branch",
 )
 
 PROFILES: dict[str, frozenset[str]] = {

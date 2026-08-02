@@ -181,7 +181,28 @@ class TestMgmtClient(BaseAhqClient):
             payload["repairComment"] = repair_comment
         return await self.post("/rest/api/stories/scripts", json=payload)
 
-    async def update_test_script(self, script_id: str, **changes) -> dict:
+    async def _put_script(self, script_id: str, document: dict, branch_name: str = None) -> dict:
+        """
+        The write half of every GET-merge-PUT script edit, plus the branch discipline both halves
+        need.
+
+        A GET returns `currentBranchName` set to THIS REQUEST'S ambient checked-out branch, not
+        the branch the script really lives on (see get_test_script's own tool description). PUTting
+        that value straight back is what makes an edit land somewhere nobody asked for: a step
+        added to a script the user created on `main` went to whatever branch the token happened to
+        be pointed at, the next run tested the old version, and nothing in either response said so.
+        Passing branch_name pins the destination; the landing branch is always echoed back so the
+        caller can see where the edit actually went even when it doesn't.
+        """
+        if branch_name:
+            document["currentBranchName"] = branch_name
+        landed = document.get("currentBranchName")
+        result = await self.put(f"/rest/api/stories/scripts/{script_id}", json=document)
+        if isinstance(result, dict) and landed:
+            result["branchName"] = landed
+        return result
+
+    async def update_test_script(self, script_id: str, branch_name: str = None, **changes) -> dict:
         # PUT /rest/api/stories/scripts/{id} is a full-document update — same GET-merge-PUT
         # discipline as update_common_function so a partial body can never wipe fields.
         # NOTE: direct edits to a script on a PROTECTED branch (often "main") 403 with
@@ -191,9 +212,11 @@ class TestMgmtClient(BaseAhqClient):
         if "testSteps" in changes:
             changes["testSteps"] = _normalize_step_parameters(changes["testSteps"])
         current.update(changes)
-        return await self.put(f"/rest/api/stories/scripts/{script_id}", json=current)
+        return await self._put_script(script_id, current, branch_name)
 
-    async def add_test_steps(self, script_id: str, steps: list, position: int = None) -> dict:
+    async def add_test_steps(
+        self, script_id: str, steps: list, position: int = None, branch_name: str = None
+    ) -> dict:
         """
         Append (or insert at `position`, 0-based) steps to an existing script — the single-call
         replacement for the fetch-spec/read-controller/hand-build-PUT detour. Sequences are
@@ -206,7 +229,7 @@ class TestMgmtClient(BaseAhqClient):
         for i, step in enumerate(merged, start=1):
             step["sequence"] = i
         current["testSteps"] = merged
-        return await self.put(f"/rest/api/stories/scripts/{script_id}", json=current)
+        return await self._put_script(script_id, current, branch_name)
 
     # --- Epics ---
     async def list_epics(self) -> list:

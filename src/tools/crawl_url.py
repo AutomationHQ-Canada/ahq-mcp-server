@@ -131,6 +131,28 @@ async def crawl_url(url: str, credentials: dict = None, max_pages: int = MAX_PAG
         return await _crawl(url, credentials, max_pages, hosted)
 
 
+async def _capture_page(page, final_url: str = None) -> dict:
+    """One page's locator harvest, in the shape the tool returns per page.
+
+    `final_url` reports where we actually landed rather than where we asked to go: add_locators
+    upserts by page URL, so a redirect (http->https, "/" -> "/home", auth bounce) would otherwise
+    file the captured locators under a URL that no longer serves them.
+    """
+    locators = await _extract_locators(page)
+    valid_locators = await _validate_locators(page, locators)
+    total, valid = len(locators), len(valid_locators)
+    resolution_rate = round(valid / total, 2) if total > 0 else 0.0
+    return {
+        "url": final_url or page.url,
+        "title": await page.title(),
+        "locators": valid_locators,
+        "total_found": total,
+        "total_valid": valid,
+        "resolution_rate": resolution_rate,
+        "passes_threshold": resolution_rate >= 0.80,
+    }
+
+
 async def _crawl(url: str, credentials: dict, max_pages: int, hosted: bool) -> dict:
     base_domain = urlparse(url).netloc
     visited: set[str] = set()
@@ -154,9 +176,19 @@ async def _crawl(url: str, credentials: dict, max_pages: int, hosted: bool) -> d
         context = await browser.new_context()
 
         post_login_url = None
+        pre_auth_page = None
         if credentials:
             login_page = await context.new_page()
             await login_page.goto(url, wait_until="networkidle", timeout=30_000)
+            # Capture the sign-in form BEFORE submitting it. This is the only moment it exists in
+            # this crawl: once the context holds a session, every later visit to the same URL
+            # renders the authenticated app instead, so a credentialed crawl used to come back
+            # with the whole product and none of the email/password/submit locators a login test
+            # actually needs — costing a second, credential-less crawl to get them.
+            try:
+                pre_auth_page = await _capture_page(login_page)
+            except Exception:
+                pre_auth_page = None
             try:
                 # Scope username/submit lookups to the <form> containing the password field,
                 # not the whole page. A login page commonly also has a nearby "Sign Up" button
@@ -206,6 +238,11 @@ async def _crawl(url: str, credentials: dict, max_pages: int, hosted: bool) -> d
         queue = [url]
         if post_login_url and _dedup_key(post_login_url) != _dedup_key(url):
             queue.insert(0, post_login_url)
+        if pre_auth_page:
+            # Already captured, and re-visiting it now would overwrite the sign-in form with
+            # whatever the authenticated session renders at that URL — mark it done.
+            pages_data.append(pre_auth_page)
+            visited.add(_dedup_key(pre_auth_page["url"]))
 
         while queue and len(visited) < max_pages:
             current_url = queue.pop(0)
@@ -237,23 +274,7 @@ async def _crawl(url: str, credentials: dict, max_pages: int, hosted: bool) -> d
                 final_url = page.url
                 visited.add(_dedup_key(final_url))
 
-                title = await page.title()
-                locators = await _extract_locators(page)
-                valid_locators = await _validate_locators(page, locators)
-
-                total = len(locators)
-                valid = len(valid_locators)
-                resolution_rate = round(valid / total, 2) if total > 0 else 0.0
-
-                pages_data.append({
-                    "url": final_url,
-                    "title": title,
-                    "locators": valid_locators,
-                    "total_found": total,
-                    "total_valid": valid,
-                    "resolution_rate": resolution_rate,
-                    "passes_threshold": resolution_rate >= 0.80,
-                })
+                pages_data.append(await _capture_page(page, final_url))
 
                 links = await page.eval_on_selector_all("a[href]", "els => els.map(e => e.href)")
                 for link in links:

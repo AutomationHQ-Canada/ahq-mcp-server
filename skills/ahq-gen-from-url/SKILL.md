@@ -85,9 +85,12 @@ The user has a deployed web application and wants test scripts generated automat
    - **`website_id` and `story_id` are both REQUIRED** — `create_test_script` now validates this
      locally and rejects the call with a clean error if either is missing, matching
      `automationhq-frontend-v2`'s own create-script form. Pass `website_id` from `create_website`'s
-     result. For `story_id`: resolve one via `list_epics` → `list_stories`; if nothing fits, call
-     `create_epic` then `create_story` rather than skipping the field or asking the user to accept
-     an invisible script — there is always a way to satisfy this now.
+     result. For `story_id`: call `list_epics` → `list_stories` and actually read the result before
+     creating anything. If a fitting epic or story already exists, **say which one and ask the user
+     whether to reuse it or start a fresh one for this work** — that is their structural decision,
+     and quietly adopting an existing epic (or adding a near-duplicate story to one that already
+     had a suitable story) leaves them with a test tree they did not choose. Only call
+     `create_epic`/`create_story` once nothing fits or the user has said so.
    - `status`/`type` default to `"Not Started"`/`"WEB"` in `create_test_script` — leave them unless
      you have a real reason to change them (never send them as null/omit them entirely). If you do
      set `status` to `"To Be Repaired"`, also pass `repair_comment` — required in that case only.
@@ -116,5 +119,14 @@ The user has a deployed web application and wants test scripts generated automat
   "Post-navigation race" section.
 - Never create a script with 0 steps
 - Script names must be unique — append " (2)", " (3)" if duplicates arise
+- **Agree the granularity before generating at scale.** One script per test case and one script
+  bundling several related cases are both legitimate, and the right answer depends on how the user
+  intends to run and maintain them. When a run would produce more than a handful of scripts, state
+  the split you are about to make and confirm it — restructuring afterwards means recreating every
+  script, since a script's steps are its identity
+- Locators from a credentialed crawl: `crawl_url` captures the sign-in page BEFORE authenticating
+  and the authenticated pages after, so one call covers both. If a login form's fields are missing
+  from the result, the credentials logged straight through — re-crawl without credentials rather
+  than writing guessed selectors
 - If crawl returns an error for a page, skip it silently and note it in the summary
 - Do not call `create_website` more than once per invocation — reuse the websiteId for all pages

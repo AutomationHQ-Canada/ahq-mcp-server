@@ -1,4 +1,5 @@
 import html
+import time
 
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
@@ -99,7 +100,43 @@ def _token_input(partner_name: str) -> str:
         '<input type="password" id="ahq_token" name="ahq_token" autocomplete="off" required>\n'
         f'<p class="hint">Create one in the {escaped} web app under Administration '
         "&rarr; API Tokens. Either type works &mdash; note that a User token still has access "
-        "to everything in its organization.</p>"
+        "to everything in its organization. <strong>Give it the longest expiry you can:</strong> "
+        "this connection can never outlive the token sealed inside it, so a short-lived token "
+        "means reconnecting and pasting a new one every time it expires.</p>"
+    )
+
+
+# Below this, a connection is short enough that the user will notice the reconnect and deserves to
+# hear about it up front rather than discover it. The platform's own token dialog offers an
+# 8-hour option, and it is a popular choice — 29% of live ORGANIZATION tokens use it.
+_SHORT_TOKEN_LIFE_SECONDS = 7 * 24 * 3600
+
+
+def _expiry_warning(claims: dict) -> str:
+    """Plain-language warning when the pasted token expires soon, or "" when it doesn't.
+
+    _capped_ttl never issues an access OR refresh token past the embedded AHQ token's own expiry
+    — it cannot, since every downstream call re-presents that token to the gateway. So the AHQ
+    token's lifetime IS the connection's lifetime, and an 8-hour token silently means re-pasting
+    a new one before the next working day.
+    """
+    exp = claims.get("exp")
+    if not isinstance(exp, (int, float)):
+        return ""
+    remaining = int(exp - time.time())
+    if remaining <= 0 or remaining >= _SHORT_TOKEN_LIFE_SECONDS:
+        return ""
+    # Rounded, not floored: an 8-hour token is a second or two into its life by the time it is
+    # pasted, and "expires in about 7 hours" for a token the user just created reads as a bug.
+    if remaining < 2 * 3600:
+        window = f"{max(1, round(remaining / 60))} minutes"
+    elif remaining < 48 * 3600:
+        window = f"{round(remaining / 3600)} hours"
+    else:
+        window = f"{round(remaining / 86400)} days"
+    return (
+        f"Heads up: this token expires in about {window}, and this connection expires with it. "
+        "To avoid reconnecting then, create a longer-lived token and paste that instead."
     )
 
 
@@ -275,6 +312,21 @@ def make_consent_endpoints(codec: TokenCodec, settings, user_client_factory, htt
                 ),
             }
         projects = _normalize_projects(raw)
+        if not projects:
+            # Otherwise this renders "Choose a project" with no options and a `required` radio —
+            # an unsubmittable form with no stated reason, which reads as "this token doesn't
+            # work" while a colleague's token on a different org sails through. Confirmed
+            # reachable: an organization holding a valid ORGANIZATION token and zero projects
+            # exists in the live dev data.
+            audit_log("auth.consent_fail", org=org_id, reason="no_projects_in_org")
+            return {
+                "ok": False,
+                "message": (
+                    "This token is valid, but its organization has no projects yet — there is "
+                    f"nothing to connect to. Create a project in the {partner_name} web app "
+                    "first, or use a token from an organization that already has one."
+                ),
+            }
         # ORGANIZATION tokens carry organizationName; USER tokens do not (TokenService's
         # generateOrgClaims vs createClaims). Without a fallback a user token would show its raw
         # org UUID on the confirmation banner.
@@ -294,7 +346,8 @@ def make_consent_endpoints(codec: TokenCodec, settings, user_client_factory, htt
             }
         return {"ok": True, "org_id": org_id, "org_name": org_name,
                 "subject": _subject_label(claims, org_name), "token_type": token_type,
-                "projects": projects, "base_url": base_url}
+                "projects": projects, "base_url": base_url,
+                "expiry_warning": _expiry_warning(claims)}
 
     def _issue_code(payload: dict, token: str, project_id: str, base_url: str) -> str:
         params = payload["params"]
@@ -340,20 +393,25 @@ def make_consent_endpoints(codec: TokenCodec, settings, user_client_factory, htt
             )
         projects = result["projects"]
 
+        warning = result.get("expiry_warning") or ""
         if not project_id:
             if len(projects) == 1:
                 project_id = projects[0]["id"]
             else:
                 who = "" if result.get("token_type") == "USER" else "organization "
+                extra = f" {html.escape(warning)}" if warning else ""
                 return _render_page(
                     txn, client_name, token_value=token, projects=projects,
                     banner=f'<p class="org">Token accepted for {who}'
-                           f"<strong>{html.escape(result['subject'])}</strong>.</p>",
+                           f"<strong>{html.escape(result['subject'])}</strong>.{extra}</p>",
                 )
 
         code = _issue_code(payload, token, project_id, result["base_url"])
+        # Logged even on the redirect path, where there is no page left to warn on: a support
+        # question of the form "it keeps asking me to reconnect" is answerable from this line.
         audit_log("auth.consent_ok", org=result["org_id"], project=project_id,
-                  token_type=result.get("token_type", ""))
+                  token_type=result.get("token_type", ""),
+                  short_lived_token=bool(warning))
         return RedirectResponse(
             _redirect_url(payload, code), status_code=302, headers={"Cache-Control": "no-store"},
         )
