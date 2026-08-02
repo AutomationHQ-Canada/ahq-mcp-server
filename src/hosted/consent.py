@@ -295,7 +295,8 @@ def make_consent_endpoints(codec: TokenCodec, settings, user_client_factory, htt
                 ),
             }
 
-        base_url = base_url_from_claims(claims, extra_base_urls) or settings.ahq_base_url
+        claimed_base_url = base_url_from_claims(claims, extra_base_urls)
+        base_url = claimed_base_url or settings.ahq_base_url
         creds = AhqCredentials(base_url=base_url, api_token=token,
                                org_id=org_id, project_id=project_id)
         try:
@@ -303,14 +304,29 @@ def make_consent_endpoints(codec: TokenCodec, settings, user_client_factory, htt
                 credentials=creds, http_client=http_client_holder.client
             ).list_projects()
         except Exception:
-            audit_log("auth.consent_fail", org=org_id, reason="gateway_rejected_token")
-            return {
-                "ok": False,
-                "message": (
+            # A token carrying its own urlDetails.baseUrl is validated against ITS environment, so
+            # a rejection really does mean the token is bad. Without that claim we fall back to
+            # this deployment's own gateway and a perfectly good token from the other environment
+            # gets rejected by a server that was never asked about it — a different problem with
+            # a different fix, so don't send the user to go re-check a token that is fine.
+            # TokenService.generateOrgClaims only writes urlDetails when the caller supplies it,
+            # and 30% of live ORGANIZATION tokens have none.
+            reason = "gateway_rejected_token" if claimed_base_url else "no_base_url_claim"
+            audit_log("auth.consent_fail", org=org_id, reason=reason)
+            if claimed_base_url:
+                message = (
                     f"{partner_name} rejected this token — it may be expired or deleted. "
                     "Check it in Administration → API Tokens and try again."
-                ),
-            }
+                )
+            else:
+                message = (
+                    f"This token carries no environment of its own, so it was checked against "
+                    f"{base_url}, which rejected it. If the token belongs to a different "
+                    f"{partner_name} environment, create a fresh one there — newer tokens record "
+                    "their own environment and work here regardless. Otherwise it may be expired "
+                    "or deleted."
+                )
+            return {"ok": False, "message": message}
         projects = _normalize_projects(raw)
         if not projects:
             # Otherwise this renders "Choose a project" with no options and a `required` radio —

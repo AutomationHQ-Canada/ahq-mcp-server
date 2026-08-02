@@ -431,3 +431,42 @@ def test_a_normal_year_long_token_is_not_nagged(client):
     resp = client.post("/consent", data={"txn": txn, "ahq_token": ORG_TOKEN, "project_id": ""})
     assert resp.status_code == 200
     assert "expires in about" not in resp.text
+
+
+# A token minted before urlDetails existed, or by a caller that didn't send it: no baseUrl claim,
+# so it can only be validated against THIS deployment's gateway. 30% of live ORGANIZATION tokens
+# look like this (TokenService.generateOrgClaims writes urlDetails only when supplied).
+NO_BASE_URL_TOKEN = _fake_jwt({
+    "organizationId": "org-elsewhere", "organizationName": "Other Env Org",
+    "tokenType": "ORGANIZATION",
+})
+
+
+def test_a_rejected_token_with_no_environment_claim_does_not_blame_the_token(client):
+    """The two rejections need different advice, and the old message only gave one.
+
+    Re-checking the token in Administration -> API Tokens is wasted effort when the token is
+    valid and simply belongs to the other environment — a plausible reading of "works from one
+    account, not another".
+    """
+    reg = _register(client)
+    txn = _authorize_to_txn(client, reg["client_id"])
+    resp = client.post(
+        "/consent", data={"txn": txn, "ahq_token": NO_BASE_URL_TOKEN, "project_id": ""},
+    )
+    assert resp.status_code == 400
+    assert "carries no environment of its own" in resp.text
+    assert "api-dev.automationhq.ai" in resp.text, "must name the gateway that actually refused"
+
+
+def test_a_rejected_token_that_named_its_own_environment_still_blames_the_token(client):
+    """A token carrying urlDetails is checked against ITS environment, so rejection is real."""
+    reg = _register(client)
+    txn = _authorize_to_txn(client, reg["client_id"])
+    bad = _fake_jwt({
+        "organizationId": "org-x", "tokenType": "ORGANIZATION",
+        "urlDetails": [{"key": "baseUrl", "value": "https://api.automationhq.ai"}],
+    })
+    resp = client.post("/consent", data={"txn": txn, "ahq_token": bad, "project_id": ""})
+    assert resp.status_code == 400
+    assert "may be expired or deleted" in resp.text

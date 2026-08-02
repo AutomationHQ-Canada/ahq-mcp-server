@@ -58,6 +58,18 @@ Key facts a future session must not rediscover:
   against. `/consent` now warns when a pasted token has under a week left, tells everyone to pick
   the longest expiry available, and records `short_lived_token` on the `auth.consent_ok` audit
   line so the question is answerable from logs.
+- **"Works with account X's token, not account Y's" has two known causes, neither of them the
+  account's role.** Investigated against the live dev DB + `TokenService` after a report that a
+  Site-Admin-created ORGANIZATION token failed where a Support-created one worked.
+  (1) `createOrgToken` lets a user mint an org token only for their OWN organization or one they
+  created (`belongsToOrg || isOrgCreator`), while AHQ Support has created most customer orgs — so
+  Support's tokens point at the CUSTOMER's org and a site admin's point at their own, which may
+  hold no projects. (2) `generateOrgClaims` writes `urlDetails` only when the caller supplies it,
+  and 30% of live ORGANIZATION tokens have no `baseUrl` claim at all; those fall back to this
+  deployment's own gateway, so a perfectly valid token from the OTHER environment gets rejected by
+  a server that was never asked about it. Both now produce a specific message instead of "the
+  token may be expired or deleted", which sent people to re-check a token that was fine.
+  Not reproducible from dev data — every ORGANIZATION token there was created by AHQ Support.
 - **A token whose organization has no projects used to dead-end silently** — the picker rendered
   with zero options and a `required` radio, unsubmittable and unexplained, which reads as "this
   token is rejected" while a colleague's token works. Now a stated error. Reachable in live dev
