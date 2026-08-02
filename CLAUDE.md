@@ -775,9 +775,11 @@ were ported directly from `automationhq-frontend-v2`'s zod form schemas, not inv
 frontend is the actual enforced contract in this platform, since `ahq-data-commons` entities carry
 no validation of their own. See `src/schema/asset_kinds.py` for the full rule set per tool.
 As of 2026-07-12 every §13 backlog slice is built (9a Recorded Script + Common Function,
-9b Archive Manager, 9c Project Roles, 9d Version Control v1, 9e Tunnel, 9f plugin packaging) —
-still missing: conflict resolution (9d-ii), drift-detection CI (9h, needs GitHub), TestBot
-creation, and a real execution-config/environments source.
+9b Archive Manager, 9c Project Roles, 9d Version Control v1, 9e Tunnel, 9f plugin packaging).
+TestBot creation (`create_test_bot`) and the execution-config source (`list_environments` /
+`create_environment` / `get_grid_capabilities` / `list_grids`) were listed here as missing and
+have since shipped — the two genuinely open items are **conflict resolution (9d-ii)** and
+**drift-detection CI (9h, needs GitHub)**.
 
 ## Self-healing locators (`scan_broken_locators` / `heal_locator` / `apply_locator_fix`)
 
