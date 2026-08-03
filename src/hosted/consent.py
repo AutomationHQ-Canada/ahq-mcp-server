@@ -165,12 +165,13 @@ _SHORT_TOKEN_LIFE_SECONDS = 7 * 24 * 3600
 
 
 def _expiry_warning(claims: dict) -> str:
-    """Plain-language warning when the pasted token expires soon, or "" when it doesn't.
+    """Plain-language warning when this connection will expire soon, or "" when it won't.
 
-    _capped_ttl never issues an access OR refresh token past the embedded AHQ token's own expiry
-    — it cannot, since every downstream call re-presents that token to the gateway. So the AHQ
-    token's lifetime IS the connection's lifetime, and an 8-hour token silently means re-pasting
-    a new one before the next working day.
+    _capped_ttl never issues an access OR refresh token past the embedded credential's own expiry
+    — it cannot, since every downstream call re-presents that credential to the gateway. So the
+    sign-in JWT's lifetime IS the connection's lifetime, and the platform issues those for 24h
+    (ai.automationhq.security.jwt.expiration), which means signing in again roughly daily until
+    refresh is implemented.
     """
     exp = claims.get("exp")
     if not isinstance(exp, (int, float)):
@@ -187,8 +188,8 @@ def _expiry_warning(claims: dict) -> str:
     else:
         window = f"{round(remaining / 86400)} days"
     return (
-        f"Heads up: this token expires in about {window}, and this connection expires with it. "
-        "To avoid reconnecting then, create a longer-lived token and paste that instead."
+        f"Heads up: this connection expires in about {window} — you'll need to sign in again "
+        "then. Nothing is lost when it does; anything you create stays in your project."
     )
 
 
