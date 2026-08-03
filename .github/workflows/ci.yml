@@ -78,8 +78,8 @@ jobs:
           RAW_COMMIT_MSG: ${{ github.event.head_commit.message }}
         run: |
           # Subject line only, trimmed to 50 chars. This has to reach bash as DATA, not as script
-          # text: ${{ }} interpolates before the shell runs, so a multi-line message pasted into
-          # `echo "..."` becomes multiple shell lines and `tr -d '\n'` only ever sees the first.
+          # text: workflow expressions interpolate before the shell runs, so a multi-line message
+          # pasted straight into an echo becomes multiple shell lines and tr only sees the first.
           # The receiver then writes it to $GITHUB_ENV, which is line-based KEY=VALUE, and every
           # body line after the first is parsed as its own malformed entry -- the job dies at
           # "Set variables" before it ever bumps imageTag, so dev silently stays on the old image.
