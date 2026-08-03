@@ -15,7 +15,14 @@ Internal-only changes (evals, CI, design docs) need no bump. Full policy + relea
 version history: `D:\MCP\AHQ_MCP_SERVER_MASTER_DESIGN.md` §14.
 
 ## Authentication
-- Header: `X-API-AUTH-KEY: <token>` on every AHQ request (NOT `Authorization: Bearer`)
+- Header depends on WHICH credential is in play (`AhqCredentials.auth_scheme`):
+  - **API token** (stdio/plugin, and legacy hosted headers) → `X-API-AUTH-KEY: <token>`. The
+    gateway resolves it by existence lookup only: no user attached, blanket org-wide reach.
+  - **Login JWT** (hosted connector, since password sign-in replaced the token) →
+    `Authorization: Bearer <jwt>`. This is the gateway's user-aware path, so the session carries
+    the signed-in person's own roles.
+  - `org-id` / `projectId` are omitted when empty, never sent blank — an empty `org-id` reads as
+    "belongs to organization ''" and is rejected, which broke the pre-org `/users/me` call.
 - Gateway URL: `https://api-dev.automationhq.ai` (NOT `https://dev.automationhq.ai`)
 - Org token type: `ORGANIZATION` — signed with a different secret than user JWTs
 - `.env` must never be committed
