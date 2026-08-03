@@ -23,6 +23,22 @@ async def test_check_local_agent_status_guard_does_not_fire_when_not_hosted():
     assert result == sentinel
 
 
+async def test_create_test_script_refuses_without_a_branch():
+    """The one argument whose wrong value fails silently, long after the call succeeds.
+
+    A script created on protected `main` cannot be committed (403), so edits stay uncommitted
+    while execute_bot keeps running the last committed version. Schema `required` alone is
+    advisory - not every MCP client enforces it - so the dispatch has to refuse too.
+    """
+    result = await _dispatch(
+        "create_test_script",
+        {"name": "A script", "steps": [{"templateId": "real-uuid"}], "website_id": "w1",
+         "story_id": "s1"},
+        DEFAULT_BUNDLE, is_hosted=False,
+    )
+    assert "branch_name is required" in result["error"]
+
+
 async def _async_result(value):
     return value
 
@@ -59,7 +75,8 @@ async def test_create_test_script_with_all_required_fields_reaches_client():
     try:
         result = await _dispatch(
             "create_test_script",
-            {"name": "A script", "steps": [{"templateId": "real-uuid"}], "website_id": "w1", "story_id": "s1"},
+            {"name": "A script", "steps": [{"templateId": "real-uuid"}], "website_id": "w1",
+             "story_id": "s1", "branch_name": "feature/x"},
             DEFAULT_BUNDLE, is_hosted=False,
         )
     finally:

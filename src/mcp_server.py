@@ -110,6 +110,50 @@ async def _unknown_id_error(fetch, id_keys, name_keys, value: str, label: str, s
     )}
 
 
+def _name_key(value: str) -> str:
+    """Comparison form for a human-typed name: case and punctuation carry no meaning here."""
+    return "".join(c for c in str(value).casefold() if c.isalnum())
+
+
+async def _existing_match(fetch, name: str, confirmed: bool, id_key: str = "_id"):
+    """Refuse to silently create a second epic/story that duplicates an existing one.
+
+    Whether to reuse an existing epic/story or add another alongside it is the user's structural
+    decision — a field report traced duplicated hierarchies to this being taken as a default. A
+    near-name match returns the candidates instead of creating, and only `confirmed` proceeds,
+    mirroring create_branch's NEEDS_CONFIRMATION handshake.
+
+    Fail-open on a lookup error, like create_test_script's branch check: not being able to check
+    for duplicates must never be the reason a legitimate create cannot happen.
+    """
+    if confirmed:
+        return None
+    try:
+        existing = await fetch()
+    except Exception:
+        return None
+    wanted = _name_key(name)
+    if not wanted:
+        return None
+    matches = [
+        item for item in (existing if isinstance(existing, list) else [])
+        if isinstance(item, dict) and (
+            _name_key(item.get("name") or item.get("title") or "") == wanted
+            or wanted in _name_key(item.get("name") or item.get("title") or "")
+        )
+    ]
+    if not matches:
+        return None
+    listed = ", ".join(
+        f"{m.get('name') or m.get('title')} ({m.get(id_key) or m.get('id')})" for m in matches
+    )
+    return {"status": "NEEDS_CONFIRMATION", "existing": matches, "error": (
+        f"Something very like '{name}' already exists: {listed}. Reusing it or creating another "
+        "alongside it is the user's call, not a default — show them what exists and ask. "
+        "Resend with confirmed=true only if they want a new one anyway."
+    )}
+
+
 async def _preflight_execution_configuration(clients: ClientBundle, config: dict):
     """Check the three ids in an execution configuration that fail late and opaquely."""
     checks = (
@@ -469,7 +513,7 @@ TOOLS = [
                 "status": {"type": "string", "default": "Not Started", "description": "One of: Not Started, In Progress, Ready, To Be Repaired, On Hold. Sending this as null/absent triggers a UI validation error when the script is opened."},
                 "repair_comment": {"type": "string", "description": "REQUIRED only when status is 'To Be Repaired' (matches the frontend form's conditional rule) — otherwise omit."},
                 "script_type": {"type": "string", "default": "WEB", "description": "e.g. 'WEB'. Sending this as null/absent triggers a UI validation error when the script is opened."},
-                "branch_name": {"type": "string", "default": "main", "description": "ASK THE USER which branch this script should live on before creating it — offer a new branch alongside the real ones from list_branches. Do NOT quietly accept the 'main' default: main is protected, so a later commit_branch on it returns 403, the edit stays an uncommitted version, and execute_bot goes on running the last committed one — the change looks saved and never executes (confirmed live: an inserted wait step silently never ran). Whatever branch is chosen is also what execute_bot needs as targetBranchName, so it has to be settled before the bot runs. Always send this field explicitly either way; omitting it falls back to the token's ambient checked-out branch, which is not reliably main."},
+                "branch_name": {"type": "string", "description": "ASK THE USER which branch this script should live on before creating it — offer a new branch alongside the real ones from list_branches. Do NOT quietly accept the 'main' default: main is protected, so a later commit_branch on it returns 403, the edit stays an uncommitted version, and execute_bot goes on running the last committed one — the change looks saved and never executes (confirmed live: an inserted wait step silently never ran). Whatever branch is chosen is also what execute_bot needs as targetBranchName, so it has to be settled before the bot runs. Always send this field explicitly either way; omitting it falls back to the token's ambient checked-out branch, which is not reliably main."},
                 "steps": {
                     "type": "array",
                     "items": {
@@ -500,7 +544,7 @@ TOOLS = [
                     }
                 }
             },
-            "required": ["name", "steps", "website_id", "story_id"]
+            "required": ["name", "steps", "website_id", "story_id", "branch_name"]
         }
     ),
 
@@ -524,9 +568,9 @@ TOOLS = [
 
     # Organization
     Tool(name="list_epics", description="List all epics in the project.", inputSchema={"type": "object", "properties": {}}),
-    Tool(name="create_epic", description="Create a new epic. Use this when no existing epic fits a test script you're about to create — create_test_script requires a story_id, which requires a parent epic.", inputSchema={"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}),
+    Tool(name="create_epic", description="Create a new epic. Use this when no existing epic fits a test script you're about to create — create_test_script requires a story_id, which requires a parent epic.", inputSchema={"type": "object", "properties": {"name": {"type": "string"}, "confirmed": {"type": "boolean", "default": False, "description": "Set true ONLY after the user has seen the existing epics and still wants a new one"}}, "required": ["name"]}),
     Tool(name="list_stories", description="List all stories under an epic. ALWAYS call this before create_story — most epics already contain a story that fits, and adding a near-duplicate fragments the user's test organisation.", inputSchema={"type": "object", "properties": {"epic_id": {"type": "string"}}, "required": ["epic_id"]}),
-    Tool(name="create_story", description="Create a new story under an epic. Only after list_stories has shown that nothing existing fits. Reusing or creating an epic/story is the user's structural decision, not a default to take silently: say which existing one you found and ask before either reusing it or adding a new one alongside it.", inputSchema={"type": "object", "properties": {"epic_id": {"type": "string"}, "name": {"type": "string"}}, "required": ["epic_id", "name"]}),
+    Tool(name="create_story", description="Create a new story under an epic. Only after list_stories has shown that nothing existing fits. Reusing or creating an epic/story is the user's structural decision, not a default to take silently: say which existing one you found and ask before either reusing it or adding a new one alongside it.", inputSchema={"type": "object", "properties": {"epic_id": {"type": "string"}, "name": {"type": "string"}, "confirmed": {"type": "boolean", "default": False, "description": "Set true ONLY after the user has seen the existing stories and still wants a new one"}}, "required": ["epic_id", "name"]}),
     Tool(name="list_bots", description="List the project's UI/functional TestBots. This is the tool for 'show me my bots' — list_performance_bots is a SEPARATE JMeter list (a project can have bots here and none there), and list_bot_types returns type metadata for create_test_bot, not bots.", inputSchema={"type": "object", "properties": {"name": {"type": "string", "description": "Optional name filter"}}}),
     Tool(name="list_suites", description="List all test suites in the project.", inputSchema={"type": "object", "properties": {}}),
     Tool(name="list_environments", description="List all configured environments.", inputSchema={"type": "object", "properties": {}}),
@@ -989,6 +1033,23 @@ async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: boo
         return await clients.test_mgmt.update_test_script(
             args["script_id"], branch_name=args.get("branch_name"), **args["changes"])
     if name == "create_test_script":
+        # Schema `required` is advisory — not every MCP client enforces it — and this is the one
+        # argument whose wrong value fails silently much later: a script created on protected
+        # `main` cannot be committed (403), so edits stay uncommitted and execute_bot keeps
+        # running the last committed version. Refusing here turns that into a question the user
+        # actually gets asked, which no amount of description text reliably achieved.
+        if not args.get("branch_name"):
+            try:
+                branches = [b.get("branchName") for b in await clients.test_mgmt.list_branches()]
+                known = ", ".join(b for b in branches if b) or "none found"
+            except Exception:
+                known = "could not list them"
+            return {"error": (
+                "branch_name is required — ask the user which branch this script should live on "
+                "before creating it, and offer creating a new one alongside the existing ones. "
+                f"Existing branches: {known}. Do not assume 'main': it is protected, so a later "
+                "commit_branch returns 403 and the script never executes what you edited."
+            )}
         kwargs = {}
         if "status" in args:
             kwargs["status"] = args["status"]
@@ -1053,10 +1114,17 @@ async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: boo
     if name == "list_epics":
         return await clients.test_mgmt.list_epics()
     if name == "create_epic":
+        clash = await _existing_match(clients.test_mgmt.list_epics, args["name"], args.get("confirmed"))
+        if clash:
+            return clash
         return await clients.test_mgmt.create_epic(args["name"])
     if name == "list_stories":
         return await clients.test_mgmt.list_stories(args["epic_id"])
     if name == "create_story":
+        clash = await _existing_match(
+            lambda: clients.test_mgmt.list_stories(args["epic_id"]), args["name"], args.get("confirmed"))
+        if clash:
+            return clash
         return await clients.test_mgmt.create_story(args["epic_id"], args["name"])
     if name == "list_bots":
         return await clients.test_mgmt.list_bots(args.get("name"))
