@@ -75,9 +75,17 @@ jobs:
       - name: Trigger GitOps workflow
         env:
           GH_TOKEN: ${{ secrets.AHQ_GITOPS_PAT }}
+          RAW_COMMIT_MSG: ${{ github.event.head_commit.message }}
         run: |
-          # Trim commit message to 50 characters and escape it for JSON
-          CLEAN_COMMIT_MSG=$(echo "${{ github.event.head_commit.message }}" | tr -d '\n' | cut -c1-50)
+          # Subject line only, trimmed to 50 chars. This has to reach bash as DATA, not as script
+          # text: ${{ }} interpolates before the shell runs, so a multi-line message pasted into
+          # `echo "..."` becomes multiple shell lines and `tr -d '\n'` only ever sees the first.
+          # The receiver then writes it to $GITHUB_ENV, which is line-based KEY=VALUE, and every
+          # body line after the first is parsed as its own malformed entry -- the job dies at
+          # "Set variables" before it ever bumps imageTag, so dev silently stays on the old image.
+          # An env var keeps the message out of the script, and is also what stops a commit
+          # message (attacker-influenceable text) from being executed as shell.
+          CLEAN_COMMIT_MSG=$(printf '%s' "$RAW_COMMIT_MSG" | head -n 1 | cut -c1-50)
           ESCAPED_COMMIT_MSG=$(jq -Rn --arg msg "$CLEAN_COMMIT_MSG" '$msg')
 
           gh api \
