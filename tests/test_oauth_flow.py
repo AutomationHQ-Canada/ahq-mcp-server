@@ -87,11 +87,13 @@ def client(monkeypatch):
     async def fake_sign_in(http_client, base_url, email, password):
         return LOGIN_JWT if (email, password) == (EMAIL, PASSWORD) else ""
 
-    async def fake_get_current_user(self):
-        return {"organizationId": "org-1", "firstName": "om", "lastName": "raut"}
+    async def fake_registration_info(self, email):
+        # Real /registrations/info shape, from a live login HAR 2026-08-03.
+        return {"userId": "user-1", "organizationId": "org-1", "projectId": "proj-1",
+                "email": email, "firstName": "om", "lastName": "raut"}
 
     monkeypatch.setattr(UserClient, "list_projects", fake_list_projects)
-    monkeypatch.setattr(UserClient, "get_current_user", fake_get_current_user)
+    monkeypatch.setattr(UserClient, "registration_info", fake_registration_info)
     monkeypatch.setattr(consent, "sign_in", fake_sign_in)
     with TestClient(create_app(_cfg()), follow_redirects=False) as c:
         c.seen_base_urls = seen_base_urls
@@ -350,11 +352,12 @@ def client_with_empty_org(monkeypatch):
     async def fake_sign_in(http_client, base_url, email, password):
         return LOGIN_JWT
 
-    async def fake_get_current_user(self):
-        return {"organizationId": "org-empty", "firstName": "om", "lastName": "raut"}
+    async def fake_registration_info(self, email):
+        return {"userId": "user-1", "organizationId": "org-empty",
+                "email": email, "firstName": "om", "lastName": "raut"}
 
     monkeypatch.setattr(UserClient, "list_projects", fake_list_projects)
-    monkeypatch.setattr(UserClient, "get_current_user", fake_get_current_user)
+    monkeypatch.setattr(UserClient, "registration_info", fake_registration_info)
     monkeypatch.setattr(consent, "sign_in", fake_sign_in)
     with TestClient(create_app(_cfg()), follow_redirects=False) as c:
         yield c

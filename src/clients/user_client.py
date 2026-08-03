@@ -44,6 +44,21 @@ class UserClient(BaseAhqClient):
             f"/rest/api/projects/organizations/{self._credentials.org_id}/all")
         return result if isinstance(result, list) else result.get("content", result)
 
+    async def registration_info(self, email: str) -> dict:
+        """Who this email belongs to: userId, organizationId, projectId, name, userRole.
+
+        This is what the web app calls immediately after sign-in (Checking.tsx -> callRegistrations
+        InfoApi with the JWT's own `sub`), and it is the only lookup that works before an
+        organization is known — it takes no org-id header, which is precisely the chicken-and-egg
+        the consent flow has.
+
+        Verified against a real login HAR 2026-08-03. `/users/me` was the obvious-looking choice
+        and is the wrong one: it 500s "No value present" for a password JWT, because SecurityUtil
+        resolves the caller from a `username` or `email` claim and LoginController's token carries
+        only `sub`. Nothing in the product calls it that way.
+        """
+        return await self.post("/rest/api/registrations/info", json={"value": email}) or {}
+
     async def list_projects_for_user(self, user_id: str) -> list:
         """Projects this user personally holds a role in, as {id, name, org_id}.
 

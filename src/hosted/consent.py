@@ -360,7 +360,7 @@ def make_consent_endpoints(codec: TokenCodec, settings, user_client_factory, htt
             )
 
         try:
-            me = await _client("").get_current_user() or {}
+            me = await _client("").registration_info(email)
         except Exception as exc:
             # The sign-in itself worked, so this is the platform refusing the JWT on a call the
             # web app makes routinely. Carrying the real reason through matters: without it the
