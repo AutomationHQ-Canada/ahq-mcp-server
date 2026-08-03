@@ -361,11 +361,15 @@ def make_consent_endpoints(codec: TokenCodec, settings, user_client_factory, htt
 
         try:
             me = await _client("").get_current_user() or {}
-        except Exception:
-            audit_log("auth.consent_fail", reason="user_lookup_failed")
+        except Exception as exc:
+            # The sign-in itself worked, so this is the platform refusing the JWT on a call the
+            # web app makes routinely. Carrying the real reason through matters: without it the
+            # page says "could not be loaded" for a 401, a 500 and a timeout alike, and there is
+            # nothing in the response to tell them apart from the outside.
+            detail = str(exc)
+            audit_log("auth.consent_fail", reason="user_lookup_failed", detail=detail[:200])
             return {"ok": False, "message": (
-                "Signed in, but your account details could not be loaded. Try again, and contact "
-                "support if it keeps happening."
+                f"Signed in, but your account details could not be loaded: {detail}"
             )}
 
         org_id = str(me.get("organizationId") or "")

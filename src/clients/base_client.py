@@ -53,8 +53,13 @@ class BaseAhqClient:
                 if creds.auth_scheme == "bearer"
                 else {"X-API-AUTH-KEY": creds.api_token}
             ),
-            "org-id": creds.org_id,
-            "projectId": creds.project_id,
+            # Omitted rather than sent empty. Services treat a present-but-blank org-id as an
+            # assertion that the caller belongs to organization "" (assertOrgAccessOrSuperRole
+            # rejects exactly that) instead of as "not specified" — and the consent flow has to
+            # call /users/me before it knows the organization, which is the whole point of that
+            # call. The web app never sends a blank one, so this path was untested.
+            **({"org-id": creds.org_id} if creds.org_id else {}),
+            **({"projectId": creds.project_id} if creds.project_id else {}),
             "Content-Type": "application/json",
         }
         self._client = http_client or httpx.AsyncClient()
