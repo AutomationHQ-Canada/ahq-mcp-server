@@ -92,6 +92,10 @@ class AhqAuthorizationCode(AuthorizationCode):
     ahq_token: str
     project_id: str = ""
     base_url: str = ""
+    # Resolved at consent time rather than re-derived here. An API token names its own
+    # organization in its claims; the JWT that password sign-in issues does not (it carries only
+    # sub/authorities/tier), so the org has to travel with the code instead.
+    org_id: str = ""
 
 
 class AhqRefreshToken(RefreshToken):
@@ -217,6 +221,7 @@ class StatelessAhqProvider(OAuthAuthorizationServerProvider):
             redirect_uri=payload["redirect_uri"],
             redirect_uri_provided_explicitly=payload["redirect_uri_provided_explicitly"],
             ahq_token=payload["ahq_token"],
+            org_id=payload.get("org_id", ""),
             project_id=payload.get("project_id", ""),
             base_url=payload.get("base_url", ""),
         )
@@ -245,7 +250,8 @@ class StatelessAhqProvider(OAuthAuthorizationServerProvider):
     async def exchange_authorization_code(
         self, client: OAuthClientInformationFull, authorization_code: AhqAuthorizationCode
     ) -> OAuthToken:
-        org_id = decode_ahq_token(authorization_code.ahq_token).get("organizationId", "")
+        org_id = authorization_code.org_id or decode_ahq_token(
+            authorization_code.ahq_token).get("organizationId", "")
         if not org_id:
             raise TokenError(error="invalid_grant", error_description="embedded AHQ token has no organization")
         return self._issue_tokens(

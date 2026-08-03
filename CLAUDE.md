@@ -614,7 +614,7 @@ script, 9/9 steps PASSED on the AHQ Premium Grid.
   existed (404 since day one — ExecutionJobController is POST-only). Recent runs come from
   test-management's `TestReportController`: `/rest/api/testreports/{botId}` (one bot's history)
   or `/rest/api/testreports/bots/list` (paged, across bots).
-- **`get_ahq_context` is a slimmed discovery snapshot** (id/name/status per entity, lists
+- **`get_context` is a slimmed discovery snapshot** (id/name/status per entity, lists
   capped at 100): the raw documents came back at ~137K characters in a real org. Fetch full
   documents with the dedicated get_* tools.
 - **Duplicate-name guard + retry trap**: TestBot and TestSuite creates reject duplicate names.
@@ -654,7 +654,7 @@ variable, `5` parameter reference, `6` faker/random (value = generator name), `7
   envelope with an untrustworthy `success` flag (defaults false even on success). The MCP layer
   strips it to `{id, message, success}` and derives `success` from the message/status — don't
   re-add a "verify with a GET" step for creates that report success.
-- `/users/me` 500s for ORGANIZATION tokens (no userId claim — server quirk); `get_ahq_context`
+- `/users/me` 500s for ORGANIZATION tokens (no userId claim — server quirk); `get_context`
   falls back to identity from token claims. `list_projects` uses
   `/rest/api/projects/organizations/{orgId}/all` (the bare path has NO handler; 405'd forever).
 
@@ -743,7 +743,7 @@ asking to "test my API" or "run a load test" means the mtaf-core tools below, no
 
 | Tool | When to use |
 |---|---|
-| `get_ahq_context` | Always call first — loads project snapshot, including API collections/workflows/performance bots (added 2026-07-10; previously mtaf-core was entirely missing from this snapshot) |
+| `get_context` | Always call first — loads project snapshot, including API collections/workflows/performance bots (added 2026-07-10; previously mtaf-core was entirely missing from this snapshot) |
 | `crawl_url` | Discover pages + locators from a live URL |
 | `create_website` / `create_page` / `add_locators` | Build UI component library |
 | `search_step_templates` / `list_step_templates` / `get_step_template` | Resolve a real `templateId` before writing any test step |
@@ -895,7 +895,7 @@ advertised.
 - A spec is comma-separated profiles and/or groups: `core`, `core,api`, `reporting`. Unknown
   tokens fall back to **all 136**, never to an empty list — a typo costs the reduction, not the
   tools, since an empty tool list reads as a broken server.
-- `get_ahq_context` is injected into every profile regardless of spec.
+- `get_context` is injected into every profile regardless of spec.
 
 **`core` (55 tools, 30,147 chars — half of `full`) is defined as "every bundled skill keeps
 working"**, not as a taste judgment. `test_every_skill_works_under_the_core_profile` reads each

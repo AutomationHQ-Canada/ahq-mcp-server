@@ -2,7 +2,7 @@
 name: ahq-view-report
 description: Show the test execution report for the last run or a specific job
 tools:
-  - mcp__ahq-mcp-server__get_ahq_context
+  - mcp__ahq-mcp-server__get_context
   - mcp__ahq-mcp-server__list_recent_runs
   - mcp__ahq-mcp-server__get_execution_report
   - mcp__ahq-mcp-server__get_execution_screenshots
@@ -17,7 +17,7 @@ The user wants to see test execution results — what passed, what failed, scree
 
 ## Workflow
 
-1. Call `get_ahq_context` — get bots list and queue status
+1. Call `get_context` — get bots list and queue status
 2. If no job ID provided:
    - Call `list_recent_runs(bot_id, limit=1)` to get the latest run
 3. Call `get_execution_report(job_id)` for full pass/fail breakdown

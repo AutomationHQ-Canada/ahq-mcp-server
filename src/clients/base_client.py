@@ -1,6 +1,8 @@
 import asyncio
+import copy
 import json
 import logging
+from dataclasses import replace
 
 import httpx
 
@@ -46,7 +48,11 @@ class BaseAhqClient:
         self._credentials = creds
         self._base = f"{creds.base_url}{service_prefix}"
         self._headers = {
-            "X-API-AUTH-KEY": creds.api_token,
+            **(
+                {"Authorization": f"Bearer {creds.api_token}"}
+                if creds.auth_scheme == "bearer"
+                else {"X-API-AUTH-KEY": creds.api_token}
+            ),
             "org-id": creds.org_id,
             "projectId": creds.project_id,
             "Content-Type": "application/json",
@@ -55,6 +61,22 @@ class BaseAhqClient:
 
     def _extra_headers(self, extra: dict) -> dict:
         return {**self._headers, **extra}
+
+    def for_project(self, project_id: str) -> "BaseAhqClient":
+        """A shallow view of this client pinned to a different project.
+
+        The server keeps no per-connection state — any pod serves any request — so "which project
+        am I working in" cannot live here. It lives in the conversation: the model carries the
+        user's choice and passes it per call, and this turns that argument into the projectId
+        header the platform expects. Copied rather than mutated because the same client instance
+        serves concurrent requests, and mutating it would let one call's project leak into another.
+        """
+        if not project_id or project_id == self._credentials.project_id:
+            return self
+        clone = copy.copy(self)
+        clone._credentials = replace(self._credentials, project_id=project_id)
+        clone._headers = {**self._headers, "projectId": project_id}
+        return clone
 
     async def _request(
         self,

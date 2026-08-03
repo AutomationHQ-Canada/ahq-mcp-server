@@ -2,7 +2,7 @@
 name: ahq-test-architecture
 description: Discover a modular test architecture for a live application (crawl → modules → Epics/Stories), ported from testbotsai's Agent #1 "The Architect"
 tools:
-  - mcp__ahq-mcp-server__get_ahq_context
+  - mcp__ahq-mcp-server__get_context
   - mcp__ahq-mcp-server__crawl_url
   - mcp__ahq-mcp-server__create_website
   - mcp__ahq-mcp-server__create_page
@@ -43,7 +43,7 @@ lives behind the login.
 
 ## Workflow
 
-1. Call `get_ahq_context` — load existing epics/stories/websites so modules aren't duplicated
+1. Call `get_context` — load existing epics/stories/websites so modules aren't duplicated
    against something that already exists in the project.
 
 2. Call `crawl_url(url, credentials, max_pages)`. This is the same crawler `ahq-gen-from-url`
@@ -81,7 +81,7 @@ lives behind the login.
 
 6. On confirmation, persist the architecture into AHQ's real domain model:
    - `create_website` for the app if one doesn't already exist for this URL (check
-     `get_ahq_context`/`list_websites` first — don't duplicate)
+     `get_context`/`list_websites` first — don't duplicate)
    - `create_page` + `add_locators` per crawled page, exactly as `ahq-gen-from-url` does, so the
      locators captured here are immediately usable when scripts are generated later
    - `create_epic(name=module.name)` per module. **AHQ epics only carry a `name` field** — there

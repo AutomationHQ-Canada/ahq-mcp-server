@@ -2,7 +2,7 @@
 name: ahq-run-bot
 description: Execute an AHQ test bot immediately and report the result
 tools:
-  - mcp__ahq-mcp-server__get_ahq_context
+  - mcp__ahq-mcp-server__get_context
   - mcp__ahq-mcp-server__execute_bot
   - mcp__ahq-mcp-server__get_job_status
   - mcp__ahq-mcp-server__get_execution_report
@@ -17,7 +17,7 @@ The user wants to run a test bot now and see the results.
 
 ## Workflow
 
-1. Call `get_ahq_context` — get bots list and environments list
+1. Call `get_context` — get bots list and environments list
 2. Find the bot by name from the context (case-insensitive match)
    - If not found: list available bots and ask user to clarify
 3. Find the environment by name from the context

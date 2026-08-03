@@ -33,7 +33,7 @@ class UserClient(BaseAhqClient):
 
     async def get_current_user(self) -> dict:
         # NOTE: 500s ("No value present") for ORGANIZATION tokens with no userId claim — a
-        # server-side quirk, not a client bug. _get_ahq_context falls back to token claims.
+        # server-side quirk, not a client bug. _get_context falls back to token claims.
         return await self.get("/rest/api/users/me")
 
     async def list_projects(self) -> list:
@@ -43,6 +43,25 @@ class UserClient(BaseAhqClient):
         result = await self.get(
             f"/rest/api/projects/organizations/{self._credentials.org_id}/all")
         return result if isinstance(result, list) else result.get("content", result)
+
+    async def list_projects_for_user(self, user_id: str) -> list:
+        """Projects this user personally holds a role in, as {id, name, org_id}.
+
+        Field names verified against live dev 2026-08-03: the documents use `_id` / `projectName` /
+        `orgId` — note `orgId`, NOT the `organizationId` every other entity uses, which is exactly
+        the sort of thing that silently produces a list of Nones.
+
+        Sourced from UserRole records rather than the caller's own organization, so it reflects
+        what the signed-in person can actually reach. Disabled projects are dropped: offering one
+        leads to a selection that fails on first use.
+        """
+        result = await self.get(f"/rest/api/projects/users/{user_id}")
+        raw = result if isinstance(result, list) else result.get("content") or result.get("projects") or []
+        return [
+            {"id": p.get("_id"), "name": p.get("projectName"), "org_id": p.get("orgId")}
+            for p in raw
+            if isinstance(p, dict) and p.get("_id") and p.get("isEnabled", True)
+        ]
 
     async def list_users(self) -> list:
         result = await self.get("/rest/api/users")

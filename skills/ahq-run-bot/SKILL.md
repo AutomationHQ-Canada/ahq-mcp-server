@@ -2,7 +2,7 @@
 name: ahq-run-bot
 description: Execute an AHQ test bot immediately and report the result
 tools:
-  - mcp__ahq-mcp-server__get_ahq_context
+  - mcp__ahq-mcp-server__get_context
   - mcp__ahq-mcp-server__list_bots
   - mcp__ahq-mcp-server__list_grids
   - mcp__ahq-mcp-server__get_grid_capabilities
@@ -24,7 +24,7 @@ The user wants to run a test bot now and see the results.
 
 ## Workflow
 
-1. Call `get_ahq_context` — bots, environments and queue state
+1. Call `get_context` — bots, environments and queue state
 2. Find the bot by name from the context (case-insensitive match)
    - If not found: list available bots and ask the user to clarify
 3. Call `list_grids` and `get_grid_capabilities` **now**, in this session. Do not reuse a gridId,

@@ -15,7 +15,7 @@ and fixed instead of hand-editing a selector.
 ## What to collect before starting
 - Nothing required up front — `scan_broken_locators` finds candidates on its own.
 - `website_id` (needed by both `heal_locator` and `apply_locator_fix`) — get it from
-  `get_ahq_context` or `list_websites` if not already known.
+  `get_context` or `list_websites` if not already known.
 - Login credentials, only if the broken locator's page requires being signed in to view.
 
 ## Workflow

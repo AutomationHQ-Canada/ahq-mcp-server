@@ -40,3 +40,8 @@ data:
   AHQ_MCP_PUBLIC_BASE_URL: "https://api-dev.automationhq.ai/ahq-mcp-server"
   AHQ_MCP_RATE_LIMIT_PER_MIN: "60"
   AHQ_MCP_CRAWL_CONCURRENCY: "2"
+  # Consent-page branding. These are read by src/hosted/consent.py and need no code change —
+  # the page title, heading, logo, token-field copy and rejection text all follow them.
+  AHQ_MCP_PARTNER_DISPLAY_NAME: "TestBots.ai"
+  AHQ_MCP_PARTNER_LOGO_URL: "https://testbots.ai/favicon.png"
+  AHQ_MCP_PARTNER_PRIMARY_COLOR: "#7c3aed"

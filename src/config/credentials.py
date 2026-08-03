@@ -77,6 +77,12 @@ class AhqCredentials:
     api_token: str
     org_id: str
     project_id: str
+    # "api-key" sends the value as X-API-AUTH-KEY, which the gateway resolves by existence lookup
+    # only — no user, no role. "bearer" sends it as Authorization: Bearer, the same path the web
+    # app uses, where the gateway attaches the real user and their authorities. Password sign-in
+    # on the consent page produces the latter, which is what makes a connector session carry the
+    # signed-in user's own permissions instead of blanket org-wide access.
+    auth_scheme: str = "api-key"
 
     @classmethod
     def from_settings(cls, settings) -> "AhqCredentials":

@@ -3,7 +3,7 @@ import time
 
 from starlette.datastructures import Headers
 
-from src.config.credentials import AhqCredentials
+from src.config.credentials import AhqCredentials, decode_ahq_token
 from src.hosted.oauth_provider import AhqTokenVerifier
 
 
@@ -51,6 +51,13 @@ class DualAuthMiddleware:
                 api_token=access.ahq_token,
                 org_id=access.org_id,
                 project_id=access.project_id,
+                # Which credential got sealed in decides how it must be presented downstream.
+                # Every API token carries tokenType (ORGANIZATION or USER — the consent page
+                # rejects anything else); the JWT that password sign-in issues never does, and
+                # has to go back as Authorization: Bearer to reach the gateway's user-aware path.
+                auth_scheme=(
+                    "api-key" if decode_ahq_token(access.ahq_token).get("tokenType") else "bearer"
+                ),
             )
             await self.app(scope, receive, send)
             return

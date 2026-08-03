@@ -2,7 +2,7 @@
 name: ahq-dashboard
 description: Show a full project overview — websites, scripts, bots, recent runs, queue state
 tools:
-  - mcp__ahq-mcp-server__get_ahq_context
+  - mcp__ahq-mcp-server__get_context
   - mcp__ahq-mcp-server__list_recent_runs
 ---
 
@@ -11,7 +11,7 @@ The user wants a quick overview of the entire AHQ project state.
 
 ## Workflow
 
-1. Call `get_ahq_context` — loads everything in parallel
+1. Call `get_context` — loads everything in parallel
 2. Call `list_recent_runs(limit=3)` — last 3 runs across all bots
 3. Return human-readable dashboard:
 

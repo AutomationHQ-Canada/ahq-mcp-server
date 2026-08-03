@@ -2,7 +2,7 @@
 name: ahq-schedule-bot
 description: Schedule an AHQ test bot to run on a recurring cron schedule
 tools:
-  - mcp__ahq-mcp-server__get_ahq_context
+  - mcp__ahq-mcp-server__get_context
   - mcp__ahq-mcp-server__list_grids
   - mcp__ahq-mcp-server__get_grid_capabilities
   - mcp__ahq-mcp-server__convert_text_to_cron
@@ -27,7 +27,7 @@ The user wants to schedule a bot to run automatically on a recurring cron schedu
 
 ## Workflow
 
-1. Call `get_ahq_context` — get bots and environments
+1. Call `get_context` — get bots and environments
 2. Find bot and environment by name from context
 3. Call `list_grids` to find a grid for this project, then `get_grid_capabilities(grid_id,
    browser)` to get valid osType/browserVersion values
@@ -55,7 +55,7 @@ executed. If the user wants a single future run, use `execute_bot` at the right 
 ## Rules
 - Always confirm the schedule back to the user in plain English before creating it
 - Never expose raw IDs — use names only
-- If the user says "cancel"/"delete the schedule(s)": `get_ahq_context` does NOT include
+- If the user says "cancel"/"delete the schedule(s)": `get_context` does NOT include
   scheduler data — call `list_schedulers` (optionally filtered by `bot_id`) to resolve the
   schedule name(s) the user means to a `schedulerId`, then `cancel_schedule(schedule_id)`. If a
   bot has multiple schedules and the user just says "the scheduler" ambiguously, list them and

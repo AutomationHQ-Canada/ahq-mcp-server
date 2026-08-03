@@ -24,7 +24,7 @@ The user has a deployed web application and wants test scripts generated automat
 
 ## Workflow
 
-1. Call `get_ahq_context` — load full project snapshot (websites, envs, epics, bots, queue)
+1. Call `get_context` — load full project snapshot (websites, envs, epics, bots, queue)
 2. Call `crawl_url` with the provided URL and credentials (if any)
    - If it returns an error about a missing Playwright browser: relay the fix to the user
      verbatim (run `playwright install chromium` once, then retry — a one-time setup step),

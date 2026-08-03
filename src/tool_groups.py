@@ -25,7 +25,10 @@ GROUPS: dict[str, tuple[str, ...]] = {
     # Orientation. Injected into every profile (see resolve_tool_names) — a subset that can't
     # tell the model which project it's pointed at is worse than no subset.
     "context": (
-        "get_ahq_context",
+        "get_context",
+    # Which project to work in is a question only the user can answer, and 115 live users have
+    # more than one — the model cannot ask if it cannot see the list.
+    "list_my_projects",
     ),
     "discovery": (
         "list_websites",

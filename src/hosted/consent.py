@@ -6,7 +6,7 @@ from starlette.responses import HTMLResponse, RedirectResponse, Response
 
 from mcp.server.auth.provider import construct_redirect_uri
 
-from src.config.credentials import AhqCredentials, base_url_from_claims, decode_ahq_token
+from src.config.credentials import AhqCredentials, decode_ahq_token
 from src.hosted.audit import audit_log
 from src.hosted.oauth_provider import CODE_TTL
 from src.hosted.token_codec import TokenCodec
@@ -21,6 +21,7 @@ _PAGE = """<!doctype html>
   :root {{
     --ahq-primary: {primary_color};
     --ahq-primary-focus-ring: {primary_color_focus_ring};
+    --ahq-primary-tint: {primary_color_tint};
     --ahq-danger: #dc2929;
     --ahq-text: #333333;
     --ahq-muted: #6b6b6b;
@@ -42,11 +43,11 @@ _PAGE = """<!doctype html>
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06);
     padding: 2rem;
   }}
-  .logo {{ display: block; height: 40px; margin: 0 auto 1.5rem; }}
+  .logo {{ display: block; height: 56px; margin: 0 auto 1.5rem; }}
   h1 {{ font-size: 1.15rem; font-weight: 600; text-align: center; margin: 0 0 1.5rem; }}
   h1 strong {{ color: var(--ahq-primary); }}
   label {{ display: block; margin: 1rem 0 0.4rem; font-weight: 500; font-size: 0.9rem; }}
-  input[type=password], input[type=text] {{
+  input[type=password], input[type=text], input[type=email] {{
     width: 100%;
     padding: 0.6rem 0.75rem;
     border: 1px solid var(--ahq-border);
@@ -54,11 +55,23 @@ _PAGE = """<!doctype html>
     font-size: 0.95rem;
     font-family: inherit;
   }}
-  input[type=password]:focus, input[type=text]:focus {{
+  input[type=password]:focus, input[type=text]:focus, input[type=email]:focus {{
     outline: none;
     border-color: var(--ahq-primary);
     box-shadow: 0 0 0 3px var(--ahq-primary-focus-ring);
   }}
+  /* Ant Design's `prefix` input, reproduced: icon sits inside the field, not in a cell beside it. */
+  .form-message {{ font-size: 0.875rem; font-weight: 400; margin: 0 0 1rem; }}
+  .field {{ display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;
+            border: 1px solid var(--ahq-border); border-radius: 6px; padding: 0 0.7rem; }}
+  .field:focus-within {{ border-color: var(--ahq-primary); box-shadow: 0 0 0 3px var(--ahq-primary-focus-ring); }}
+  .field-icon {{ display: flex; align-items: center; color: var(--ahq-muted); }}
+  /* Overrides the full-width submit-button styling above — same element, opposite job. */
+  .reveal {{ width: auto; margin: 0; padding: 0; background: none; border: none; color: var(--ahq-muted);
+             display: flex; align-items: center; cursor: pointer; text-transform: none; }}
+  .reveal:hover {{ filter: none; color: var(--ahq-text); }}
+  .field input {{ border: none; border-radius: 0; padding-left: 0; padding-right: 0; flex: 1; }}
+  .field input:focus {{ outline: none; box-shadow: none; }}
   .radio {{ margin: 0.5rem 0; font-weight: 400; }}
   .radio label {{ display: flex; align-items: center; gap: 0.5rem; font-weight: 400; margin: 0; }}
   button {{
@@ -71,12 +84,13 @@ _PAGE = """<!doctype html>
     color: #ffffff;
     background: var(--ahq-primary);
     border: none;
-    border-radius: 4px;
+    border-radius: 6px;
+    text-transform: uppercase;
     cursor: pointer;
   }}
   button:hover {{ filter: brightness(0.87); }}
   .error {{ background: #fdecea; border: 1px solid #f5c6cb; color: var(--ahq-danger); padding: 0.6rem 0.75rem; border-radius: 4px; font-size: 0.9rem; }}
-  .org {{ background: #f4e9f6; padding: 0.6rem 0.75rem; border-radius: 4px; font-size: 0.9rem; }}
+  .org {{ background: var(--ahq-primary-tint); padding: 0.6rem 0.75rem; border-radius: 4px; font-size: 0.9rem; }}
   .hint {{ color: var(--ahq-muted); font-size: 0.8rem; margin-top: 0.4rem; }}
 </style></head><body>
 <div class="card">
@@ -93,22 +107,60 @@ _PAGE = """<!doctype html>
 </body></html>"""
 
 
-def _token_input(partner_name: str) -> str:
-    escaped = html.escape(partner_name)
+# Inline SVG rather than an <img>/icon font: the page must stay self-contained (no external
+# requests) and these two are the whole icon set.
+_MAIL_ICON = ('<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+              'stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/>'
+              '<path d="m2 7 10 6 10-6"/></svg>')
+_LOCK_ICON = ('<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+              'stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/>'
+              '<path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>')
+_EYE_ICON = ('<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+             'stroke-width="2"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z"/>'
+             '<circle cx="12" cy="12" r="3"/></svg>')
+_EYE_OFF_ICON = ('<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+                 'stroke-width="2"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z"/>'
+                 '<circle cx="12" cy="12" r="3"/><path d="m3 3 18 18"/></svg>')
+
+
+def _login_inputs(email_value: str = "") -> str:
+    """Email + password, mirroring the platform's own sign-in screen.
+
+    Deliberately matches automationhq-frontend-v2's Login.tsx rather than inventing a second look:
+    one "Login with Email" heading over the pair, icons as in-field prefixes, placeholders instead
+    of per-field labels, and the same copy the web app uses (auth.login.* in common.json). Someone
+    who signs in to the web app should recognise this page immediately — it is asking for the same
+    password, and looking unfamiliar is exactly how a credential prompt teaches people bad habits.
+
+    Signing in issues a real user JWT, so the gateway authenticates the session as that person and
+    applies their role — unlike an API token, which the gateway resolves by existence alone and
+    grants blanket org-wide access to whoever holds it.
+    """
     return (
-        f'<label for="ahq_token">{escaped} API token</label>\n'
-        '<input type="password" id="ahq_token" name="ahq_token" autocomplete="off" required>\n'
-        f'<p class="hint">Create one in the {escaped} web app under Administration '
-        "&rarr; API Tokens. Either type works &mdash; note that a User token still has access "
-        "to everything in its organization. <strong>Give it the longest expiry you can:</strong> "
-        "this connection can never outlive the token sealed inside it, so a short-lived token "
-        "means reconnecting and pasting a new one every time it expires.</p>"
+        '<h2 class="form-message">Login with Email</h2>\n'
+        f'<div class="field"><span class="field-icon">{_MAIL_ICON}</span>'
+        '<input type="email" id="ahq_email" name="ahq_email" autocomplete="username" '
+        f'placeholder="Email Address" value="{html.escape(email_value, quote=True)}" required></div>\n'
+        f'<div class="field"><span class="field-icon">{_LOCK_ICON}</span>'
+        '<input type="password" id="ahq_password" name="ahq_password" '
+        'placeholder="Password" autocomplete="current-password" required>'
+        '<button type="button" class="reveal" id="ahq_reveal" aria-label="Show password">'
+        f'{_EYE_OFF_ICON}</button></div>\n'
+        # type="button" matters: a bare <button> inside a form defaults to submit, so tapping the
+        # eye would post half-filled credentials. Lives here rather than in the page template
+        # because this string is inserted after .format() and needs no brace escaping.
+        '<script>(function(){'
+        'var i=document.getElementById("ahq_password"),b=document.getElementById("ahq_reveal");'
+        'if(!i||!b)return;'
+        'b.addEventListener("click",function(){'
+        'var shown=i.type==="text";'
+        'i.type=shown?"password":"text";'
+        'b.setAttribute("aria-label",shown?"Show password":"Hide password");'
+        f'b.innerHTML=shown?{_EYE_OFF_ICON!r}:{_EYE_ICON!r};'
+        'i.focus();});})();</script>\n'
     )
 
 
-# Below this, a connection is short enough that the user will notice the reconnect and deserves to
-# hear about it up front rather than discover it. The platform's own token dialog offers an
-# 8-hour option, and it is a popular choice — 29% of live ORGANIZATION tokens use it.
 _SHORT_TOKEN_LIFE_SECONDS = 7 * 24 * 3600
 
 
@@ -140,6 +192,27 @@ def _expiry_warning(claims: dict) -> str:
     )
 
 
+async def sign_in(http_client, base_url: str, email: str, password: str) -> str:
+    """Exchange email+password for a user JWT, or "" if the credentials are refused.
+
+    POSTs the same /login the web app uses; the gateway permits it unauthenticated. The response's
+    `token` arrives with the configured JWT prefix already attached ("Bearer <jwt>"), so it is
+    stripped here — every caller wants the bare token to seal or to re-present itself.
+
+    The password exists only for the duration of this call. It is never logged, never stored, and
+    never sealed into the issued OAuth blob; only the resulting JWT is.
+    """
+    response = await http_client.post(
+        f"{base_url.rstrip('/')}/ahq-auth-services/login",
+        json={"username": email, "password": password},
+        timeout=30,
+    )
+    if response.status_code != 200:
+        return ""
+    token = (response.json() or {}).get("token") or ""
+    return token.split(" ", 1)[1] if " " in token else token
+
+
 def _hex_to_rgba(hex_color: str, alpha: float) -> str:
     # Used for the input-focus glow, which needs a translucent version of whatever primary
     # color a deployment configures — not just the AHQ purple this was originally hardcoded to.
@@ -158,14 +231,15 @@ def _error_banner(message: str) -> str:
 
 
 def _render(txn: str, client_name: str, partner_name: str, logo: str, primary_color: str,
-            banner: str = "", token_value: str = "", projects: list | None = None,
-            status: int = 200) -> Response:
+            banner: str = "", token_value: str = "", email_value: str = "",
+            projects: list | None = None, status: int = 200) -> Response:
     if projects is not None:
         # Project picker round-trip: the validated token rides along hidden so the user
         # doesn't have to paste it twice (their own browser, their own token, 10-min txn TTL).
         # Names only, no id shown — the id is still what actually travels as the field value.
         token_field = (
-            f'<input type="hidden" name="ahq_token" value="{html.escape(token_value, quote=True)}">'
+            f'<input type="hidden" name="ahq_jwt" value="{html.escape(token_value, quote=True)}">'
+            f'<input type="hidden" name="ahq_email" value="{html.escape(email_value, quote=True)}">'
         )
         radios = "\n".join(
             f'<div class="radio"><label><input type="radio" name="project_id" '
@@ -177,7 +251,7 @@ def _render(txn: str, client_name: str, partner_name: str, logo: str, primary_co
     else:
         # First screen: token only. No manual project-id entry — the project is always chosen
         # from the live picker after the token is validated (auto-selected if there's only one).
-        token_field = _token_input(partner_name)
+        token_field = _login_inputs(email_value)
         project_field = ""
     return HTMLResponse(
         _PAGE.format(
@@ -185,6 +259,10 @@ def _render(txn: str, client_name: str, partner_name: str, logo: str, primary_co
             partner_name=html.escape(partner_name),
             primary_color=primary_color,
             primary_color_focus_ring=_hex_to_rgba(primary_color, 0.15),
+            # The org chip's fill was a hardcoded pale magenta derived from AHQ's own purple, so
+            # it stayed magenta against any other partner's brand. Derived from primary_color
+            # like the focus ring, it follows whatever colour the deployment configures.
+            primary_color_tint=_hex_to_rgba(primary_color, 0.10),
             client_name=html.escape(client_name),
             banner=banner,
             txn=html.escape(txn, quote=True),
@@ -193,34 +271,6 @@ def _render(txn: str, client_name: str, partner_name: str, logo: str, primary_co
         ),
         status_code=status,
     )
-
-
-# Both AHQ token types work here. They differ only in which identity claims they carry
-# (ORGANIZATION: organizationName + createdByUserId; USER: userId + email + name) — both carry
-# organizationId and urlDetails, which is everything the flow below actually needs.
-#
-# NOTE: accepting a USER token does NOT scope permissions to that user. The gateway's API-key
-# path (SecurityContextRepository.validateApiKey) only checks that the token value exists in the
-# `tokens` collection; it never reads tokenType, expiry or revocation, and attaches no user. So a
-# USER token today has the same org-wide reach as an ORGANIZATION one. Verified live 2026-07-28.
-# Documented in CONNECT.md so nobody reads "user token" as "restricted token".
-_ACCEPTED_TOKEN_TYPES = ("ORGANIZATION", "USER")
-
-
-def _subject_label(claims: dict, org_name: str) -> str:
-    """Who the confirmation banner should name.
-
-    For a USER token the person is the meaningful identity and we have it; for an ORGANIZATION
-    token there is no user, so the org is the only thing to show.
-    """
-    if claims.get("tokenType") == "USER":
-        who = claims.get("name") or claims.get("email")
-        email = claims.get("email")
-        if who and email and who != email:
-            return f"{who} ({email})"
-        if who:
-            return str(who)
-    return org_name
 
 
 def _normalize_projects(raw: list) -> list[dict]:
@@ -247,16 +297,18 @@ _EXPIRED_HTML = (
 
 def make_consent_endpoints(codec: TokenCodec, settings, user_client_factory, http_client_holder):
     """
-    Returns (GET, POST) Starlette endpoints for the consent step of the OAuth flow: the page
-    where a user pastes an AHQ API token (Organization or User) and picks a project. Both types
-    carry the organizationId and urlDetails claims this flow needs; see _ACCEPTED_TOKEN_TYPES for
-    what accepting a USER token does and does not buy. user_client_factory
-    is the UserClient class (injected for tests); http_client_holder is mcp_server.app_http_client
-    (the shared pooled httpx client).
+    Returns (GET, POST) Starlette endpoints for the consent step of the OAuth flow: the page where
+    a user signs in with their email and password and picks a project.
+
+    Sign-in replaced pasting an API token because the token could never be more than proof of
+    possession — the gateway resolved it by existence lookup alone, attaching no user, so every
+    connector session reached everything in the organization regardless of who opened it. A
+    password produces a real user JWT, which the gateway's own JWT path resolves to that person and
+    their roles.
+
+    user_client_factory is the UserClient class (injected for tests); http_client_holder is
+    mcp_server.app_http_client (the shared pooled httpx client).
     """
-    extra_base_urls = frozenset(
-        u.strip() for u in (getattr(settings, "ahq_mcp_extra_base_urls", "") or "").split(",") if u.strip()
-    )
     # Per-deployment branding (e.g. a self-hosted client showing their own identity instead of
     # AutomationHQ's) — empty settings fall back to AHQ's own name/logo/color unchanged.
     partner_name = getattr(settings, "ahq_mcp_partner_display_name", "") or "AutomationHQ"
@@ -271,107 +323,91 @@ def make_consent_endpoints(codec: TokenCodec, settings, user_client_factory, htt
         txn = (form.get("txn") if form is not None else request.query_params.get("txn")) or ""
         return txn, codec.decode("txn", txn)
 
-    async def _validate_and_list(token: str, project_id: str = "") -> dict:
-        """
-        Token-type check plus a live gateway call to list the org's real projects (this also
-        confirms project_id, if given, actually belongs to the token's organization). Returns
-        {"ok": False, "message": ...} on any failure ("projects"/"org_name" are also included
-        for the project_not_in_org case, since that one still needs to show a picker), or
-        {"ok": True, "org_id", "org_name", "projects", "base_url"} on success. base_url is
-        resolved from the token's own urlDetails claim rather than this server's fixed
-        AHQ_BASE_URL, so the same consent page correctly validates tokens from any environment.
-        """
-        claims = decode_ahq_token(token)
-        org_id = claims.get("organizationId", "")
-        token_type = claims.get("tokenType", "")
-        if not token or not org_id or token_type not in _ACCEPTED_TOKEN_TYPES:
-            audit_log("auth.consent_fail", reason="unsupported_token_type",
-                      token_type=token_type or "none")
-            return {
-                "ok": False,
-                "message": (
-                    f"That doesn't look like a {partner_name} API token. Create one under "
-                    "Administration → API Tokens (type: Organization or User) and paste it here."
-                ),
-            }
+    async def _validate_and_list_by_password(email: str, password: str, project_id: str = "") -> dict:
+        """Password sign-in's equivalent of _validate_and_list, returning the same shape.
 
-        claimed_base_url = base_url_from_claims(claims, extra_base_urls)
-        base_url = claimed_base_url or settings.ahq_base_url
-        creds = AhqCredentials(base_url=base_url, api_token=token,
-                               org_id=org_id, project_id=project_id)
+        The JWT /login issues carries only `sub`, `authorities` and `tier` — no organizationId and
+        no urlDetails — so the organization comes from /users/me rather than the token itself, and
+        the environment is this deployment's own AHQ_BASE_URL rather than a claim. That is the one
+        capability password sign-in gives up: a token could name its own environment, a password
+        cannot, so this only ever signs in against the gateway this server is configured for.
+        """
+        jwt = await sign_in(http_client_holder.client, settings.ahq_base_url, email, password)
+        if not jwt:
+            audit_log("auth.consent_fail", reason="bad_credentials")
+            # Verbatim auth.login.form.message.invalid_credentials from the web app's own
+            # common.json — the same failure should not be described two different ways.
+            return {"ok": False, "message": (
+                "Unable to log in. Your login details are incorrect, or your account has been "
+                "disabled. Please contact the administrator for more information."
+            )}
+        return await _profile_for_jwt(jwt, email, project_id)
+
+    async def _profile_for_jwt(jwt: str, email: str, project_id: str = "") -> dict:
+        """Organization, projects and display name for an already-issued sign-in JWT.
+
+        Split from the sign-in itself because the project picker is a second round trip: the
+        password is gone by then (a password field cannot be pre-filled and must not be echoed
+        into hidden form state), so the issued JWT is what travels forward instead.
+        """
+        base_url = settings.ahq_base_url
+
+        def _client(org_id: str):
+            return user_client_factory(
+                credentials=AhqCredentials(base_url=base_url, api_token=jwt, org_id=org_id,
+                                           project_id=project_id, auth_scheme="bearer"),
+                http_client=http_client_holder.client,
+            )
+
         try:
-            raw = await user_client_factory(
-                credentials=creds, http_client=http_client_holder.client
-            ).list_projects()
+            me = await _client("").get_current_user() or {}
         except Exception:
-            # A token carrying its own urlDetails.baseUrl is validated against ITS environment, so
-            # a rejection really does mean the token is bad. Without that claim we fall back to
-            # this deployment's own gateway and a perfectly good token from the other environment
-            # gets rejected by a server that was never asked about it — a different problem with
-            # a different fix, so don't send the user to go re-check a token that is fine.
-            # TokenService.generateOrgClaims only writes urlDetails when the caller supplies it,
-            # and 30% of live ORGANIZATION tokens have none.
-            reason = "gateway_rejected_token" if claimed_base_url else "no_base_url_claim"
-            audit_log("auth.consent_fail", org=org_id, reason=reason)
-            if claimed_base_url:
-                message = (
-                    f"{partner_name} rejected this token — it may be expired or deleted. "
-                    "Check it in Administration → API Tokens and try again."
-                )
-            else:
-                message = (
-                    f"This token carries no environment of its own, so it was checked against "
-                    f"{base_url}, which rejected it. If the token belongs to a different "
-                    f"{partner_name} environment, create a fresh one there — newer tokens record "
-                    "their own environment and work here regardless. Otherwise it may be expired "
-                    "or deleted."
-                )
-            return {"ok": False, "message": message}
-        projects = _normalize_projects(raw)
-        if not projects:
-            # Otherwise this renders "Choose a project" with no options and a `required` radio —
-            # an unsubmittable form with no stated reason, which reads as "this token doesn't
-            # work" while a colleague's token on a different org sails through. Confirmed
-            # reachable: an organization holding a valid ORGANIZATION token and zero projects
-            # exists in the live dev data.
-            audit_log("auth.consent_fail", org=org_id, reason="no_projects_in_org")
-            return {
-                "ok": False,
-                "message": (
-                    "This token is valid, but its organization has no projects yet — there is "
-                    f"nothing to connect to. Create a project in the {partner_name} web app "
-                    "first, or use a token from an organization that already has one."
-                ),
-            }
-        # ORGANIZATION tokens carry organizationName; USER tokens do not (TokenService's
-        # generateOrgClaims vs createClaims). Without a fallback a user token would show its raw
-        # org UUID on the confirmation banner.
-        org_name = claims.get("organizationName") or org_id
+            audit_log("auth.consent_fail", reason="user_lookup_failed")
+            return {"ok": False, "message": (
+                "Signed in, but your account details could not be loaded. Try again, and contact "
+                "support if it keeps happening."
+            )}
 
+        org_id = str(me.get("organizationId") or "")
+        if not org_id:
+            audit_log("auth.consent_fail", reason="no_org_on_user")
+            return {"ok": False, "message": (
+                "This account is not attached to an organization, so there is nothing to connect to."
+            )}
+
+        try:
+            projects = _normalize_projects(await _client(org_id).list_projects())
+        except Exception:
+            audit_log("auth.consent_fail", org=org_id, reason="projects_lookup_failed")
+            return {"ok": False, "message": "Signed in, but your projects could not be loaded."}
+        if not projects:
+            audit_log("auth.consent_fail", org=org_id, reason="no_projects_in_org")
+            return {"ok": False, "message": (
+                "This account's organization has no projects yet — there is nothing to connect to."
+            )}
+
+        name = " ".join(p for p in (me.get("firstName"), me.get("lastName")) if p).strip()
+        subject = f"{name} ({email})" if name else email
         if project_id and project_id not in {p["id"] for p in projects}:
             audit_log("auth.consent_fail", org=org_id, reason="project_not_in_org")
-            return {
-                "ok": False,
-                "projects": projects,
-                "org_name": org_name,
-                "subject": _subject_label(claims, org_name),
-                "message": (
-                    f"Project '{project_id}' does not belong to organization "
-                    f"'{org_name}'. Pick one of its projects below."
-                ),
-            }
-        return {"ok": True, "org_id": org_id, "org_name": org_name,
-                "subject": _subject_label(claims, org_name), "token_type": token_type,
+            return {"ok": False, "projects": projects, "org_name": org_id, "subject": subject,
+                    "message": "That project is not one of yours. Pick one below."}
+        return {"ok": True, "org_id": org_id, "org_name": org_id, "subject": subject,
                 "projects": projects, "base_url": base_url,
-                "expiry_warning": _expiry_warning(claims)}
+                # _capped_ttl binds the connection to this JWT's exp, and a login JWT lasts 24h
+                # (ai.automationhq.security.jwt.expiration). Say so rather than let it expire
+                # overnight unexplained.
+                "expiry_warning": _expiry_warning(decode_ahq_token(jwt)), "jwt": jwt}
 
-    def _issue_code(payload: dict, token: str, project_id: str, base_url: str) -> str:
+    def _issue_code(payload: dict, token: str, project_id: str, base_url: str,
+                    org_id: str) -> str:
         params = payload["params"]
         return codec.encode(
             "code",
             {
                 "ahq_token": token,
                 "project_id": project_id,
+                "org_id": org_id,
                 "base_url": base_url,
                 "client_id": payload["client_id"],
                 "redirect_uri": params["redirect_uri"],
@@ -398,15 +434,25 @@ def make_consent_endpoints(codec: TokenCodec, settings, user_client_factory, htt
         if payload is None:
             return HTMLResponse(_EXPIRED_HTML, status_code=400)
         client_name = payload["client_name"]
-        token = str(form.get("ahq_token") or "").strip()
+        email = str(form.get("ahq_email") or "").strip()
+        password = str(form.get("ahq_password") or "")
         project_id = str(form.get("project_id") or "").strip()
 
-        result = await _validate_and_list(token, project_id)
+        # Second pass (project picker): the JWT issued on the first pass rides along hidden, since
+        # the password is gone and must not be echoed back into the form.
+        issued_jwt = str(form.get("ahq_jwt") or "").strip()
+        result = (
+            await _profile_for_jwt(issued_jwt, email, project_id) if issued_jwt
+            else await _validate_and_list_by_password(email, password, project_id)
+        )
         if not result["ok"]:
             return _render_page(
-                txn, client_name, token_value=token, projects=result.get("projects"),
-                status=400, banner=_error_banner(result["message"]),
+                txn, client_name, email_value=email, token_value=issued_jwt,
+                projects=result.get("projects"), status=400,
+                banner=_error_banner(result["message"]),
             )
+        # The JWT, not the password, is what the connection is made of.
+        token = result["jwt"]
         projects = result["projects"]
 
         warning = result.get("expiry_warning") or ""
@@ -414,19 +460,17 @@ def make_consent_endpoints(codec: TokenCodec, settings, user_client_factory, htt
             if len(projects) == 1:
                 project_id = projects[0]["id"]
             else:
-                who = "" if result.get("token_type") == "USER" else "organization "
                 extra = f" {html.escape(warning)}" if warning else ""
                 return _render_page(
-                    txn, client_name, token_value=token, projects=projects,
-                    banner=f'<p class="org">Token accepted for {who}'
+                    txn, client_name, email_value=email, token_value=token, projects=projects,
+                    banner=f'<p class="org">Signed in as '
                            f"<strong>{html.escape(result['subject'])}</strong>.{extra}</p>",
                 )
 
-        code = _issue_code(payload, token, project_id, result["base_url"])
+        code = _issue_code(payload, token, project_id, result["base_url"], result["org_id"])
         # Logged even on the redirect path, where there is no page left to warn on: a support
         # question of the form "it keeps asking me to reconnect" is answerable from this line.
         audit_log("auth.consent_ok", org=result["org_id"], project=project_id,
-                  token_type=result.get("token_type", ""),
                   short_lived_token=bool(warning))
         return RedirectResponse(
             _redirect_url(payload, code), status_code=302, headers={"Cache-Control": "no-store"},

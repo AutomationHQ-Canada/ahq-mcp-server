@@ -3,7 +3,7 @@ name: ahq-gen-from-requirements
 description: Generate AHQ test scripts from a requirements document (PDF/DOCX/XLSX/CSV/TXT)
 tools:
   - mcp__ahq-mcp-server__extract_requirements
-  - mcp__ahq-mcp-server__get_ahq_context
+  - mcp__ahq-mcp-server__get_context
   - mcp__ahq-mcp-server__list_epics
   - mcp__ahq-mcp-server__create_epic
   - mcp__ahq-mcp-server__list_stories
@@ -25,7 +25,7 @@ generated from it — no live app/URL involved.
 
 ## Workflow
 
-1. Call `get_ahq_context` — load existing epics/bots/suites so generated scripts don't duplicate
+1. Call `get_context` — load existing epics/bots/suites so generated scripts don't duplicate
    something that already exists.
 2. Call `extract_requirements` with the file path.
    - The tool only parses the file — it does not generate test cases. That reasoning happens here.
@@ -82,7 +82,7 @@ generated from it — no live app/URL involved.
      `automationhq-frontend-v2`'s own create-script form (this is a hard requirement now, not a
      "recommended" field). Pass `website_id` if the requirement maps to a known application.
    - Attach to an epic/story (`story_id`) if the user specified one, or if there's an obviously
-     matching one from `get_ahq_context`/`list_epics`/`list_stories`. If nothing fits, call
+     matching one from `get_context`/`list_epics`/`list_stories`. If nothing fits, call
      `create_epic` then `create_story` rather than skipping the field — there is always a way to
      satisfy this now, so don't flag-and-move-on the way this skill used to.
    - `status`/`type` default to `"Not Started"`/`"WEB"` in `create_test_script` — leave them unless

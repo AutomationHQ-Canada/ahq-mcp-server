@@ -233,7 +233,7 @@ def _slim_context_list(items, fields, cap=_CONTEXT_LIST_CAP, more_tool=None):
     return slimmed
 
 
-async def _get_ahq_context(clients: ClientBundle) -> dict:
+async def _get_context(clients: ClientBundle) -> dict:
     results = await asyncio.gather(
         clients.user.get_current_user(),
         clients.user.list_projects(),
@@ -303,7 +303,19 @@ _BRANCH_PIN_HINT = (
 
 TOOLS = [
     # Context
-    Tool(name="get_ahq_context", description="Load full AHQ project snapshot from all services in parallel. Call this first before any other action.", inputSchema={"type": "object", "properties": {}}),
+    Tool(
+        name="list_my_projects",
+        description=(
+            "Projects the signed-in user personally has a role in, across every organization they "
+            "belong to. Call this before creating anything when the user has not named a project: "
+            "115 of ~1800 live users hold roles in more than one, and there is no way to tell from "
+            "a later error which one they meant. Ask them to choose, then pass the chosen id as "
+            "project_id on subsequent calls — the server keeps no per-session project, so the "
+            "choice only persists if you carry it."
+        ),
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    Tool(name="get_context", description="Load full AHQ project snapshot from all services in parallel. Call this first before any other action.", inputSchema={"type": "object", "properties": {}}),
 
     # Asset — websites
     Tool(name="list_websites", description="List ALL websites in the project. Use this for 'show me the websites' — search_websites needs a name and returns [] for an empty query.", inputSchema={"type": "object", "properties": {}}),
@@ -913,8 +925,16 @@ async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: boo
             return {"error": format_validation_error(name, e)}
 
     # Context
-    if name == "get_ahq_context":
-        return await _get_ahq_context(clients)
+    if name == "list_my_projects":
+        me = await clients.user.get_current_user() or {}
+        user_id = me.get("userId") or me.get("id") or ""
+        if not user_id:
+            return {"error": "Could not identify the signed-in user, so their projects cannot be "
+                             "listed. This is expected for ORGANIZATION API tokens, which name no "
+                             "user — use get_context instead."}
+        return {"projects": await clients.user.list_projects_for_user(user_id)}
+    if name == "get_context":
+        return await _get_context(clients)
 
     # Asset
     if name == "list_websites":
