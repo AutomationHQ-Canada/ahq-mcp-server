@@ -1,4 +1,4 @@
-from src.mcp_server import _dispatch, _get_ahq_context, _HOSTED_UNSUPPORTED, DEFAULT_BUNDLE
+from src.mcp_server import _dispatch, _get_context, _HOSTED_UNSUPPORTED, DEFAULT_BUNDLE
 
 
 async def test_hosted_unsupported_tools_return_clean_error_when_hosted():
@@ -100,8 +100,8 @@ async def test_create_story_dispatches_to_client():
     assert result == sentinel
 
 
-async def test_get_ahq_context_includes_mtaf_core_sections():
-    # Regression test for the context gap: get_ahq_context previously never surfaced API
+async def test_get_context_includes_mtaf_core_sections():
+    # Regression test for the context gap: get_context previously never surfaced API
     # collections/workflows/performance bots, leaving no context-loading path for that domain.
     patches = {
         "user.get_current_user": {"name": "u"},
@@ -123,7 +123,7 @@ async def test_get_ahq_context_includes_mtaf_core_sections():
             obj = getattr(DEFAULT_BUNDLE, obj_name)
             originals[path] = getattr(obj, attr)
             setattr(obj, attr, (lambda v: (lambda: _async_result(v)))(value))
-        result = await _get_ahq_context(DEFAULT_BUNDLE)
+        result = await _get_context(DEFAULT_BUNDLE)
     finally:
         for path, original in originals.items():
             obj_name, attr = path.split(".")

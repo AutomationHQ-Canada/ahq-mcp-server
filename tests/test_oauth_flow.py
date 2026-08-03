@@ -1,7 +1,7 @@
 """
 Full OAuth flow end-to-end against the real Starlette app (register -> authorize -> consent ->
-token -> authenticated /mcp initialize), with only the AHQ gateway call (UserClient.list_projects)
-monkeypatched. starlette.testclient.TestClient runs the lifespan, so the session manager and
+token -> authenticated /mcp initialize), with only the AHQ gateway calls (consent.sign_in,
+UserClient.get_current_user, UserClient.list_projects) monkeypatched. starlette.testclient.TestClient runs the lifespan, so the session manager and
 shared httpx client are live.
 """
 
@@ -16,6 +16,7 @@ import pytest
 from starlette.testclient import TestClient
 
 from src.clients.user_client import UserClient
+from src.hosted import consent
 from src.http_server import create_app
 
 
@@ -43,6 +44,16 @@ PROD_ORG_TOKEN = _fake_jwt({
     "urlDetails": [{"key": "baseUrl", "value": "https://api.automationhq.ai"}],
 })
 
+EMAIL = "om@example.com"
+PASSWORD = "correct-horse"
+# What LoginController.generateJwtToken actually mints: sub + authorities + tier, and nothing
+# else. No organizationId (hence the /users/me hop) and no urlDetails (hence no per-token
+# environment). Expiry is the platform default of 24h.
+LOGIN_JWT = _fake_jwt({
+    "sub": EMAIL, "authorities": ["TESTER"], "tier": "PRO",
+    "exp": int(time.time()) + 24 * 3600,
+})
+
 VERIFIER = "a" * 43
 CHALLENGE = base64.urlsafe_b64encode(hashlib.sha256(VERIFIER.encode()).digest()).decode().rstrip("=")
 REDIRECT_URI = "http://localhost:33418/callback"
@@ -66,16 +77,22 @@ def client(monkeypatch):
 
     async def fake_list_projects(self):
         seen_base_urls.append(self._credentials.base_url)
-        if self._credentials.api_token not in (
-            ORG_TOKEN, PROD_ORG_TOKEN, USER_TOKEN, SHORT_LIVED_ORG_TOKEN,
-        ):
+        if self._credentials.api_token != LOGIN_JWT:
             raise RuntimeError("401 from gateway")
         # Real /projects/organizations/{orgId}/all shape: `_id` + `projectName`
         # (confirmed live 2026-07-14 — NOT projectId/name).
         return [{"_id": "proj-1", "projectName": "Project One"},
                 {"_id": "proj-2", "projectName": "Project Two"}]
 
+    async def fake_sign_in(http_client, base_url, email, password):
+        return LOGIN_JWT if (email, password) == (EMAIL, PASSWORD) else ""
+
+    async def fake_get_current_user(self):
+        return {"organizationId": "org-1", "firstName": "om", "lastName": "raut"}
+
     monkeypatch.setattr(UserClient, "list_projects", fake_list_projects)
+    monkeypatch.setattr(UserClient, "get_current_user", fake_get_current_user)
+    monkeypatch.setattr(consent, "sign_in", fake_sign_in)
     with TestClient(create_app(_cfg()), follow_redirects=False) as c:
         c.seen_base_urls = seen_base_urls
         yield c
@@ -106,8 +123,9 @@ def _authorize_to_txn(client, client_id: str) -> str:
     return parse_qs(urlparse(location).query)["txn"][0]
 
 
-def _consent_to_code(client, txn: str, token: str = ORG_TOKEN, project_id: str = "proj-1"):
-    return client.post("/consent", data={"txn": txn, "ahq_token": token, "project_id": project_id})
+def _consent_to_code(client, txn: str, project_id: str = "proj-1"):
+    return client.post("/consent", data={
+        "txn": txn, "ahq_email": EMAIL, "ahq_password": PASSWORD, "project_id": project_id})
 
 
 def test_full_flow_register_authorize_consent_token_mcp_initialize(client):
@@ -175,49 +193,39 @@ def test_pkce_wrong_verifier_rejected(client):
     assert resp.json()["error"] == "invalid_grant"
 
 
-def test_consent_accepts_a_user_token(client):
-    """A personal API token must complete the flow, not just be recognised.
-
-    Both AHQ token types carry organizationId and urlDetails, which is everything consent needs;
-    the type check was the only thing rejecting USER tokens (confirmed against a live one).
-    """
+def test_consent_accepts_valid_credentials(client):
+    """Signing in must complete the whole flow, not merely be accepted."""
     reg = _register(client)
     txn = _authorize_to_txn(client, reg["client_id"])
-    resp = _consent_to_code(client, txn, token=USER_TOKEN)
+    resp = _consent_to_code(client, txn)
     assert resp.status_code == 302, resp.text
     assert "code=" in resp.headers["location"]
 
 
-def test_user_token_banner_names_the_person_not_a_raw_org_id(client):
-    """USER tokens carry no organizationName, so the naive fallback prints a bare UUID.
+def test_banner_names_the_person_not_a_raw_org_id(client):
+    """The JWT carries no name, so the banner has to come from /users/me, not the token.
 
     Reaching the picker requires omitting project_id, which is also the path a real user takes
     when their org has more than one project.
     """
     reg = _register(client)
     txn = _authorize_to_txn(client, reg["client_id"])
-    resp = client.post("/consent", data={"txn": txn, "ahq_token": USER_TOKEN, "project_id": ""})
+    resp = _consent_to_code(client, txn, project_id="")
     assert resp.status_code == 200
     assert "om raut (om@example.com)" in resp.text
-    assert "organization org-1" not in resp.text
+    assert "org-1" not in resp.text
 
 
-def test_consent_still_rejects_a_token_of_neither_type(client):
-    for token in (UNKNOWN_TYPE_TOKEN, NO_TYPE_TOKEN):
-        reg = _register(client)
-        txn = _authorize_to_txn(client, reg["client_id"])
-        resp = _consent_to_code(client, txn, token=token)
-        assert resp.status_code == 400, resp.text
-        assert "API token" in resp.text
-
-
-def test_consent_rejects_gateway_invalid_token(client):
+def test_consent_rejects_wrong_password(client):
+    """And says it the way the web app says it — same failure, same sentence."""
     reg = _register(client)
     txn = _authorize_to_txn(client, reg["client_id"])
-    bogus = _fake_jwt({"organizationId": "org-x", "tokenType": "ORGANIZATION"})
-    resp = _consent_to_code(client, txn, token=bogus)
+    resp = client.post("/consent", data={
+        "txn": txn, "ahq_email": EMAIL, "ahq_password": "wrong", "project_id": "proj-1"})
     assert resp.status_code == 400
-    assert "rejected" in resp.text
+    assert "Unable to log in" in resp.text
+    # The password must never survive into the re-rendered form.
+    assert "wrong" not in resp.text
 
 
 def test_consent_rejects_project_not_in_org(client):
@@ -226,7 +234,7 @@ def test_consent_rejects_project_not_in_org(client):
     txn = _authorize_to_txn(client, reg["client_id"])
     resp = _consent_to_code(client, txn, project_id="someone-elses-project")
     assert resp.status_code == 400
-    assert "does not belong" in resp.text
+    assert "not one of yours" in resp.text
     assert "Project One" in resp.text  # picker offered as the fix
 
 
@@ -237,7 +245,6 @@ def test_consent_without_project_renders_picker(client):
     assert resp.status_code == 200
     assert 'type="radio"' in resp.text
     assert "Project Two" in resp.text
-    assert "Org One" in resp.text  # org-name confirmation banner
     assert "(proj-2)" not in resp.text  # id must not be shown alongside the name, only in value=
 
 
@@ -247,7 +254,8 @@ def test_consent_first_screen_has_no_project_id_field(client):
     resp = client.get("/consent", params={"txn": txn})
     assert resp.status_code == 200
     assert 'name="project_id"' not in resp.text
-    assert 'name="ahq_token"' in resp.text
+    assert 'name="ahq_email"' in resp.text
+    assert 'name="ahq_password"' in resp.text
 
 
 def test_consent_page_uses_default_ahq_branding_when_unconfigured(client):
@@ -281,58 +289,8 @@ def test_consent_page_uses_partner_branding_when_configured(monkeypatch):
         assert "#123456" in resp.text
         assert "#9c27b0" not in resp.text
 
-        # Rejection message also uses the partner name, not a hardcoded "AutomationHQ".
-        rejected = _consent_to_code(c, txn, token=UNKNOWN_TYPE_TOKEN)
-        assert "CA UTAP API token" in rejected.text
-
-
-def test_consent_resolves_prod_gateway_from_token(client):
-    # This server is dev-hosted (ahq_base_url=https://api-dev...), but a prod org token's own
-    # urlDetails must make list_projects hit prod's gateway instead — the same consent URL
-    # correctly serving both environments.
-    reg = _register(client)
-    txn = _authorize_to_txn(client, reg["client_id"])
-    resp = _consent_to_code(client, txn, token=PROD_ORG_TOKEN, project_id="proj-1")
-    assert resp.status_code == 302, resp.text
-    assert client.seen_base_urls[-1] == "https://api.automationhq.ai"
-
-
-def test_prod_token_session_survives_into_mcp_credentials(client):
-    # The base_url resolved at consent time (prod) must still be the one used for every
-    # subsequent /mcp tool call's credentials, not this server's own dev AHQ_BASE_URL. Unit
-    # coverage for the base_url propagation itself lives in test_dual_auth.py and
-    # test_oauth_provider.py; this confirms the prod-sourced token round-trips through the full
-    # register->authorize->consent->token->/mcp pipeline without breaking.
-    reg = _register(client)
-    txn = _authorize_to_txn(client, reg["client_id"])
-    consent = _consent_to_code(client, txn, token=PROD_ORG_TOKEN, project_id="proj-1")
-    assert consent.status_code == 302, consent.text
-    code = parse_qs(urlparse(consent.headers["location"]).query)["code"][0]
-
-    token_resp = client.post("/token", data={
-        "grant_type": "authorization_code",
-        "code": code,
-        "redirect_uri": REDIRECT_URI,
-        "client_id": reg["client_id"],
-        "code_verifier": VERIFIER,
-    })
-    assert token_resp.status_code == 200, token_resp.text
-    access_token = token_resp.json()["access_token"]
-
-    mcp_resp = client.post(
-        "/mcp",
-        headers={
-            "Authorization": f"Bearer {access_token}",
-            "Accept": "application/json, text/event-stream",
-            "Content-Type": "application/json",
-        },
-        json={
-            "jsonrpc": "2.0", "id": 1, "method": "initialize",
-            "params": {"protocolVersion": "2025-03-26", "capabilities": {},
-                       "clientInfo": {"name": "flow-test", "version": "0"}},
-        },
-    )
-    assert mcp_resp.status_code == 200
+        # The heading names the partner; the sign-in form is otherwise brand-neutral.
+        assert "Connect" in resp.text and "CA UTAP" in resp.text
 
 
 def test_expired_txn_shows_expired_page(client):
@@ -387,16 +345,22 @@ SHORT_LIVED_ORG_TOKEN = _fake_jwt({
 @pytest.fixture
 def client_with_empty_org(monkeypatch):
     async def fake_list_projects(self):
-        if self._credentials.api_token == EMPTY_ORG_TOKEN:
-            return []
-        return [{"_id": "proj-1", "projectName": "Project One"}]
+        return []
+
+    async def fake_sign_in(http_client, base_url, email, password):
+        return LOGIN_JWT
+
+    async def fake_get_current_user(self):
+        return {"organizationId": "org-empty", "firstName": "om", "lastName": "raut"}
 
     monkeypatch.setattr(UserClient, "list_projects", fake_list_projects)
+    monkeypatch.setattr(UserClient, "get_current_user", fake_get_current_user)
+    monkeypatch.setattr(consent, "sign_in", fake_sign_in)
     with TestClient(create_app(_cfg()), follow_redirects=False) as c:
         yield c
 
 
-def test_a_valid_token_whose_org_has_no_projects_says_so(client_with_empty_org):
+def test_an_account_whose_org_has_no_projects_says_so(client_with_empty_org):
     """Otherwise: a 'Choose a project' form with no options and a required radio.
 
     The user cannot submit it and is told nothing, so it reads as "my token is rejected" while a
@@ -406,31 +370,12 @@ def test_a_valid_token_whose_org_has_no_projects_says_so(client_with_empty_org):
     reg = _register(client_with_empty_org)
     txn = _authorize_to_txn(client_with_empty_org, reg["client_id"])
     resp = client_with_empty_org.post(
-        "/consent", data={"txn": txn, "ahq_token": EMPTY_ORG_TOKEN, "project_id": ""},
+        "/consent", data={"txn": txn, "ahq_email": EMAIL, "ahq_password": PASSWORD,
+              "project_id": ""},
     )
     assert resp.status_code == 400
     assert "no projects yet" in resp.text
     assert 'type="radio"' not in resp.text, "must not offer an empty, unsubmittable picker"
-
-
-def test_a_short_lived_token_warns_before_it_becomes_a_support_ticket(client):
-    """We cannot outlive the credential we wrap — so say so while the user can still act on it."""
-    reg = _register(client)
-    txn = _authorize_to_txn(client, reg["client_id"])
-    resp = client.post(
-        "/consent", data={"txn": txn, "ahq_token": SHORT_LIVED_ORG_TOKEN, "project_id": ""},
-    )
-    assert resp.status_code == 200
-    assert "expires in about 8 hours" in resp.text
-    assert "longer-lived token" in resp.text
-
-
-def test_a_normal_year_long_token_is_not_nagged(client):
-    reg = _register(client)
-    txn = _authorize_to_txn(client, reg["client_id"])
-    resp = client.post("/consent", data={"txn": txn, "ahq_token": ORG_TOKEN, "project_id": ""})
-    assert resp.status_code == 200
-    assert "expires in about" not in resp.text
 
 
 # A token minted before urlDetails existed, or by a caller that didn't send it: no baseUrl claim,
@@ -441,32 +386,3 @@ NO_BASE_URL_TOKEN = _fake_jwt({
     "tokenType": "ORGANIZATION",
 })
 
-
-def test_a_rejected_token_with_no_environment_claim_does_not_blame_the_token(client):
-    """The two rejections need different advice, and the old message only gave one.
-
-    Re-checking the token in Administration -> API Tokens is wasted effort when the token is
-    valid and simply belongs to the other environment — a plausible reading of "works from one
-    account, not another".
-    """
-    reg = _register(client)
-    txn = _authorize_to_txn(client, reg["client_id"])
-    resp = client.post(
-        "/consent", data={"txn": txn, "ahq_token": NO_BASE_URL_TOKEN, "project_id": ""},
-    )
-    assert resp.status_code == 400
-    assert "carries no environment of its own" in resp.text
-    assert "api-dev.automationhq.ai" in resp.text, "must name the gateway that actually refused"
-
-
-def test_a_rejected_token_that_named_its_own_environment_still_blames_the_token(client):
-    """A token carrying urlDetails is checked against ITS environment, so rejection is real."""
-    reg = _register(client)
-    txn = _authorize_to_txn(client, reg["client_id"])
-    bad = _fake_jwt({
-        "organizationId": "org-x", "tokenType": "ORGANIZATION",
-        "urlDetails": [{"key": "baseUrl", "value": "https://api.automationhq.ai"}],
-    })
-    resp = client.post("/consent", data={"txn": txn, "ahq_token": bad, "project_id": ""})
-    assert resp.status_code == 400
-    assert "may be expired or deleted" in resp.text

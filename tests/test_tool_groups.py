@@ -118,9 +118,9 @@ def test_bare_group_names_resolve_on_their_own():
 
 
 def test_orientation_is_never_filtered_out():
-    """get_ahq_context is how the model learns which org/project it is pointed at."""
+    """get_context is how the model learns which org/project it is pointed at."""
     for spec in ("api", "healing", "core", "vault,mocks"):
-        assert "get_ahq_context" in resolve_tool_names(spec), spec
+        assert "get_context" in resolve_tool_names(spec), spec
 
 
 def test_spec_parsing_tolerates_whitespace_and_case():
