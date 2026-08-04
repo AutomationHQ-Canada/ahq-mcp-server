@@ -1,11 +1,11 @@
 {
-  "name": "automationhq",
+  "name": "testbots",
   "owner": {
     "name": "TestBots.ai"
   },
   "plugins": [
     {
-      "name": "ahq-skills",
+      "name": "testbots-skills",
       "source": "./",
       "description": "TestBots.ai test-automation workflows: script generation, bot execution/scheduling, and reporting."
     }

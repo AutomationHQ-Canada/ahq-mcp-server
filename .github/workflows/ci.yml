@@ -75,8 +75,10 @@ jobs:
       - name: Trigger GitOps workflow
         env:
           # A classic PAT, deliberately: it is not pinned to a resource owner, so the dispatch
-          # keeps working when this repo moves between organizations. AHQ_GITOPS_PAT stays in
-          # place as the fallback until the move is proven.
+          # survives this repo moving between organizations -- proven live on the move to
+          # testbots-ai (run 41 dispatched into AutomationHQ-Canada/kubernetes-argocd-apps).
+          # The older AHQ_GITOPS_PAT secret is NO LONGER USED by any workflow; it is kept only
+          # as a rollback and can be deleted once this has run for a while.
           GH_TOKEN: ${{ secrets.GITOPS_PAT_TESTBOT }}
           RAW_COMMIT_MSG: ${{ github.event.head_commit.message }}
         run: |

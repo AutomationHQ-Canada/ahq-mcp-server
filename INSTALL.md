@@ -1,10 +1,10 @@
-# Installing the TestBots.ai Claude Code Plugin (ahq-skills)
+# Installing the TestBots.ai Claude Code Plugin (testbots-skills)
 
 Follow this guide to connect Claude Code to TestBots.ai. You get **137 MCP tools** (script
 generation, bot execution, reporting, version control, archive, roles, API/load testing, ...)
-plus **9 workflow skills** (`/ahq-test-architecture`, `/ahq-gen-from-url`,
-`/ahq-gen-from-requirements`, `/ahq-heal-locators`, `/ahq-run-bot`, `/ahq-schedule-bot`,
-`/ahq-view-report`, `/ahq-view-performance`, `/ahq-dashboard`).
+plus **9 workflow skills** (`/testbots-test-architecture`, `/testbots-gen-from-url`,
+`/testbots-gen-from-requirements`, `/testbots-heal-locators`, `/testbots-run-bot`, `/testbots-schedule-bot`,
+`/testbots-view-report`, `/testbots-view-performance`, `/testbots-dashboard`).
 
 Total time: about 10 minutes.
 
@@ -32,10 +32,22 @@ curl -LsSf https://astral.sh/uv/install.sh | sh    # macOS / Linux
 
 ```
 /plugin marketplace add testbots-ai/mcp-server
-/plugin install ahq-skills@automationhq
+/plugin install testbots-skills@testbots
 ```
 
 Choose **"Install for you (user scope)"**.
+
+> **Upgrading from `ahq-skills@automationhq`?** 3.0.0 renamed the plugin and the marketplace, so an
+> in-place update does not reach you. Uninstall the old one before installing, or both will be
+> active at once:
+>
+> ```
+> /plugin uninstall ahq-skills@automationhq
+> /plugin marketplace remove automationhq
+> ```
+>
+> All nine slash commands changed prefix as well: `/ahq-run-bot` → `/testbots-run-bot`,
+> `/ahq-dashboard` → `/testbots-dashboard`, and so on. Your `.env` is untouched.
 
 **3. Add your credentials** — in a terminal:
 
@@ -98,7 +110,7 @@ Expected output: `Successfully added marketplace: automationhq`
 ## Step 2 — Install the plugin
 
 ```
-/plugin install ahq-skills@automationhq
+/plugin install testbots-skills@testbots
 ```
 
 When asked for a scope, pick **"Install for you (user scope)"** — this makes the plugin
@@ -109,10 +121,10 @@ available in every project/directory on your machine.
 The plugin clones itself to a fixed location:
 
 ```
-%USERPROFILE%\.claude\plugins\cache\automationhq\ahq-skills\<version>\
+%USERPROFILE%\.claude\plugins\cache\testbots\testbots-skills\<version>\
 ```
 
-(e.g. `C:\Users\<you>\.claude\plugins\cache\automationhq\ahq-skills\1.6.8` — **the last folder is
+(e.g. `C:\Users\<you>\.claude\plugins\cache\testbots\testbots-skills\1.6.8` — **the last folder is
 the plugin version; check which one exists on your machine and use that below**).
 
 The server launches via `uv run`, which **installs all Python dependencies automatically on the
@@ -178,11 +190,11 @@ AHQ_PROJECT_ID=<the UUID of the project to work in>
    (first start installs dependencies, give it a moment).
 2. Run `/mcp` → `ahq-mcp-server` should show **connected** with 137 tools.
 3. Type `/ahq` → the 9 skills should autocomplete. Plugin skills are **namespaced**, so the full
-   names are `/ahq-skills:ahq-dashboard`, `/ahq-skills:ahq-gen-from-url`, etc.
+   names are `/testbots-skills:testbots-dashboard`, `/testbots-skills:testbots-gen-from-url`, etc.
 4. Smoke test — ask Claude: *"list my TestBots websites"*. Real data back = you're done.
 
 > Don't be alarmed if `/reload-plugins` reports `0 skills` — that counter only covers standalone
-> (non-plugin) skills. Verify with `claude plugin details ahq-skills@automationhq` in a terminal:
+> (non-plugin) skills. Verify with `claude plugin details testbots-skills@testbots` in a terminal:
 > it should list **Skills (9)** and **MCP servers (1)**.
 
 ## Updating to a newer version
@@ -191,7 +203,7 @@ In Claude Code (or a terminal with `claude plugin ...`):
 
 ```
 /plugin marketplace update automationhq
-/plugin update ahq-skills@automationhq
+/plugin update testbots-skills@testbots
 ```
 
 Then restart the session (or `/reload-plugins`) — that's it. If your credentials live in
@@ -242,7 +254,7 @@ that message first, it usually IS the fix.
 | Tool errors say `ahq-mcp-server is not configured: ... is empty` | The `.env` is missing, in the wrong folder, or missing a value — the message names the variable and the expected file path. Fix, then `/reload-plugins`. |
 | Tool errors say `Got the web frontend's HTML instead of an API response` | The gateway URL is normally decoded from your token automatically. This means either your token predates the `urlDetails` claim (add `AHQ_BASE_URL` to `.env`, pointed at the API gateway, e.g. `https://api-dev.automationhq.ai`, never the web UI) or an `AHQ_BASE_URL` override you added yourself points at the web UI — remove or fix it. |
 | `/mcp` shows `ahq-mcp-server` **failed** | Usually `uv` missing from PATH (`uv --version` to check; restart the terminal/session after installing it). Verify the server itself with: `uv run --project <plugin folder> python -c "from src.mcp_server import TOOLS; print(len(TOOLS))"` → must print `137`. |
-| Tools work but `/ahq` skills don't appear | Restart the Claude Code session — skills register at startup. Full names are namespaced: `/ahq-skills:ahq-dashboard`. |
+| Tools work but `/testbots` skills don't appear | Restart the Claude Code session — skills register at startup. Full names are namespaced: `/testbots-skills:testbots-dashboard`. |
 | Every TestBots call returns 401 | Wrong/expired token in `.env`. Both Organization and User API tokens work; a raw browser-session JWT does not. |
 | `crawl_url` errors about a missing browser | The first crawl downloads Chromium itself, so this normally self-resolves — that one call just takes a few minutes. The error only persists if the download actually failed (no disk space, no network), and it quotes the real reason. Manual fallback: `uv run playwright install chromium` in the plugin folder. |
 | Data lands in the wrong org | Not possible via the token alone — the org ID is decoded from it. Check you were given a token for the right organization. |

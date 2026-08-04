@@ -1,5 +1,5 @@
 ---
-name: ahq-view-performance
+name: testbots-view-performance
 description: Show performance and ROI metrics from a test execution
 tools:
   - mcp__ahq-mcp-server__get_context

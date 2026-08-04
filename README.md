@@ -44,8 +44,20 @@ The session then carries your own roles and permissions.
 
 ```
 /plugin marketplace add testbots-ai/mcp-server
-/plugin install ahq-skills@automationhq
+/plugin install testbots-skills@testbots
 ```
+
+> **Already had the plugin installed as `ahq-skills@automationhq`?** The plugin was renamed in
+> 3.0.0 and an in-place update will not carry you across. Remove the old one first, or you end up
+> with both and duplicate slash commands:
+>
+> ```
+> /plugin uninstall ahq-skills@automationhq
+> /plugin marketplace remove automationhq
+> ```
+>
+> The slash commands were renamed too — `/ahq-run-bot` is now `/testbots-run-bot`, and so on for
+> all nine.
 
 Then put an API token and project id in `~/.ahq/.env`:
 
@@ -66,15 +78,15 @@ Guided, multi-step workflows shipped with the plugin. Each one is a slash comman
 
 | Skill | What it does |
 |---|---|
-| `/ahq-test-architecture` | Crawl a live app, derive modules, lay them out as Epics and Stories |
-| `/ahq-gen-from-url` | Generate test scripts by crawling a URL |
-| `/ahq-gen-from-requirements` | Generate test scripts from a PDF, DOCX, XLSX, CSV or TXT spec |
-| `/ahq-heal-locators` | Find locators broken by a UI change, propose a fix, apply on confirmation |
-| `/ahq-run-bot` | Execute a TestBot now and report the result |
-| `/ahq-schedule-bot` | Put a TestBot on a recurring cron schedule |
-| `/ahq-view-report` | Show the execution report for the last or a specific run |
-| `/ahq-view-performance` | Show performance and ROI metrics for a run |
-| `/ahq-dashboard` | Project overview — websites, scripts, bots, recent runs, queue state |
+| `/testbots-test-architecture` | Crawl a live app, derive modules, lay them out as Epics and Stories |
+| `/testbots-gen-from-url` | Generate test scripts by crawling a URL |
+| `/testbots-gen-from-requirements` | Generate test scripts from a PDF, DOCX, XLSX, CSV or TXT spec |
+| `/testbots-heal-locators` | Find locators broken by a UI change, propose a fix, apply on confirmation |
+| `/testbots-run-bot` | Execute a TestBot now and report the result |
+| `/testbots-schedule-bot` | Put a TestBot on a recurring cron schedule |
+| `/testbots-view-report` | Show the execution report for the last or a specific run |
+| `/testbots-view-performance` | Show performance and ROI metrics for a run |
+| `/testbots-dashboard` | Project overview — websites, scripts, bots, recent runs, queue state |
 
 ---
 

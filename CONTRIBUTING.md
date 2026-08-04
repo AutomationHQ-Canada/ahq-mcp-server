@@ -53,7 +53,7 @@ claude mcp list
 
 You should see `ahq-mcp-server-dev: python -m src.mcp_server - ✔ Connected`.
 
-> This is a **separate** registration from any `ahq-skills@automationhq` plugin install you may
+> This is a **separate** registration from any `testbots-skills@testbots` plugin install you may
 > also have — the plugin always runs the *published* version, this one runs *your checkout*, so
 > both can coexist without conflicting.
 

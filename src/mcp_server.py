@@ -1312,7 +1312,7 @@ async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: boo
                     "error": (
                         "This TestBot's grid runs on your own machine's local agent "
                         "(localhost:9202), which the hosted MCP server can't reach — only a "
-                        "stdio connection running on that same machine can. Use the ahq-skills "
+                        "stdio connection running on that same machine can. Use the testbots-skills "
                         "Claude Code plugin (stdio) for local-grid execution, or point this bot "
                         "at a cloud grid instead."
                     )

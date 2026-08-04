@@ -1,5 +1,5 @@
 ---
-name: ahq-view-report
+name: testbots-view-report
 description: Show the test execution report for the last run or a specific job
 tools:
   - mcp__ahq-mcp-server__get_context

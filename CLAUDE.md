@@ -578,8 +578,8 @@ Two built-in templates do this (`ActionLibraryServices.java`, seeded in
 `template-id-37` (`"Wait for clickability of {{ui-locator}} for {{number}} seconds"`) is the same
 idea for waiting on an element to become interactable rather than a navigation to complete.
 
-**Script-generation skills insert a wait step automatically now** (see `ahq-gen-from-url`/
-`ahq-gen-from-requirements` Rules) — this is not something to re-solve per script by hand.
+**Script-generation skills insert a wait step automatically now** (see `testbots-gen-from-url`/
+`testbots-gen-from-requirements` Rules) — this is not something to re-solve per script by hand.
 
 ### Execution path — create TestBot → execute → results (2026-07-13, proven live end-to-end)
 

@@ -11,7 +11,7 @@ from src.config.ahq_services import REPO_ROOT
 # extract_requirements reads a file off the SERVER's disk, which is meaningless/blocked when
 # hosted — the one skill whose workflow needs a hosted adaptation note.
 _HOSTED_NOTE = {
-    "ahq-gen-from-requirements": (
+    "testbots-gen-from-requirements": (
         "\n\n> Note (hosted server): the `extract_requirements` tool is unavailable here — "
         "it reads local files. Ask the user to paste the requirements text directly instead."
     ),

@@ -1,5 +1,5 @@
 ---
-name: ahq-dashboard
+name: testbots-dashboard
 description: Show a full project overview — websites, scripts, bots, recent runs, queue state
 tools:
   - mcp__ahq-mcp-server__get_context

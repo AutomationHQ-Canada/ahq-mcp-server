@@ -1,7 +1,7 @@
 {
-  "name": "ahq-skills",
-  "description": "TestBots.ai test-automation workflows for Claude Code — generate test scripts from a URL or requirements doc, run and schedule TestBots, and view execution/performance reports.",
-  "version": "2.1.1",
+  "name": "testbots-skills",
+  "description": "TestBots.ai test-automation workflows for Claude Code \u2014 generate test scripts from a URL or requirements doc, run and schedule TestBots, and view execution/performance reports.",
+  "version": "3.0.0",
   "author": {
     "name": "TestBots.ai"
   }

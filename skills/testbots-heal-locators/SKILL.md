@@ -1,5 +1,5 @@
 ---
-name: ahq-heal-locators
+name: testbots-heal-locators
 description: Find test locators broken by a UI change and propose (then apply) a fix
 tools:
   - mcp__ahq-mcp-server__scan_broken_locators

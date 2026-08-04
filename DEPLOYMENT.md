@@ -14,14 +14,14 @@ additionally installs the curated workflow skills.
 
 The repo doubles as a Claude Code plugin (`.claude-plugin/plugin.json` + `skills/*/SKILL.md` +
 `.mcp.json`). Installing it registers the MCP server AND the 9 workflow skills
-(`/ahq-test-architecture`, `/ahq-gen-from-url`, `/ahq-gen-from-requirements`, `/ahq-heal-locators`,
-`/ahq-run-bot`, `/ahq-schedule-bot`, `/ahq-view-report`, `/ahq-view-performance`,
-`/ahq-dashboard`) in one step —
+(`/testbots-test-architecture`, `/testbots-gen-from-url`, `/testbots-gen-from-requirements`, `/testbots-heal-locators`,
+`/testbots-run-bot`, `/testbots-schedule-bot`, `/testbots-view-report`, `/testbots-view-performance`,
+`/testbots-dashboard`) in one step —
 no matter which directory you're working in.
 
 ```
 /plugin marketplace add testbots-ai/mcp-server
-/plugin install ahq-skills@automationhq
+/plugin install testbots-skills@testbots
 ```
 
 (The repo is live at https://github.com/testbots-ai/mcp-server — public; no GitHub

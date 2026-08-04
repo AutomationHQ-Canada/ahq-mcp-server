@@ -1,5 +1,5 @@
 ---
-name: ahq-test-architecture
+name: testbots-test-architecture
 description: Discover a modular test architecture for a live application (crawl → modules → Epics/Stories), ported from testbotsai's Agent #1 "The Architect"
 tools:
   - mcp__ahq-mcp-server__get_context
@@ -16,7 +16,7 @@ tools:
 ## When to use this skill
 The user wants a **test strategy / modular breakdown** of a live application — "what are the
 testable areas of this app and how should we organize coverage" — before (or instead of) jumping
-straight to individual test scripts. Run this BEFORE `ahq-gen-from-url` when the user's ask is
+straight to individual test scripts. Run this BEFORE `testbots-gen-from-url` when the user's ask is
 architectural ("map out a test plan for X", "what should we test on this app") rather than
 "generate test scripts for X".
 
@@ -46,7 +46,7 @@ lives behind the login.
 1. Call `get_context` — load existing epics/stories/websites so modules aren't duplicated
    against something that already exists in the project.
 
-2. Call `crawl_url(url, credentials, max_pages)`. This is the same crawler `ahq-gen-from-url`
+2. Call `crawl_url(url, credentials, max_pages)`. This is the same crawler `testbots-gen-from-url`
    uses — real pages, titles, and locators, not a second/separate crawl implementation.
 
 3. **Apply grounding rules before writing anything** (ported directly from testbotsai's
@@ -76,13 +76,13 @@ lives behind the login.
      actions on that module's pages
 
 5. **Show the modules to the user as a table before creating anything** — this is a review
-   checkpoint, the same discipline `ahq-gen-from-requirements` uses for its traceability matrix.
+   checkpoint, the same discipline `testbots-gen-from-requirements` uses for its traceability matrix.
    Wait for confirmation (or edits) before step 6.
 
 6. On confirmation, persist the architecture into the platform's real domain model:
    - `create_website` for the app if one doesn't already exist for this URL (check
      `get_context`/`list_websites` first — don't duplicate)
-   - `create_page` + `add_locators` per crawled page, exactly as `ahq-gen-from-url` does, so the
+   - `create_page` + `add_locators` per crawled page, exactly as `testbots-gen-from-url` does, so the
      locators captured here are immediately usable when scripts are generated later
    - `create_epic(name=module.name)` per module. **Epics only carry a `name` field** — there
      is nowhere to store `description`/`priority`/`estimatedTests` on the entity itself, so those
@@ -94,12 +94,12 @@ lives behind the login.
    - What was actually persisted: N epics, M stories, pages/locators captured
    - Any modules flagged for manual review (login failed/SSO, or pages with a locator
      `resolution_rate` below 0.5 — still real pages, just worth a second look)
-   - Suggest the natural next step: run `ahq-gen-from-url` (it can reuse the website/pages/locators
+   - Suggest the natural next step: run `testbots-gen-from-url` (it can reuse the website/pages/locators
      just created) to turn these stories into actual test scripts
 
 ## Rules
 - Never invent a module or test area for something not observed in the `crawl_url` result — same
-  grounding discipline as `ahq-gen-from-url`'s locator rules, one layer up (features, not elements)
+  grounding discipline as `testbots-gen-from-url`'s locator rules, one layer up (features, not elements)
 - Always show the module design and get confirmation before creating any Epics/Stories
 - Never present an unauthenticated (login-failed or pre-login-only) crawl as if it captured the
   full application — flag it and add a manual-verification `Authentication` module instead
@@ -108,4 +108,4 @@ lives behind the login.
 - Keep it to roughly 3-8 modules for one app; if `crawl_url` hit its own 20-page cap, say so —
   pages beyond that were never seen
 - This skill stops at Epics/Stories — it does not write Test Scripts itself; hand off to
-  `ahq-gen-from-url`/`ahq-gen-from-requirements` for that
+  `testbots-gen-from-url`/`testbots-gen-from-requirements` for that

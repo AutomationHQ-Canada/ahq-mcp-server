@@ -1,15 +1,15 @@
 from src.prompts import SKILL_PROMPTS, get_skill_prompt, list_skill_prompts, parse_skill_md
 
 EXPECTED_SKILLS = {
-    "ahq-dashboard",
-    "ahq-gen-from-requirements",
-    "ahq-gen-from-url",
-    "ahq-heal-locators",
-    "ahq-run-bot",
-    "ahq-schedule-bot",
-    "ahq-test-architecture",
-    "ahq-view-performance",
-    "ahq-view-report",
+    "testbots-dashboard",
+    "testbots-gen-from-requirements",
+    "testbots-gen-from-url",
+    "testbots-heal-locators",
+    "testbots-run-bot",
+    "testbots-schedule-bot",
+    "testbots-test-architecture",
+    "testbots-view-performance",
+    "testbots-view-report",
 }
 
 
@@ -27,26 +27,26 @@ def test_frontmatter_stripped_from_body():
 def test_names_and_descriptions_come_from_frontmatter():
     prompts = {p.name: p for p in list_skill_prompts()}
     assert set(prompts) == EXPECTED_SKILLS
-    assert prompts["ahq-run-bot"].description == "Execute a TestBot immediately and report the result"
+    assert prompts["testbots-run-bot"].description == "Execute a TestBot immediately and report the result"
     assert all(p.description for p in prompts.values())
 
 
 def test_get_prompt_returns_body_as_user_message():
-    result = get_skill_prompt("ahq-run-bot")
+    result = get_skill_prompt("testbots-run-bot")
     assert result.messages[0].role == "user"
     assert "Workflow" in result.messages[0].content.text
 
 
 def test_hosted_note_only_on_gen_from_requirements():
-    hosted = get_skill_prompt("ahq-gen-from-requirements", hosted=True)
+    hosted = get_skill_prompt("testbots-gen-from-requirements", hosted=True)
     assert "extract_requirements" in hosted.messages[0].content.text
     assert "unavailable" in hosted.messages[0].content.text
 
-    local = get_skill_prompt("ahq-gen-from-requirements", hosted=False)
+    local = get_skill_prompt("testbots-gen-from-requirements", hosted=False)
     assert "unavailable" not in local.messages[0].content.text
 
     # gen-from-url needs no note — crawl_url IS hosted-enabled since Slice 9j
-    hosted_url = get_skill_prompt("ahq-gen-from-url", hosted=True)
+    hosted_url = get_skill_prompt("testbots-gen-from-url", hosted=True)
     assert "unavailable" not in hosted_url.messages[0].content.text
 
 

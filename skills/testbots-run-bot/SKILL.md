@@ -1,5 +1,5 @@
 ---
-name: ahq-run-bot
+name: testbots-run-bot
 description: Execute a TestBot immediately and report the result
 tools:
   - mcp__ahq-mcp-server__get_context

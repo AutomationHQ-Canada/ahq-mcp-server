@@ -1,5 +1,5 @@
 ---
-name: ahq-gen-from-url
+name: testbots-gen-from-url
 description: Generate TestBots test scripts by crawling a live web application URL
 tools:
   - mcp__ahq-mcp-server__crawl_url

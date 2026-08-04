@@ -1,5 +1,5 @@
 ---
-name: ahq-gen-from-requirements
+name: testbots-gen-from-requirements
 description: Generate TestBots test scripts from a requirements document (PDF/DOCX/XLSX/CSV/TXT)
 tools:
   - mcp__ahq-mcp-server__extract_requirements
@@ -62,9 +62,12 @@ generated from it — no live app/URL involved.
 
 7. Call `create_test_script` for each derived test case:
    - Name format: "<Requirement ref> — <Scenario>" (e.g. "REQ-12 — Login with invalid password")
-   - Steps use the templateIds resolved above, only if concrete UI targets are known from context;
-     otherwise leave the script as a single descriptive placeholder step and flag it as needing
-     manual locator/template work.
+   - Steps use the templateIds resolved above. If a requirement needs a `ui-locator` for a live
+     page, check `get_page_by_url` for an existing locator first; if none exists and a target URL
+     is known, call `crawl_url` on it to capture real locators rather than falling back to a
+     placeholder. Only leave a single descriptive placeholder step (flagged as needing manual
+     locator/template work) when no concrete UI target or URL is known at all — never guess a raw
+     selector as a substitute.
    - See CLAUDE.md's "TestStep shape" section for the exact, proven-working shape. In short: each
      step needs `templateId` + `templateTitle` (built-ins only) + a `parameters` array (NOT
      `params`) with one entry per `{{placeholder}}` in `templateTitle` — `{"key": "ui-locator",
@@ -99,13 +102,23 @@ generated from it — no live app/URL involved.
 
 ## Rules
 - Never fabricate UI locators that weren't derivable from context — flag those scripts instead of
-  guessing (this mirrors the grounding-rules discipline used for `crawl_url`/`ahq-gen-from-url`)
+  guessing (this mirrors the grounding-rules discipline used for `crawl_url`/`testbots-gen-from-url`)
+- Never write a raw guessed selector (e.g. `input[type='email']`) into a step instead of a real
+  `locatorId` — check `get_page_by_url` first, and if none exists, call `crawl_url` (when a URL is
+  known) before writing the step
 - Never fabricate a templateId — always resolve it via `search_step_templates`/`get_step_template` first
 - Never omit `templateTitle` on a step whose templateId is a built-in (`"template-id-N"`) — causes a 500
 - Never put step values in `params` — use `parameters` (a list); `params` does not drive step titles or execution
 - Never fabricate `locateBy`/`locatorValue` on a `ui-locator` parameter — pass only `{"locatorId": "..."}` and let the server enrich it
 - Never call `create_test_script` without `website_id` and `story_id` — both are validated locally and rejected if missing; resolve or create an epic/story rather than omitting it
+- **Ask the user which branch the scripts should land on before creating them** — offer a new branch alongside the real ones from `list_branches`, and pass the answer as `branch_name`. Do not silently default to `main`: it is protected, so a later `commit_branch` returns 403, the edit stays an uncommitted version, and `execute_bot` keeps running the last committed one — the change appears saved but never executes. The same branch is what `execute_bot` needs as `targetBranchName`, so settle it before the bot runs, not after
 - Never create a script with 0 steps
+- **After any step that can trigger navigation (a submit/sign-in/link click) and before the next
+  step that verifies the result, insert a wait step** — `template-id-36` ("Wait for visibility of
+  {{ui-locator}} for {{number}} seconds", preferred when a destination-page locator is known) or
+  `template-id-35` ("Wait for {{number}} seconds", plain fixed delay ~5-10s otherwise). Skipping
+  this causes the verify step to run before the page has navigated and fail — see CLAUDE.md's
+  "Post-navigation race" section.
 - Script names must be unique — append " (2)", " (3)" if duplicates arise
 - Always show the traceability matrix before writing scripts, not just in the final summary
 - If the file has an `error` from `extract_requirements`, do not retry — report it to the user

@@ -1,5 +1,5 @@
 ---
-name: ahq-run-bot
+name: testbots-run-bot
 description: Execute a TestBot immediately and report the result
 tools:
   - mcp__ahq-mcp-server__get_context
@@ -33,4 +33,4 @@ The user wants to run a test bot now and see the results.
 ## Rules
 - Never expose raw IDs to the user — always use names
 - If the queue is busy (from context), warn the user before executing
-- If status is FAILED, show which scripts failed and suggest running /ahq-view-report for screenshots
+- If status is FAILED, show which scripts failed and suggest running /testbots-view-report for screenshots
