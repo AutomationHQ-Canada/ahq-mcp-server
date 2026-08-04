@@ -1,4 +1,4 @@
-# Developer Guide — Running & Verifying ahq-mcp-server Locally
+# Developer Guide — Running & Verifying the MCP Server Locally
 
 This is the handover doc for anyone developing **on** this repo (not just using it as a
 plugin). If you only want to *use* the server, see [`INSTALL.md`](INSTALL.md) instead.

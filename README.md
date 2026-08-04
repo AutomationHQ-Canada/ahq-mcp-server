@@ -1,4 +1,4 @@
-# ahq-mcp-server
+# TestBots.ai MCP Server
 
 An [MCP](https://modelcontextprotocol.io) server for the **TestBots.ai** test-automation
 platform. It puts the platform behind plain language: ask an AI assistant to crawl an app and
@@ -6,6 +6,11 @@ generate test scripts, run a TestBot, read the execution report, heal a locator 
 broke, open a pull request — no TestBots.ai web UI needed.
 
 **137 tools** across 18 domains, plus **9 guided workflow skills** for Claude Code.
+
+> **On the name.** The MCP server still identifies itself as `ahq-mcp-server` — that string is in
+> the connection URL, in `/mcp` output, and prefixes every tool name. It is deliberately unchanged
+> for now: renaming it invalidates every configured connector at once, so it is batched with the
+> move to a TestBots.ai hostname rather than broken twice.
 
 ```
 "Crawl https://shop.example.com and generate smoke tests for the checkout flow"

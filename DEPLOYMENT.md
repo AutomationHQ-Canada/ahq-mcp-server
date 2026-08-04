@@ -1,4 +1,4 @@
-# Deploying / Installing ahq-mcp-server
+# Deploying / Installing the TestBots.ai MCP server
 
 Two ways to use this server with Claude Code. Both give you the same 137 MCP tools; the plugin
 additionally installs the curated workflow skills.
