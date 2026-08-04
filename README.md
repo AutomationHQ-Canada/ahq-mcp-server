@@ -43,7 +43,7 @@ The session then carries your own roles and permissions.
 ### Claude Code plugin — adds skills and local-agent execution
 
 ```
-/plugin marketplace add AutomationHQ-Canada/ahq-mcp-server
+/plugin marketplace add testbots-ai/mcp-server
 /plugin install ahq-skills@automationhq
 ```
 
@@ -198,8 +198,8 @@ on the consent page. The connector entry and everything you created stay put.
 ## Development
 
 ```bash
-git clone https://github.com/AutomationHQ-Canada/ahq-mcp-server
-cd ahq-mcp-server
+git clone https://github.com/testbots-ai/mcp-server
+cd mcp-server
 uv sync --extra dev
 uv run playwright install chromium     # only if you'll use crawl_url or locator healing
 ```

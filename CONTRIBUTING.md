@@ -15,8 +15,8 @@ plugin). If you only want to *use* the server, see [`INSTALL.md`](INSTALL.md) in
 ## 1. Clone and install dependencies
 
 ```powershell
-git clone https://github.com/AutomationHQ-Canada/ahq-mcp-server
-cd ahq-mcp-server
+git clone https://github.com/testbots-ai/mcp-server
+cd mcp-server
 uv sync --extra dev
 ```
 

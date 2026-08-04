@@ -31,7 +31,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh    # macOS / Linux
 **2. Install the plugin** — in Claude Code:
 
 ```
-/plugin marketplace add AutomationHQ-Canada/ahq-mcp-server
+/plugin marketplace add testbots-ai/mcp-server
 /plugin install ahq-skills@automationhq
 ```
 
@@ -90,7 +90,7 @@ Ask *"list my TestBots websites"*. Real data back means you're done.
 In any Claude Code session (any directory):
 
 ```
-/plugin marketplace add AutomationHQ-Canada/ahq-mcp-server
+/plugin marketplace add testbots-ai/mcp-server
 ```
 
 Expected output: `Successfully added marketplace: automationhq`
@@ -253,7 +253,7 @@ that message first, it usually IS the fix.
 Don't develop inside the plugin cache folder — clone the repo instead:
 
 ```powershell
-git clone https://github.com/AutomationHQ-Canada/ahq-mcp-server
+git clone https://github.com/testbots-ai/mcp-server
 ```
 
 See `DEPLOYMENT.md` (Option B) for registering your checkout as the MCP server, `CLAUDE.md` for

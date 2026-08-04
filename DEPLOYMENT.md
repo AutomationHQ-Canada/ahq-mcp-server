@@ -20,11 +20,11 @@ The repo doubles as a Claude Code plugin (`.claude-plugin/plugin.json` + `skills
 no matter which directory you're working in.
 
 ```
-/plugin marketplace add AutomationHQ-Canada/ahq-mcp-server
+/plugin marketplace add testbots-ai/mcp-server
 /plugin install ahq-skills@automationhq
 ```
 
-(The repo is live at https://github.com/AutomationHQ-Canada/ahq-mcp-server — public; no GitHub
+(The repo is live at https://github.com/testbots-ai/mcp-server — public; no GitHub
 login or org membership required.)
 
 Prerequisites on the machine:
