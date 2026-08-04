@@ -70,7 +70,7 @@ skills and `CLAUDE.md`, so prefer Option A for anyone not working inside this re
 
 `src/http_server.py` (`ahq-mcp-http` entrypoint) serves the same tools over Streamable HTTP
 for the centrally-hosted deployment at `{AHQ_MCP_PUBLIC_BASE_URL}` (dev:
-`https://api-dev.automationhq.ai/ahq-mcp-server`). End users install NOTHING — they connect
+`https://api-dev.testbots.ai/mcp-server`). End users install NOTHING — they connect
 any MCP client to `{public base}/mcp` and authenticate one of two ways:
 
 **1. OAuth (Claude Desktop / claude.ai connectors, MCP Inspector, any OAuth-capable client).**
@@ -91,7 +91,7 @@ against Mongo per request.
 {
   "mcpServers": {
     "ahq": {
-      "url": "https://api-dev.automationhq.ai/ahq-mcp-server/mcp",
+      "url": "https://api-dev.testbots.ai/mcp-server/mcp",
       "headers": { "X-API-AUTH-KEY": "<org token>", "projectId": "<project id>" }
     }
   }

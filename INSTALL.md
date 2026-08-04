@@ -105,7 +105,7 @@ In any Claude Code session (any directory):
 /plugin marketplace add testbots-ai/mcp-server
 ```
 
-Expected output: `Successfully added marketplace: automationhq`
+Expected output: `Successfully added marketplace: testbots`
 
 ## Step 2 — Install the plugin
 
@@ -202,7 +202,7 @@ AHQ_PROJECT_ID=<the UUID of the project to work in>
 In Claude Code (or a terminal with `claude plugin ...`):
 
 ```
-/plugin marketplace update automationhq
+/plugin marketplace update testbots
 /plugin update testbots-skills@testbots
 ```
 

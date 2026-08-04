@@ -35,7 +35,7 @@ Pick the row that matches how you work. All three reach the same tools.
 Add a custom MCP connector pointing at:
 
 ```
-https://api-dev.automationhq.ai/ahq-mcp-server/mcp
+https://api-dev.testbots.ai/mcp-server/mcp
 ```
 
 Leave authentication as **OAuth** (the default). Your browser opens TestBots.ai's sign-in page;

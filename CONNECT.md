@@ -21,7 +21,7 @@ the web app. Nothing to create, nothing to copy.
 **2.** In your AI client, add a custom MCP connector with this URL:
 
 ```
-https://api-dev.automationhq.ai/ahq-mcp-server/mcp
+https://api-dev.testbots.ai/mcp-server/mcp
 ```
 
 | Client | Where |
@@ -50,7 +50,7 @@ Per-client detail, prerequisites and troubleshooting below.
 **1. Your server URL**
 
 ```
-https://api-dev.automationhq.ai/ahq-mcp-server/mcp
+https://api-dev.testbots.ai/mcp-server/mcp
 ```
 
 > **Pilot environment.** If TestBots.ai has given you a different URL for your organization,
@@ -201,7 +201,7 @@ step, but you manage the token yourself and it never rotates automatically:
 {
   "mcpServers": {
     "ahq": {
-      "url": "https://api-dev.automationhq.ai/ahq-mcp-server/mcp",
+      "url": "https://api-dev.testbots.ai/mcp-server/mcp",
       "headers": {
         "X-API-AUTH-KEY": "<your API token>",
         "projectId": "<the project's UUID>"
@@ -265,7 +265,7 @@ wrong.
 Add `?profile=core` to the MCP URL:
 
 ```
-https://api-dev.automationhq.ai/ahq-mcp-server/mcp?profile=core
+https://api-dev.testbots.ai/mcp-server/mcp?profile=core
 ```
 
 `core` is **57 tools, about half the payload** — the everyday loop (discover, author, run, report,
