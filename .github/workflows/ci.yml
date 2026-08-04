@@ -74,7 +74,10 @@ jobs:
 
       - name: Trigger GitOps workflow
         env:
-          GH_TOKEN: ${{ secrets.AHQ_GITOPS_PAT }}
+          # A classic PAT, deliberately: it is not pinned to a resource owner, so the dispatch
+          # keeps working when this repo moves between organizations. AHQ_GITOPS_PAT stays in
+          # place as the fallback until the move is proven.
+          GH_TOKEN: ${{ secrets.GITOPS_PAT_TESTBOT }}
           RAW_COMMIT_MSG: ${{ github.event.head_commit.message }}
         run: |
           # Subject line only, trimmed to 50 chars. This has to reach bash as DATA, not as script
