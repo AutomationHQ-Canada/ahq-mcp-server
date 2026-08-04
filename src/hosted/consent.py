@@ -188,8 +188,7 @@ def _expiry_warning(claims: dict) -> str:
     else:
         window = f"{round(remaining / 86400)} days"
     return (
-        f"Heads up: this connection expires in about {window} — you'll need to sign in again "
-        "then. Nothing is lost when it does; anything you create stays in your project."
+        f"This connection expires in about {window} — you'll need to sign in again."
     )
 
 
