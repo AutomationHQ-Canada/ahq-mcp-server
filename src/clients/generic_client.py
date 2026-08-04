@@ -63,8 +63,13 @@ class GenericClient(BaseAhqClient):
                 "error": f"{service_name} does not expose an OpenAPI spec.",
                 "note": "ahq-background-v2-services has no springdoc dependency.",
             }
+        # 60s, not the usual 15: these documents are large and slow to generate. Even so,
+        # ahq-test-management-services does not answer at all (measured: no response across three
+        # attempts, ~47s total, while ahq-asset-services returns 62 paths in 1.2s) -- so expect
+        # this to still fail for that one service until the backend endpoint is fixed. The failure
+        # is at least legible now that timeouts report their type instead of an empty string.
         return await self._request(
-            "GET", f"{self._credentials.base_url}{prefix}/v3/api-docs", timeout=15
+            "GET", f"{self._credentials.base_url}{prefix}/v3/api-docs", timeout=60
         )
 
     async def call_api(

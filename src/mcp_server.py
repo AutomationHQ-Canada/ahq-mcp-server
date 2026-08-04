@@ -489,8 +489,8 @@ TOOLS = [
     Tool(name="list_test_scripts", description="List or search test scripts by name. Returns a summary per script (id, name, status, type, stepCount) — call get_test_script for a script's actual steps. The `name` filter is a plain case-insensitive substring match. Results cover the configured project only; use get_scripts_for_branch to ask which scripts are on a specific branch.", inputSchema={"type": "object", "properties": {"name": {"type": "string", "description": "Optional case-insensitive substring filter"}}}),
     Tool(name="get_test_script", description="Get full details of a test script by ID, including every step. NOTE: the returned currentBranchName reflects this request's ambient branch, NOT the script's real branch membership — use get_scripts_for_branch for that.", inputSchema={"type": "object", "properties": {"script_id": {"type": "string"}}, "required": ["script_id"]}),
     Tool(name="delete_test_script", description="Delete a test script. This is the SAME soft delete the UI performs — the script is archived (isArchived=true), appears under Administration -> Archive, and can be brought back with restore_asset; it is not destroyed. TWO-PHASE: if the script is still referenced by any Test Set or TestBot, the first call deletes NOTHING and returns status NEEDS_CONFIRMATION listing them (the raw API signals this with a 202 that is easily misread as success). Relay that list to the user and only call again with confirmed=true if they agree — that detaches the script from each one as it deletes.", inputSchema={"type": "object", "properties": {"script_id": {"type": "string"}, "confirmed": {"type": "boolean", "default": False, "description": "Set true ONLY to confirm a prior NEEDS_CONFIRMATION response, after the user has agreed"}}, "required": ["script_id"]}),
-    Tool(name="add_test_steps", description="Append (or insert) steps into an EXISTING test script in one call — no manual PUT assembly needed. Steps use the same shape as create_test_script (templateId + templateTitle verbatim for built-ins + parameters). Scalar parameter values accept friendly forms: {\"literal\": \"text\"}, {\"configuration\": \"paramName\"}, {\"vault\": \"secretName\"}, {\"variable\": \"varName\"}, {\"data_column\": \"col\"}, {\"faker\": \"Email\"}, {\"parameter\": \"name\"} — or the raw {\"type\": <code>, \"value\": ...}. Sequences renumber automatically. ALWAYS pass branch_name — omitting it lets the edit land on whatever branch the token is ambiently pointed at, not the script's own. NOTE: scripts on a protected branch (often 'main') reject direct edits — create a branch or delete+recreate.", inputSchema={"type": "object", "properties": {"script_id": {"type": "string"}, "steps": {"type": "array", "items": {"type": "object"}, "description": "Steps to add"}, "position": {"type": "integer", "description": "0-based insert position; omit to append at the end"}, "branch_name": {"type": "string", "description": _BRANCH_PIN_HINT}}, "required": ["script_id", "steps"]}),
-    Tool(name="update_test_script", description="Update fields of an existing test script (name, status, story_id, testSteps, ...) — GET-merge-PUT, so unspecified fields are preserved. Pass branch_name for the same reason as add_test_steps. Same protected-branch caveat.", inputSchema={"type": "object", "properties": {"script_id": {"type": "string"}, "changes": {"type": "object", "description": "Fields to change, using the entity's own field names (e.g. name, status, storyId, testSteps)"}, "branch_name": {"type": "string", "description": _BRANCH_PIN_HINT}}, "required": ["script_id", "changes"]}),
+    Tool(name="add_test_steps", description="Append (or insert) steps into an EXISTING test script in one call — no manual PUT assembly needed. Steps use the same shape as create_test_script (templateId + templateTitle verbatim for built-ins + parameters). Scalar parameter values accept friendly forms: {\"literal\": \"text\"}, {\"configuration\": \"paramName\"}, {\"vault\": \"secretName\"}, {\"variable\": \"varName\"}, {\"data_column\": \"col\"}, {\"faker\": \"Email\"}, {\"parameter\": \"name\"} — or the raw {\"type\": <code>, \"value\": ...}. Sequences renumber automatically. ALWAYS pass branch_name — omitting it lets the edit land on whatever branch the token is ambiently pointed at, not the script's own. NOTE: scripts on a protected branch (often 'main') reject direct edits — create a branch or delete+recreate.", inputSchema={"type": "object", "properties": {"script_id": {"type": "string"}, "steps": {"type": "array", "items": {"type": "object"}, "description": "Steps to add"}, "position": {"type": "integer", "description": "0-based insert position; omit to append at the end"}, "branch_name": {"type": "string", "description": _BRANCH_PIN_HINT}}, "required": ["script_id", "steps", "branch_name"]}),
+    Tool(name="update_test_script", description="Update fields of an existing test script (name, status, story_id, testSteps, ...) — GET-merge-PUT, so unspecified fields are preserved. Pass branch_name for the same reason as add_test_steps. Same protected-branch caveat.", inputSchema={"type": "object", "properties": {"script_id": {"type": "string"}, "changes": {"type": "object", "description": "Fields to change, using the entity's own field names (e.g. name, status, storyId, testSteps)"}, "branch_name": {"type": "string", "description": _BRANCH_PIN_HINT}}, "required": ["script_id", "changes", "branch_name"]}),
     Tool(
         name="create_test_script",
         description=(
@@ -922,13 +922,19 @@ async def _dispatch_hosted(name: str, arguments: dict, clients: ClientBundle):
     except Exception as e:
         audit_log("tool_call", org=org, project=creds.project_id, tool=name,
                   duration_ms=int((time.monotonic() - started) * 1000),
-                  ok=False, error=str(e)[:200])
+                  ok=False, error=_describe(e)[:200])
         raise
     error = result.get("error") if isinstance(result, dict) else None
     audit_log("tool_call", org=org, project=creds.project_id, tool=name,
               duration_ms=int((time.monotonic() - started) * 1000),
               ok=error is None, **({"error": str(error)[:200]} if error is not None else {}))
     return result
+
+
+def _describe(exc: Exception) -> str:
+    """Never lose the exception type. `str(httpx.ReadTimeout())` is the empty string."""
+    detail = str(exc)
+    return f"{type(exc).__name__}: {detail}" if detail else type(exc).__name__
 
 
 @server.call_tool()
@@ -941,7 +947,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             result = await _dispatch(name, arguments, clients, is_hosted)
         return [TextContent(type="text", text=json.dumps(_slim_response_obj(result), indent=2))]
     except Exception as e:
-        return [TextContent(type="text", text=json.dumps({"error": str(e)}))]
+        # Type first: httpx's timeout exceptions carry no message at all, so a bare str(e) here
+        # reported every timeout in the server as {"error": ""} -- no tool, no cause, nothing.
+        return [TextContent(type="text", text=json.dumps({"error": _describe(e)}))]
 
 
 @server.list_prompts()
@@ -1023,6 +1031,24 @@ async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: boo
         return await clients.test_mgmt.delete_test_script(
             args["script_id"], args.get("confirmed", False)
         )
+    if name in ("add_test_steps", "update_test_script") and not args.get("branch_name"):
+        # Omitting it lands the edit on whatever branch the token is ambiently pointed at: the PUT
+        # is a full-document write and the GET's currentBranchName is the request's branch, not the
+        # script's (see TestMgmtClient._put_script). The edit still reports success, so the damage
+        # only shows at commit time -- commitAll snapshots the TARGET branch's stale head and pins
+        # a version older than the work just done, under a 200.
+        try:
+            current = await clients.test_mgmt.get_test_script(args["script_id"])
+            seen = current.get("currentBranchName") or "unknown"
+        except Exception:
+            seen = "could not read it"
+        return {"error": (
+            "branch_name is required — pass the branch this script actually lives on. Confirm it "
+            f"with get_scripts_for_branch rather than trusting currentBranchName (currently: {seen}), "
+            "which reflects this request's ambient branch. Omitting it silently moves the edit to "
+            "another branch and a later commit_branch will appear to revert your work."
+        )}
+
     if name == "add_test_steps":
         return await clients.test_mgmt.add_test_steps(
             args["script_id"], args["steps"], args.get("position"),
@@ -1050,6 +1076,7 @@ async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: boo
                 f"Existing branches: {known}. Do not assume 'main': it is protected, so a later "
                 "commit_branch returns 403 and the script never executes what you edited."
             )}
+
         kwargs = {}
         if "status" in args:
             kwargs["status"] = args["status"]
@@ -1062,6 +1089,7 @@ async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: boo
         return await clients.test_mgmt.create_test_script(
             args["name"], args["steps"], args.get("page_id"), args.get("website_id"), args.get("story_id"), **kwargs
         )
+
     if name == "list_step_templates":
         return await clients.test_mgmt.list_templates(args.get("offset", 0))
     if name == "search_step_templates":

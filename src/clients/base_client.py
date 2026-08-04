@@ -106,7 +106,7 @@ class BaseAhqClient:
                 if attempt == MAX_ATTEMPTS:
                     raise
                 logger.warning("TestBots request %s %s failed (%s), retrying (%d/%d)",
-                                method, url, exc, attempt, MAX_ATTEMPTS)
+                                method, url, type(exc).__name__, attempt, MAX_ATTEMPTS)
                 await asyncio.sleep(BACKOFF_BASE_SECONDS * 2 ** (attempt - 1))
                 continue
 
