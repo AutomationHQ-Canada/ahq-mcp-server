@@ -10,7 +10,7 @@ plugin). If you only want to *use* the server, see [`INSTALL.md`](INSTALL.md) in
 | Python 3.11+ | `python --version` | https://python.org (or let `uv` manage it) |
 | [`uv`](https://docs.astral.sh/uv/) on PATH | `uv --version` | Windows: `winget install astral-sh.uv` · macOS/Linux: `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
 | Claude Code v2+ | `claude --version` | https://claude.com/claude-code |
-| An AHQ API token (Organization type) | — | AHQ UI → Administration → Settings → API Tokens |
+| An TestBots API token (Organization type) | — | TestBots UI → Administration → Settings → API Tokens |
 
 ## 1. Clone and install dependencies
 
@@ -32,8 +32,8 @@ AHQ_API_TOKEN=<your Organization API token>
 AHQ_PROJECT_ID=<the project UUID you want to test against>
 ```
 
-Token: AHQ UI → Administration → Settings → API Tokens → Create.
-Project UUID: the **second** UUID in the AHQ web app's URL.
+Token: TestBots UI → Administration → Settings → API Tokens → Create.
+Project UUID: the **second** UUID in the TestBots web app's URL.
 
 `AHQ_BASE_URL` is optional — the gateway URL is decoded from the token itself; only set it if
 `/mcp` reports the token has no usable base URL (see the Troubleshooting table below).
@@ -85,7 +85,7 @@ is no separate "start the server" step for normal iteration.
 
 **d. Exercise the changed tool for real**
 
-Ask Claude something that routes to the tool you changed (e.g. "list my AHQ websites") and
+Ask Claude something that routes to the tool you changed (e.g. "list my TestBots websites") and
 confirm real data comes back.
 
 ## 5. Running the server standalone (optional)
@@ -121,7 +121,7 @@ edit code → uv run pytest → restart Claude Code session → try the tool for
 | `/mcp` shows `ahq-mcp-server-dev` **failed** | `uv`/Python not on PATH, or you ran `claude mcp add` from the wrong directory. Re-run the smoke check in step 4b from inside the repo. |
 | Tool errors say `ahq-mcp-server is not configured: ... is empty` | `.env` is missing, in the wrong folder, or missing a value — the error names the variable and expected path. |
 | Tool errors say `Got the web frontend's HTML instead of an API response` | Token predates the `urlDetails` claim — add `AHQ_BASE_URL` to `.env`, pointed at the **API gateway** (e.g. `https://api-dev.automationhq.ai`), never the web UI. |
-| Every AHQ call returns 401 | Wrong/expired token in `.env`. A raw browser-session JWT does not work — needs an Organization or User API token. |
+| Every TestBots call returns 401 | Wrong/expired token in `.env`. A raw browser-session JWT does not work — needs an Organization or User API token. |
 | Changes don't seem to take effect | You edited code but didn't restart the Claude Code session — it doesn't hot-reload. |
 
 ## See also

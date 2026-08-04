@@ -359,12 +359,12 @@ TOOLS = [
         ),
         inputSchema={"type": "object", "properties": {}},
     ),
-    Tool(name="get_context", description="Load full AHQ project snapshot from all services in parallel. Call this first before any other action.", inputSchema={"type": "object", "properties": {}}),
+    Tool(name="get_context", description="Load full TestBots project snapshot from all services in parallel. Call this first before any other action.", inputSchema={"type": "object", "properties": {}}),
 
     # Asset — websites
     Tool(name="list_websites", description="List ALL websites in the project. Use this for 'show me the websites' — search_websites needs a name and returns [] for an empty query.", inputSchema={"type": "object", "properties": {}}),
-    Tool(name="search_websites", description="Search for an existing website by name in AHQ. For the full list use list_websites.", inputSchema={"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}),
-    Tool(name="create_website", description="Create a new website record in AHQ.", inputSchema={"type": "object", "properties": {"name": {"type": "string"}, "url": {"type": "string"}}, "required": ["name", "url"]}),
+    Tool(name="search_websites", description="Search for an existing website by name in TestBots. For the full list use list_websites.", inputSchema={"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}),
+    Tool(name="create_website", description="Create a new website record in TestBots.", inputSchema={"type": "object", "properties": {"name": {"type": "string"}, "url": {"type": "string"}}, "required": ["name", "url"]}),
 
     # Asset — pages
     Tool(name="list_pages", description="List all pages under a website.", inputSchema={"type": "object", "properties": {"website_id": {"type": "string"}}, "required": ["website_id"]}),
@@ -494,7 +494,7 @@ TOOLS = [
     Tool(
         name="create_test_script",
         description=(
-            "Create a test script in AHQ. Each step's templateId MUST come from "
+            "Create a test script in TestBots. Each step's templateId MUST come from "
             "list_step_templates/search_step_templates — never invent one. Call get_step_template "
             "on the chosen template first to see which parameter keys it actually uses. "
             "For built-in templates (templateId like 'template-id-N'), also copy that template's "
@@ -707,7 +707,7 @@ TOOLS = [
     Tool(name="generate_fake_data", description="Generate one synthetic value of a given fake-data type, for populating test data.", inputSchema={"type": "object", "properties": {"display_name": {"type": "string", "description": "Must be one of the names returned by list_fake_data_types"}}, "required": ["display_name"]}),
 
     # Email
-    Tool(name="send_email", description="Send a transactional email through AHQ (e.g. a test run summary).", inputSchema={"type": "object", "properties": {"to": {"type": "string"}, "subject": {"type": "string"}, "message": {"type": "string"}, "multiple_tos": {"type": "array", "items": {"type": "string"}}, "from_address": {"type": "string"}}, "required": ["to", "subject", "message"]}),
+    Tool(name="send_email", description="Send a transactional email through TestBots (e.g. a test run summary).", inputSchema={"type": "object", "properties": {"to": {"type": "string"}, "subject": {"type": "string"}, "message": {"type": "string"}, "multiple_tos": {"type": "array", "items": {"type": "string"}}, "from_address": {"type": "string"}}, "required": ["to", "subject", "message"]}),
 
     # Consumer-Driven Contract Testing (Pact) — niche capability for API contract verification
     Tool(name="list_consumers", description="List Pact contract-testing consumers (API clients).", inputSchema={"type": "object", "properties": {}}),
@@ -729,7 +729,7 @@ TOOLS = [
     Tool(
         name="get_service_spec",
         description=(
-            "Fetch the full OpenAPI spec (all endpoints, schemas, params) for any AHQ service. "
+            "Fetch the full OpenAPI spec (all endpoints, schemas, params) for any TestBots service. "
             "Use this to discover new or unknown endpoints when the hand-written tools don't cover a feature. "
             f"Available services: {', '.join(sorted(set(SERVICE_MAP.keys())))}"
         ),
@@ -747,7 +747,7 @@ TOOLS = [
     Tool(
         name="call_api",
         description=(
-            "Call ANY AHQ REST endpoint directly. Use after get_service_spec to invoke a discovered endpoint "
+            "Call ANY TestBots REST endpoint directly. Use after get_service_spec to invoke a discovered endpoint "
             "that is not covered by a hand-written tool. Supports GET, POST, PUT, DELETE."
         ),
         inputSchema={

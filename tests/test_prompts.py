@@ -27,7 +27,7 @@ def test_frontmatter_stripped_from_body():
 def test_names_and_descriptions_come_from_frontmatter():
     prompts = {p.name: p for p in list_skill_prompts()}
     assert set(prompts) == EXPECTED_SKILLS
-    assert prompts["ahq-run-bot"].description == "Execute an AHQ test bot immediately and report the result"
+    assert prompts["ahq-run-bot"].description == "Execute a TestBot immediately and report the result"
     assert all(p.description for p in prompts.values())
 
 

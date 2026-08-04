@@ -253,7 +253,7 @@ class StatelessAhqProvider(OAuthAuthorizationServerProvider):
         org_id = authorization_code.org_id or decode_ahq_token(
             authorization_code.ahq_token).get("organizationId", "")
         if not org_id:
-            raise TokenError(error="invalid_grant", error_description="embedded AHQ token has no organization")
+            raise TokenError(error="invalid_grant", error_description="embedded TestBots token has no organization")
         return self._issue_tokens(
             client_id=authorization_code.client_id,
             ahq_token=authorization_code.ahq_token,

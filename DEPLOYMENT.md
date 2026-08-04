@@ -1,6 +1,6 @@
 # Deploying / Installing ahq-mcp-server
 
-Two ways to use this server with Claude Code. Both give you the same 115 MCP tools; the plugin
+Two ways to use this server with Claude Code. Both give you the same 137 MCP tools; the plugin
 additionally installs the curated workflow skills.
 
 > **Just want to install and use it?** Follow the step-by-step handover guide in
@@ -13,9 +13,10 @@ additionally installs the curated workflow skills.
 ## Option A — Claude Code plugin (recommended)
 
 The repo doubles as a Claude Code plugin (`.claude-plugin/plugin.json` + `skills/*/SKILL.md` +
-`.mcp.json`). Installing it registers the MCP server AND the 8 workflow skills
-(`/ahq-test-architecture`, `/ahq-gen-from-url`, `/ahq-gen-from-requirements`, `/ahq-run-bot`,
-`/ahq-schedule-bot`, `/ahq-view-report`, `/ahq-view-performance`, `/ahq-dashboard`) in one step —
+`.mcp.json`). Installing it registers the MCP server AND the 9 workflow skills
+(`/ahq-test-architecture`, `/ahq-gen-from-url`, `/ahq-gen-from-requirements`, `/ahq-heal-locators`,
+`/ahq-run-bot`, `/ahq-schedule-bot`, `/ahq-view-report`, `/ahq-view-performance`,
+`/ahq-dashboard`) in one step —
 no matter which directory you're working in.
 
 ```
@@ -73,13 +74,13 @@ for the centrally-hosted deployment at `{AHQ_MCP_PUBLIC_BASE_URL}` (dev:
 any MCP client to `{public base}/mcp` and authenticate one of two ways:
 
 **1. OAuth (Claude Desktop / claude.ai connectors, MCP Inspector, any OAuth-capable client).**
-The service is its own OAuth 2.1 authorization server (AHQ has none): dynamic client
-registration + PKCE, with a browser consent page where the user pastes their AHQ
+The service is its own OAuth 2.1 authorization server (TestBots has none): dynamic client
+registration + PKCE, with a browser consent page where the user pastes their TestBots
 ORGANIZATION API token once and picks a project (validated live against the gateway — the
 Slice 9k org↔project check). All OAuth state (client_id, code, access/refresh tokens) is a
 Fernet-encrypted self-contained blob keyed by `AHQ_MCP_AUTH_SECRET` — no storage, any replica
 can serve any step. Tokens can't be individually revoked (no storage); the backstop is that
-every downstream call carries the user's embedded AHQ token, which the gateway re-validates
+every downstream call carries the user's embedded TestBots token, which the gateway re-validates
 against Mongo per request.
 
 **2. Headers (Cursor / VS Code / Claude Code without OAuth).** Same as before: send
@@ -97,14 +98,14 @@ against Mongo per request.
 }
 ```
 
-The 8 workflow skills are also served as **MCP prompts** (`src/prompts.py`), so hosted
+The 9 workflow skills are also served as **MCP prompts** (`src/prompts.py`), so hosted
 clients get the curated workflows without the plugin.
 
 Hosted env vars (see the Helm chart `values-*.yaml` + Secret):
 
 | Var | Where | Notes |
 |---|---|---|
-| `AHQ_BASE_URL` | ConfigMap | gateway URL the server calls AHQ through |
+| `AHQ_BASE_URL` | ConfigMap | gateway URL the server calls TestBots through |
 | `AHQ_MCP_PUBLIC_BASE_URL` | ConfigMap | public URL incl. `/ahq-mcp-server` prefix |
 | `AHQ_MCP_AUTH_SECRET` | **Secret** `ahq-mcp-server-secrets` | REQUIRED; identical on every replica; startup fails without it |
 | `AHQ_MCP_RATE_LIMIT_PER_MIN` | ConfigMap | per-org token bucket, default 60 |

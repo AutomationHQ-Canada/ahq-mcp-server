@@ -1,6 +1,6 @@
-# Connecting to the AutomationHQ MCP server
+# Connecting to the TestBots.ai MCP server
 
-Use AutomationHQ's test-automation tools directly from your AI assistant — generate test scripts,
+Use TestBots.ai's test-automation tools directly from your AI assistant — generate test scripts,
 run TestBots, read execution reports, manage branches and pull requests — by connecting one URL.
 Nothing to install.
 
@@ -15,9 +15,8 @@ Microsoft 365 Copilot, Lovable, Cursor and Windsurf**.
 
 ## Quick start
 
-**1.** Get an AutomationHQ API token — AHQ → Administration → Settings → API Tokens → Create.
-Either **Organization** or **User** type works (a User token is *not* permission-restricted — see
-below).
+**1.** Have your TestBots.ai account ready — the same email and password you use to sign in to
+the web app. Nothing to create, nothing to copy.
 
 **2.** In your AI client, add a custom MCP connector with this URL:
 
@@ -35,9 +34,10 @@ https://api-dev.automationhq.ai/ahq-mcp-server/mcp
 
 **3.** Leave authentication as **OAuth** (the default everywhere). Not API key.
 
-**4.** Your browser opens AutomationHQ's page — paste the token, pick a project, **Authorize**.
+**4.** Your browser opens TestBots.ai's sign-in page — enter your email and password, pick a
+project, **Authorize**.
 
-**5.** Ask *"list my AHQ websites"* in a **new** chat.
+**5.** Ask *"list my TestBots websites"* in a **new** chat.
 
 > VS Code only: switch Copilot Chat to **Agent** mode, or the tools won't appear.
 
@@ -53,22 +53,21 @@ Per-client detail, prerequisites and troubleshooting below.
 https://api-dev.automationhq.ai/ahq-mcp-server/mcp
 ```
 
-> **Pilot environment.** If AutomationHQ has given you a different URL for your organization,
+> **Pilot environment.** If TestBots.ai has given you a different URL for your organization,
 > use that one instead — every instruction below is otherwise identical.
 
-**2. An AutomationHQ API token — Organization or User**
+**2. Your TestBots.ai account**
 
-AHQ web app → **Administration → Settings → API Tokens → Create**. Either type works.
+The same email and password you use for the web app. You enter them on TestBots.ai's own sign-in
+page in your browser — never into a config file, and the AI client never sees them.
 
-> **A User token is not a restricted token.** It identifies who created it, but it still reaches
-> everything in the organization — every project, every script, every bot. AHQ's gateway checks
-> only that a token exists; it does not apply that person's project roles to API calls. Do not
-> hand someone a User token expecting it to limit what they can reach.
+> **The connection carries your own permissions.** Signing in produces a session scoped to you, so
+> the tools reach exactly what your roles allow — no more. This is why sign-in replaced the older
+> "paste an API token" flow: an API token proved only possession, reached everything in the
+> organization regardless of who used it, and applied nobody's project roles.
 
-Use an Organization token for a shared or automated setup, and a User token when you want actions
-traceable to a person. Ask your AHQ administrator if you can't create either yourself.
-
-You'll paste this token into a browser page once per client, never into a config file.
+Single sign-on accounts can't use the connector yet — there's no password to enter. Use the Claude
+Code plugin ([`INSTALL.md`](INSTALL.md)), which authenticates with an API token instead.
 
 ---
 
@@ -77,12 +76,15 @@ You'll paste this token into a browser page once per client, never into a config
 The same four steps in every client:
 
 1. You add the server URL to your AI client.
-2. The client opens your browser to AutomationHQ's sign-in page.
-3. You paste your API token and pick a project (skipped if your org has only one).
+2. The client opens your browser to TestBots.ai's sign-in page.
+3. You sign in and pick a project (skipped if you only have one).
 4. The browser returns you to the client, now showing **Connected**.
 
-Your token is validated live against AutomationHQ each time you connect. The client only ever
-stores an encrypted session token, never the token itself in plaintext.
+Your credentials are checked live against TestBots.ai and are never stored. The client keeps only
+an encrypted session, and your password never reaches it or this server's storage.
+
+Sessions last 24 hours. After that the client reports a connection error and you reconnect the
+same way — nothing you created is affected.
 
 ---
 
@@ -90,12 +92,12 @@ stores an encrypted session token, never the token itself in plaintext.
 
 1. **Settings → Connectors**
 2. **Add custom connector**
-3. Name it (e.g. `AutomationHQ`) and paste the server URL
+3. Name it (e.g. `TestBots.ai`) and paste the server URL
 4. **Add**, then **Connect** on the new card
-5. Paste your API token on the consent page, choose a project, **Authorize**
+5. Sign in with your email and password on the consent page, choose a project, **Authorize**
 6. Return to Claude — the connector shows **Connected**
 
-Start a **new** chat and ask *"list my AHQ websites"* to confirm. An existing conversation won't
+Start a **new** chat and ask *"list my TestBots websites"* to confirm. An existing conversation won't
 pick up a newly added connector.
 
 ## VS Code + GitHub Copilot Chat
@@ -106,18 +108,18 @@ in a **trusted workspace** — in Restricted Mode, MCP servers don't start.
 1. `Ctrl+Shift+P` / `Cmd+Shift+P` → **MCP: Add Server...**
 2. **HTTP (HTTP or Server-Sent Events)**
 3. Paste the server URL
-4. Name it (e.g. `AHQ-MCP`)
+4. Name it (e.g. `TestBots`)
 5. **Global** scope, unless you want it in one workspace only
-6. Paste your API token on the consent page, pick a project, **Authorize**
+6. Sign in with your email and password on the consent page, pick a project, **Authorize**
 7. Open Copilot Chat, switch the mode dropdown to **Agent**, click the tools icon (🔧) to confirm
-   the AHQ tools are listed
+   the TestBots tools are listed
 
 Step 7 catches most "it isn't working" reports — **MCP tools only appear in Agent mode**, not Ask
 or Edit.
 
 > Copilot Chat sometimes prefers its own built-in tools (git, terminal, file search) for an
-> ambiguous request. If something that clearly needs AHQ data comes back empty, name it
-> explicitly: *"using the AHQ tools, list my test scripts"*. That's Copilot's tool-selection
+> ambiguous request. If something that clearly needs TestBots data comes back empty, name it
+> explicitly: *"using the TestBots tools, list my test scripts"*. That's Copilot's tool-selection
 > behaviour, not a broken connection.
 
 ## Microsoft Copilot Studio
@@ -135,10 +137,10 @@ different path from VS Code's Copilot Chat above, despite the shared name.
 **Steps**
 
 1. Your agent → **Tools** → **Add a tool** → **New tool** → **Model Context Protocol**
-2. **Server name**: `AutomationHQ`
+2. **Server name**: `TestBots.ai`
 3. **Server description** — this is the only text the agent's orchestrator uses to decide when to
-   call AutomationHQ, so make it specific:
-   > AutomationHQ test automation platform. Create and run UI test scripts and TestBots, inspect
+   call TestBots.ai, so make it specific:
+   > TestBots.ai test automation platform. Create and run UI test scripts and TestBots, inspect
    > execution reports and pass/fail results per step, manage test suites, environments, branches
    > and pull requests, and query websites, pages and UI locators.
 4. **Server URL**: as above
@@ -146,7 +148,7 @@ different path from VS Code's Copilot Chat above, despite the shared name.
 6. **Create** → **Add to agent** → **Create new connection** → consent page → **Authorize**
 
 > **Use OAuth, not API key.** Copilot Studio's API-key auth sends a single header, but header
-> authentication here needs two. With only one, AutomationHQ returns an empty result set rather
+> authentication here needs two. With only one, TestBots.ai returns an empty result set rather
 > than an error — so your agent would report "you have no test scripts" instead of failing
 > visibly. OAuth avoids this entirely; the consent page selects the project.
 
@@ -154,7 +156,7 @@ Copilot Studio supports only the Streamable HTTP transport, which is what this s
 
 ## Microsoft 365 Copilot (declarative agent)
 
-Getting AHQ tools into M365 Copilot chat means building a **declarative agent** — a build step,
+Getting TestBots tools into M365 Copilot chat means building a **declarative agent** — a build step,
 not a connect-a-URL step.
 
 In VS Code with the **Microsoft 365 Agents Toolkit** (6.12.0+):
@@ -175,13 +177,13 @@ In VS Code with the **Microsoft 365 Agents Toolkit** (6.12.0+):
 
 Lovable connects MCP servers as **chat connectors** — the tools are available to Lovable's AI
 while it builds for you. They are deliberately never part of the app Lovable publishes, so this
-does not let a Lovable-built app call AutomationHQ at runtime; that would be an ordinary API
+does not let a Lovable-built app call TestBots.ai at runtime; that would be an ordinary API
 integration in the generated code.
 
 1. **Connectors** dashboard → scroll to the bottom → **Custom MCP**
-2. Name it (e.g. `AutomationHQ`) and enter the server URL
+2. Name it (e.g. `TestBots.ai`) and enter the server URL
 3. Leave authentication as **OAuth** (the default)
-4. **Add & authorize** → consent page → paste token, pick project, **Authorize**
+4. **Add & authorize** → consent page → sign in, pick project, **Authorize**
 
 > Don't use the bearer-token/API-key option — it can't carry everything this server's header
 > authentication needs. OAuth is the only route that works.
@@ -209,8 +211,8 @@ step, but you manage the token yourself and it never rotates automatically:
 }
 ```
 
-Both headers are required — with only the token, AutomationHQ answers with an empty result set
-rather than an error. Find the project UUID in the AHQ web app's URL
+Both headers are required — with only the token, TestBots.ai answers with an empty result set
+rather than an error. Find the project UUID in the TestBots web app's URL
 (`.../<orgId>/<projectId>/...` — the **second** UUID).
 
 Cursor: `.cursor/mcp.json` in your project, or `~/.cursor/mcp.json` globally. Windsurf: its own
@@ -222,7 +224,7 @@ Cursor: `.cursor/mcp.json` in your project, or `~/.cursor/mcp.json` globally. Wi
 
 **Passwords used in test steps appear in plaintext in execution reports.**
 
-AutomationHQ's secret vault keeps a credential out of the stored test script — the step displays
+TestBots.ai's secret vault keeps a credential out of the stored test script — the step displays
 as `Enter [vault: my_password] for "Password field"` and the real value appears nowhere in the
 script document. That part works as expected.
 
@@ -238,7 +240,7 @@ not the full lifecycle.
 
 **What to do:** use dedicated test accounts with credentials you're willing to have visible in
 report history, and never reuse a production or personal password in a test script. Raise this
-with your AutomationHQ contact if report-level protection matters for your use case.
+with your TestBots.ai contact if report-level protection matters for your use case.
 
 ---
 
@@ -252,9 +254,9 @@ with your AutomationHQ contact if report-level protection matters for your use c
 
 ## Choosing which tools to enable
 
-This server exposes **136 tools**, and every one of their descriptions is sent to the model on
-every message — MCP has no way to load them on demand. That is roughly 14,500 tokens before your
-question is even read, and more importantly it is 136 near-neighbours for the model to tell apart.
+This server exposes **137 tools**, and every one of their descriptions is sent to the model on
+every message — MCP has no way to load them on demand. That is roughly 15,000 tokens before your
+question is even read, and more importantly it is 137 near-neighbours for the model to tell apart.
 A wrong pick usually doesn't error; it returns an empty list, and the answer comes back confidently
 wrong.
 
@@ -266,7 +268,7 @@ Add `?profile=core` to the MCP URL:
 https://api-dev.automationhq.ai/ahq-mcp-server/mcp?profile=core
 ```
 
-`core` is **55 tools, about half the payload** — the everyday loop (discover, author, run, report,
+`core` is **57 tools, about half the payload** — the everyday loop (discover, author, run, report,
 heal) and everything the bundled skills need. All 9 skills are guaranteed to work under it; a test
 enforces that, so a skill can never quietly outgrow the profile.
 
@@ -274,11 +276,11 @@ Compose extra groups onto it when you need them:
 
 | Spec | What you get |
 |---|---|
-| `?profile=core` | The everyday loop — 55 tools |
+| `?profile=core` | The everyday loop — 57 tools |
 | `?profile=core,api` | …plus API/REST testing |
 | `?profile=core,versioning` | …plus branches and pull requests |
 | `?profile=reporting` | A single group on its own — read-only run results |
-| *(omitted)* | All 136 — the default, unchanged |
+| *(omitted)* | All 137 — the default, unchanged |
 
 Groups: `context`, `discovery`, `healing`, `authoring`, `planning`, `execution`, `scheduling`,
 `reporting`, `versioning`, `admin`, `vault`, `api`, `performance`, `contracts`, `mocks`,
@@ -287,17 +289,17 @@ Groups: `context`, `discovery`, `healing`, `authoring`, `planning`, `execution`,
 A client that can't edit the URL can send an `X-AHQ-Tool-Profile` header instead. Running over
 stdio, set `AHQ_MCP_TOOL_PROFILE=core`.
 
-A misspelled profile falls back to all 136 rather than to none — you lose the reduction, never the
+A misspelled profile falls back to all 137 rather than to none — you lose the reduction, never the
 tools.
 
-> Filtering controls what the model is *shown*, not what it is *allowed* to do. Your AHQ token is
-> the security boundary and the gateway re-checks it on every call. Don't use a profile to
-> withhold a destructive tool — use a token with narrower permissions.
+> Filtering controls what the model is *shown*, not what it is *allowed* to do. Your signed-in
+> session is the security boundary and the gateway re-checks it on every call. Don't use a profile
+> to withhold a destructive tool — use an account with narrower permissions.
 
 ### Then narrow further in the client
 
 Clients that let you pick individual tools (Copilot Studio, M365 declarative agents) should still
-do so — an orchestrator choosing from 55 is better than from 136, but a dozen is better again.
+do so — an orchestrator choosing from 57 is better than from 137, but a dozen is better again.
 Keep destructive tools — `permanently_delete_asset`, `merge_pull_request`, `delete_test_script` —
 out of any agent aimed at general users.
 
@@ -307,14 +309,14 @@ out of any agent aimed at general users.
 
 | Symptom | Cause / fix |
 |---|---|
-| Consent page says the token "doesn't look like an API token" | The token is neither an Organization nor a User token, or it is malformed. Re-copy it from Administration → API Tokens. |
-| Consent page says AutomationHQ "rejected this token" | The token is expired or deleted. Create a fresh one. |
+| Consent page says your login details are incorrect | Same email and password as the web app. If they work there and not here, your account may be SSO-only — use the Claude Code plugin instead. |
+| Worked yesterday, now every tool fails | The 24-hour session expired. Reconnect from your client and sign in again. |
 | "This connection link has expired" | The browser tab sat open more than 10 minutes, or the link was reused. Start the connection again from your client. |
 | Connected, but every list comes back empty | You're connected to a project with no data, or you used header authentication without `projectId`. Reconnect with OAuth, or check the project you selected. |
 | Connected, but no tools appear | VS Code: confirm Copilot Chat is in **Agent** mode. Claude Desktop: start a **new** chat. |
 | A tool fails saying it needs a local agent | That action requires a test agent on your own machine, which a URL connection can't reach. Use the Claude Code plugin, or point the bot at a cloud grid. |
-| Registration or callback URL is rejected | Your client's OAuth callback isn't recognised by the server yet. Send the exact error to your AutomationHQ contact — it names the URL, and allowlisting it is a quick configuration change. |
-| Anything else | Contact your AutomationHQ representative with the exact error text. |
+| Registration or callback URL is rejected | Your client's OAuth callback isn't recognised by the server yet. Send the exact error to your TestBots.ai contact — it names the URL, and allowlisting it is a quick configuration change. |
+| Anything else | Contact your TestBots.ai representative with the exact error text. |
 
 ---
 

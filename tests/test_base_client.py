@@ -89,7 +89,7 @@ async def test_error_extracts_human_readable_message_from_response_obj_envelope(
         await client.get("/things")
 
     assert str(exc_info.value) == (
-        "AHQ API error 400 (Bad Request): Another scheduler is already scheduled "
+        "TestBots API error 400 (Bad Request): Another scheduler is already scheduled "
         "within 1 hour of this time. Please choose a different time slot."
     )
     assert "timestamp" not in str(exc_info.value)  # the raw envelope must not leak through

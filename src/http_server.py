@@ -131,7 +131,7 @@ def create_app(settings):
         ProtectedResourceMetadata(
             resource=AnyHttpUrl(f"{public_base}/mcp"),
             authorization_servers=[AnyHttpUrl(public_base)],
-            resource_name="AutomationHQ MCP Server",
+            resource_name="TestBots MCP Server",
         )
     )
 

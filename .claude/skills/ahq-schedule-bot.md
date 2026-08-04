@@ -1,6 +1,6 @@
 ---
 name: ahq-schedule-bot
-description: Schedule an AHQ test bot to run on a recurring cron schedule
+description: Schedule a TestBot to run on a recurring cron schedule
 tools:
   - mcp__ahq-mcp-server__get_context
   - mcp__ahq-mcp-server__list_grids

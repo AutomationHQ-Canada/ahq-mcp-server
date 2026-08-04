@@ -7,7 +7,7 @@ tools:
 ---
 
 ## When to use this skill
-The user wants a quick overview of the entire AHQ project state.
+The user wants a quick overview of the entire TestBots project state.
 
 ## Workflow
 

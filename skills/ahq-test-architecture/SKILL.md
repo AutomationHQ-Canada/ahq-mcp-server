@@ -20,8 +20,8 @@ straight to individual test scripts. Run this BEFORE `ahq-gen-from-url` when the
 architectural ("map out a test plan for X", "what should we test on this app") rather than
 "generate test scripts for X".
 
-This is the AHQ-native equivalent of testbotsai's Agent #1 ("The Architect"): same grounding
-discipline and module schema, but crawling with AHQ's own `crawl_url` and persisting the result as
+This is the TestBots-native equivalent of testbotsai's Agent #1 ("The Architect"): same grounding
+discipline and module schema, but crawling with our own `crawl_url` and persisting the result as
 real Epics/Stories instead of a standalone UI artifact.
 
 ## What to collect before starting
@@ -79,12 +79,12 @@ lives behind the login.
    checkpoint, the same discipline `ahq-gen-from-requirements` uses for its traceability matrix.
    Wait for confirmation (or edits) before step 6.
 
-6. On confirmation, persist the architecture into AHQ's real domain model:
+6. On confirmation, persist the architecture into the platform's real domain model:
    - `create_website` for the app if one doesn't already exist for this URL (check
      `get_context`/`list_websites` first — don't duplicate)
    - `create_page` + `add_locators` per crawled page, exactly as `ahq-gen-from-url` does, so the
      locators captured here are immediately usable when scripts are generated later
-   - `create_epic(name=module.name)` per module. **AHQ epics only carry a `name` field** — there
+   - `create_epic(name=module.name)` per module. **Epics only carry a `name` field** — there
      is nowhere to store `description`/`priority`/`estimatedTests` on the entity itself, so those
      stay in your response text, not in the API call.
    - `create_story(epic_id, name=testArea)` per test area under that module's epic

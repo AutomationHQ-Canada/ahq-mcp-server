@@ -260,12 +260,12 @@ def test_consent_first_screen_has_no_project_id_field(client):
     assert 'name="ahq_password"' in resp.text
 
 
-def test_consent_page_uses_default_ahq_branding_when_unconfigured(client):
+def test_consent_page_uses_default_branding_when_unconfigured(client):
     reg = _register(client)
     txn = _authorize_to_txn(client, reg["client_id"])
     resp = client.get("/consent", params={"txn": txn})
-    assert "AutomationHQ" in resp.text
-    assert "#9c27b0" in resp.text
+    assert "TestBots.ai" in resp.text
+    assert "#7c3aed" in resp.text
     assert "CA UTAP" not in resp.text
 
 

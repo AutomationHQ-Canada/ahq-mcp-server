@@ -1,7 +1,7 @@
 """
 Serves the plugin's skills as MCP prompts, so hosted/remote clients (which can't install the
 Claude Code plugin) still get the curated workflows over the wire. Clients surface these as
-slash-command-like entries (VS Code: /mcp.ahq.<name>, Claude Desktop: the "+" menu).
+slash-command-like entries (VS Code: /mcp.<server>.<name>, Claude Desktop: the "+" menu).
 """
 
 from mcp.types import GetPromptResult, Prompt, PromptMessage, TextContent

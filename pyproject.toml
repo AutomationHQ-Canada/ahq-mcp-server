@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ahq-mcp-server"
-version = "2.0.0"
-description = "AutomationHQ MCP server — AI-powered test script generation"
+version = "2.1.0"
+description = "TestBots.ai MCP server — AI-powered test script generation"
 requires-python = ">=3.11"
 dependencies = [
     "mcp>=1.0.0,<2.0.0",  # 2.0.0 (2026-07-31) dropped the @server.list_tools()/@server.call_tool() decorator API and lowlevel.server.request_ctx for a constructor-callback style — pin to 1.x until that migration is deliberately scoped

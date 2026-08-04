@@ -1,6 +1,6 @@
 ---
 name: ahq-gen-from-requirements
-description: Generate AHQ test scripts from a requirements document (PDF/DOCX/XLSX/CSV/TXT)
+description: Generate TestBots test scripts from a requirements document (PDF/DOCX/XLSX/CSV/TXT)
 tools:
   - mcp__ahq-mcp-server__extract_requirements
   - mcp__ahq-mcp-server__get_context
@@ -16,7 +16,7 @@ tools:
 ---
 
 ## When to use this skill
-The user has a requirements doc, user story export, or spec file and wants AHQ test scripts
+The user has a requirements doc, user story export, or spec file and wants TestBots test scripts
 generated from it — no live app/URL involved.
 
 ## What to collect before starting

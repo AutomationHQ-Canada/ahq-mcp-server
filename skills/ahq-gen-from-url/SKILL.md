@@ -1,6 +1,6 @@
 ---
 name: ahq-gen-from-url
-description: Generate AHQ test scripts by crawling a live web application URL
+description: Generate TestBots test scripts by crawling a live web application URL
 tools:
   - mcp__ahq-mcp-server__crawl_url
   - mcp__ahq-mcp-server__create_website

@@ -34,7 +34,7 @@ class AhqApiError(Exception):
         except (ValueError, TypeError):
             pass
         detail = message if message else body[:500]
-        super().__init__(f"AHQ API error {status_code} ({reason}): {detail}")
+        super().__init__(f"TestBots API error {status_code} ({reason}): {detail}")
 
 
 class BaseAhqClient:
@@ -105,13 +105,13 @@ class BaseAhqClient:
             except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.PoolTimeout) as exc:
                 if attempt == MAX_ATTEMPTS:
                     raise
-                logger.warning("AHQ request %s %s failed (%s), retrying (%d/%d)",
+                logger.warning("TestBots request %s %s failed (%s), retrying (%d/%d)",
                                 method, url, exc, attempt, MAX_ATTEMPTS)
                 await asyncio.sleep(BACKOFF_BASE_SECONDS * 2 ** (attempt - 1))
                 continue
 
             if r.status_code in RETRYABLE_STATUS_CODES and attempt < MAX_ATTEMPTS:
-                logger.warning("AHQ request %s %s got %d, retrying (%d/%d)",
+                logger.warning("TestBots request %s %s got %d, retrying (%d/%d)",
                                 method, url, r.status_code, attempt, MAX_ATTEMPTS)
                 await asyncio.sleep(BACKOFF_BASE_SECONDS * 2 ** (attempt - 1))
                 continue

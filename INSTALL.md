@@ -1,6 +1,6 @@
-# Installing the AutomationHQ Claude Code Plugin (ahq-skills)
+# Installing the TestBots.ai Claude Code Plugin (ahq-skills)
 
-Follow this guide to connect Claude Code to AutomationHQ. You get **136 MCP tools** (script
+Follow this guide to connect Claude Code to TestBots.ai. You get **137 MCP tools** (script
 generation, bot execution, reporting, version control, archive, roles, API/load testing, ...)
 plus **9 workflow skills** (`/ahq-test-architecture`, `/ahq-gen-from-url`,
 `/ahq-gen-from-requirements`, `/ahq-heal-locators`, `/ahq-run-bot`, `/ahq-schedule-bot`,
@@ -54,19 +54,19 @@ AHQ_API_TOKEN=<your API token>
 AHQ_PROJECT_ID=<your project UUID>
 ```
 
-Token: AHQ → **Administration → Settings → API Tokens → Create**. Either **Organization** or
+Token: TestBots → **Administration → Settings → API Tokens → Create**. Either **Organization** or
 **User** type works — but a User token is *not* permission-restricted; it still reaches everything
 in the organization.
-Project UUID: the **second** UUID in the AHQ web app's URL.
+Project UUID: the **second** UUID in the TestBots web app's URL.
 
 **4. Restart Claude Code**, then check:
 
 ```
-/mcp        →  ahq-mcp-server: connected, 136 tools
+/mcp        →  ahq-mcp-server: connected, 137 tools
 /ahq        →  9 skills autocomplete
 ```
 
-Ask *"list my AHQ websites"*. Real data back means you're done.
+Ask *"list my TestBots websites"*. Real data back means you're done.
 
 > Nothing else to install — no Python, no `pip`, no browser download. `uv` brings its own Python,
 > dependencies install on first launch, and Chromium downloads itself the first time you crawl a
@@ -80,7 +80,7 @@ Ask *"list my AHQ websites"*. Real data back means you're done.
 |---|---|---|
 | Claude Code v2+ | `claude --version` | https://claude.com/claude-code |
 | `uv` on PATH | `uv --version` | Windows: `winget install astral-sh.uv` · macOS/Linux: `curl -LsSf https://astral.sh/uv/install.sh \| sh` — no Python install needed, uv brings its own |
-| An AHQ API token (Organization or User) | — | AHQ UI → Administration → Settings → API Tokens (ask your admin if you can't create one) |
+| An TestBots API token (Organization or User) | — | TestBots UI → Administration → Settings → API Tokens (ask your admin if you can't create one) |
 
 > The `ahq-mcp-server` repo is public, so `/plugin marketplace add` in Step 1 works with no
 > GitHub login required. If it still fails with a git error, install `git` and retry.
@@ -157,7 +157,7 @@ AHQ_API_TOKEN=<your API token from Administration -> Settings -> API Tokens>
 AHQ_PROJECT_ID=<the UUID of the project to work in>
 ```
 
-> **Where to find `AHQ_PROJECT_ID`:** open the AHQ web app and enter your project — the browser
+> **Where to find `AHQ_PROJECT_ID`:** open the TestBots web app and enter your project — the browser
 > URL is `<host>/<orgId>/<projectId>/...`; the **second** UUID is the project ID.
 >
 > **Don't add anything else.** Your organization ID and the API gateway URL are both decoded from
@@ -166,7 +166,7 @@ AHQ_PROJECT_ID=<the UUID of the project to work in>
 > gateway** (e.g. `https://api-dev.automationhq.ai`), never the web app.
 >
 > **Moving between environments? Change BOTH lines.** The same plugin works against any
-> AutomationHQ environment — the gateway and your organization follow the token automatically, so
+> TestBots.ai environment — the gateway and your organization follow the token automatically, so
 > switching is just a matter of pasting a different one. But `AHQ_PROJECT_ID` does *not* follow
 > the token. Leave a project UUID from the old environment in place and every list comes back
 > empty with no error at all, because results are scoped to organization **and** project
@@ -176,10 +176,10 @@ AHQ_PROJECT_ID=<the UUID of the project to work in>
 
 1. **Restart Claude Code** (or run `/reload-plugins`) — the MCP server starts with the session
    (first start installs dependencies, give it a moment).
-2. Run `/mcp` → `ahq-mcp-server` should show **connected** with 136 tools.
+2. Run `/mcp` → `ahq-mcp-server` should show **connected** with 137 tools.
 3. Type `/ahq` → the 9 skills should autocomplete. Plugin skills are **namespaced**, so the full
    names are `/ahq-skills:ahq-dashboard`, `/ahq-skills:ahq-gen-from-url`, etc.
-4. Smoke test — ask Claude: *"list my AHQ websites"*. Real data back = you're done.
+4. Smoke test — ask Claude: *"list my TestBots websites"*. Real data back = you're done.
 
 > Don't be alarmed if `/reload-plugins` reports `0 skills` — that counter only covers standalone
 > (non-plugin) skills. Verify with `claude plugin details ahq-skills@automationhq` in a terminal:
@@ -210,7 +210,7 @@ cost up front.
 
 **Passwords used in test steps appear in plaintext in execution reports.**
 
-AutomationHQ's secret vault keeps a credential out of the stored test script — the step displays
+TestBots.ai's secret vault keeps a credential out of the stored test script — the step displays
 as `Enter [vault: my_password] for "Password field"` and the real value appears nowhere in the
 script document. That part works as expected.
 
@@ -226,7 +226,7 @@ not the full lifecycle.
 
 **What to do:** use dedicated test accounts with credentials you're willing to have visible in
 report history, and never reuse a production or personal password in a test script. Raise it with
-your AutomationHQ contact if report-level protection matters for your use case.
+your TestBots.ai contact if report-level protection matters for your use case.
 
 ---
 
@@ -241,9 +241,9 @@ that message first, it usually IS the fix.
 | `marketplace add` fails with a clone error | The repo is public, so this is usually just a missing/misconfigured local `git` install — install `git`, then retry. |
 | Tool errors say `ahq-mcp-server is not configured: ... is empty` | The `.env` is missing, in the wrong folder, or missing a value — the message names the variable and the expected file path. Fix, then `/reload-plugins`. |
 | Tool errors say `Got the web frontend's HTML instead of an API response` | The gateway URL is normally decoded from your token automatically. This means either your token predates the `urlDetails` claim (add `AHQ_BASE_URL` to `.env`, pointed at the API gateway, e.g. `https://api-dev.automationhq.ai`, never the web UI) or an `AHQ_BASE_URL` override you added yourself points at the web UI — remove or fix it. |
-| `/mcp` shows `ahq-mcp-server` **failed** | Usually `uv` missing from PATH (`uv --version` to check; restart the terminal/session after installing it). Verify the server itself with: `uv run --project <plugin folder> python -c "from src.mcp_server import TOOLS; print(len(TOOLS))"` → must print `136`. |
+| `/mcp` shows `ahq-mcp-server` **failed** | Usually `uv` missing from PATH (`uv --version` to check; restart the terminal/session after installing it). Verify the server itself with: `uv run --project <plugin folder> python -c "from src.mcp_server import TOOLS; print(len(TOOLS))"` → must print `137`. |
 | Tools work but `/ahq` skills don't appear | Restart the Claude Code session — skills register at startup. Full names are namespaced: `/ahq-skills:ahq-dashboard`. |
-| Every AHQ call returns 401 | Wrong/expired token in `.env`. Both Organization and User API tokens work; a raw browser-session JWT does not. |
+| Every TestBots call returns 401 | Wrong/expired token in `.env`. Both Organization and User API tokens work; a raw browser-session JWT does not. |
 | `crawl_url` errors about a missing browser | The first crawl downloads Chromium itself, so this normally self-resolves — that one call just takes a few minutes. The error only persists if the download actually failed (no disk space, no network), and it quotes the real reason. Manual fallback: `uv run playwright install chromium` in the plugin folder. |
 | Data lands in the wrong org | Not possible via the token alone — the org ID is decoded from it. Check you were given a token for the right organization. |
 | Assets you created aren't visible in the web app (or vice versa) | Results are scoped to organization **and** project together, and a mismatched pair returns an empty result rather than an error. Check `AHQ_PROJECT_ID` matches the project you're looking at. |
