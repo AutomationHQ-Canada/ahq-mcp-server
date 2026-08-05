@@ -22,10 +22,17 @@ import httpx
 from src.clients.user_client import UserClient
 from src.config.ahq_services import settings
 from src.config.credentials import AhqCredentials
-from src.hosted.consent import sign_in
+from src.hosted.consent import _normalize_projects, sign_in
 
 CREDENTIALS_HOME = Path.home() / ".testbots"
 ENV_PATH = CREDENTIALS_HOME / ".env"
+
+_NEEDS_TERMINAL = (
+    "testbots-login needs an interactive terminal for the password prompt.\n"
+    # Plain ASCII: the Windows console codepage mangles an em dash into a replacement char.
+    "Run it in a terminal window, not through a pipe, a CI job, or an AI assistant\n"
+    "session, none of which can prompt for a password without capturing it."
+)
 
 
 def _write_env(token: str, project_id: str, base_url: str) -> None:
@@ -78,9 +85,23 @@ async def _run(base_url: str, force: bool) -> int:
         print(f"{ENV_PATH} already holds a token. Re-run with --force to mint another.")
         return 1
 
+    # Only catches the redirected-stdin case, and only where isatty is trustworthy — Windows
+    # reports NUL as a character device, so this is False there even with no console at all.
+    # The EOFError below is what actually fires on Windows.
+    if not sys.stdin.isatty():
+        print(_NEEDS_TERMINAL)
+        return 1
+
     print(f"Signing in to {base_url}\n")
-    email = input("Email: ").strip()
-    password = getpass.getpass("Password: ")
+    try:
+        email = input("Email: ").strip()
+        # No usable console means getpass reads the console device and blocks rather than
+        # falling back to a visible prompt. Refusing beats hanging, and both beat echoing the
+        # password into whatever is capturing output — a CI log, or an assistant transcript.
+        password = getpass.getpass("Password: ")
+    except EOFError:
+        print(f"\n{_NEEDS_TERMINAL}")
+        return 1
     if not email or not password:
         print("Email and password are both required.")
         return 1
@@ -107,9 +128,25 @@ async def _run(base_url: str, force: bool) -> int:
             print("\nSigned in, but this account is not attached to an organization.")
             return 1
 
+        # User-scoped first (what this person holds a role in), then org-wide, which is what
+        # the consent flow already used. Without the fallback an account with few or no
+        # per-project roles dead-ends on an organization full of projects: support@ has one
+        # role, on a project whose orgId is null, while its organization holds 54 — so this
+        # reported "no projects" where the hosted connector listed them all.
         projects = await client(org_id).list_projects_for_user(user_id)
         if not projects:
-            print("\nSigned in, but you have no projects yet.")
+            try:
+                projects = _normalize_projects(await client(org_id).list_projects())
+            except Exception:
+                projects = []
+        if not projects:
+            # Naming the organization matters: both lookups are org-scoped, so an account in a
+            # different organization than the user expects reads as a broken login rather than
+            # as the wrong org. Minting would not help either -- createOrgToken allows
+            # belongsToOrg || isOrgCreator, so this same organization is the only one reachable.
+            print(f"\nSigned in, but organization {org_id} has no projects, so there is "
+                  f"nothing to connect to.\nIf you expected projects here, check you are in "
+                  f"the organization you think you are.")
             return 1
         project = _choose(projects)
 
