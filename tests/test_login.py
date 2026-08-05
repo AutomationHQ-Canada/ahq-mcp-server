@@ -87,3 +87,34 @@ def test_write_env_pins_the_gateway_only_when_it_differs(tmp_path, monkeypatch):
     login._write_env("fresh", "proj-9", base_url="https://other.example")
 
     assert "TESTBOTS_BASE_URL=https://other.example" in env.read_text(encoding="utf-8")
+
+
+def test_login_explains_the_token_cap_instead_of_raising_the_api_error(monkeypatch, capsys):
+    """The cap is the likeliest failure: per-org, only 5, and nothing revokes on replace."""
+    import asyncio
+    from src.clients.base_client import AhqApiError
+
+    async def boom(*a, **k):
+        raise AhqApiError(500, "Internal Server Error",
+                          '{"error": "Organization has reached the maximum token limit of 5."}')
+
+    monkeypatch.setattr(UserClient, "create_org_token", boom)
+    monkeypatch.setattr(UserClient, "registration_info",
+                        lambda self, email: _async({"userId": "u1", "organizationId": "org-1"}))
+    monkeypatch.setattr(UserClient, "list_projects_for_user",
+                        lambda self, uid: _async([{"id": "p1", "name": "Only"}]))
+    monkeypatch.setattr(login, "sign_in", lambda *a, **k: _async("jwt"))
+    monkeypatch.setattr(login.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda *a: "someone@example.com")
+    monkeypatch.setattr(login.getpass, "getpass", lambda *a: "pw")
+    monkeypatch.setattr(login, "ENV_PATH", login.Path("nonexistent-for-this-test.env"))
+
+    assert asyncio.run(login._run("https://gw.example", force=True)) == 1
+    out = capsys.readouterr().out
+    assert "reached its limit" in out
+    assert "Administration" in out
+    assert "AhqApiError" not in out
+
+
+async def _async(value):
+    return value

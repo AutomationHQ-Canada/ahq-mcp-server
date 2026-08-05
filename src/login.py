@@ -19,6 +19,7 @@ from pathlib import Path
 
 import httpx
 
+from src.clients.base_client import AhqApiError
 from src.clients.user_client import UserClient
 from src.config.ahq_services import settings
 from src.config.credentials import AhqCredentials
@@ -157,7 +158,19 @@ async def _run(base_url: str, force: bool) -> int:
         project = _choose(projects)
 
         label = f"testbots-mcp-server ({os.environ.get('COMPUTERNAME') or os.uname().nodename})"
-        result = await client(org_id).create_org_token(org_id, user_id, base_url, label=label)
+        try:
+            result = await client(org_id).create_org_token(org_id, user_id, base_url, label=label)
+        except AhqApiError as exc:
+            # The cap is the single most likely failure here -- it is per-organization, low (5),
+            # and nothing revokes on replace, so any established org sits at it. Raising the raw
+            # API error buries a precise instruction under a stack-trace-shaped line.
+            if "token limit" not in str(exc).lower():
+                raise
+            print(f"\n{org_id} has reached its limit of active API tokens, so a new one "
+                  f"cannot be issued.\n\nDelete one you no longer use in the web app under "
+                  f"Administration -> Settings -> API Tokens,\nthen run this again. Nothing "
+                  f"has been changed and your existing tokens still work.")
+            return 1
 
     token = result.get("token") or ""
     if not token:
