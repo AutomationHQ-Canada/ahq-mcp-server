@@ -49,52 +49,74 @@ Choose **"Install for you (user scope)"**.
 > All nine slash commands changed prefix as well: `/ahq-run-bot` → `/testbots-run-bot`,
 > `/ahq-dashboard` → `/testbots-dashboard`, and so on. Your `.env` is untouched.
 
-**3. Add your credentials** — in a terminal:
+**3. Sign in** — in a **terminal window** (it asks for your password, so it can't run inside Claude
+Code or through a pipe):
 
 ```powershell
-mkdir $env:USERPROFILE\.testbots -Force                 # Windows
-notepad $env:USERPROFILE\.testbots\.env
-
-mkdir -p ~/.testbots                                    # macOS / Linux
-nano ~/.testbots/.env
+# Windows PowerShell — cd's into the plugin, whatever version you have
+cd (Get-ChildItem $env:USERPROFILE\.claude\plugins\cache\testbots\testbots-skills |
+    Sort-Object Name -Descending | Select-Object -First 1).FullName
+uv run --project . python -m src.login
 ```
 
-Put two lines in that file:
+```bash
+# macOS / Linux
+cd "$(ls -d ~/.claude/plugins/cache/testbots/testbots-skills/* | sort -V | tail -1)"
+uv run --project . python -m src.login
+```
+
+Enter your TestBots email and password, pick a project, done. It writes `~/.testbots/.env` for you.
+You never open the web app, never hunt for a token, and never paste a project UUID.
+
+What it does: signs you in, then uses that session **once** to create a **one-year API token** and
+saves only the token. The password is used for the single sign-in call and is not written anywhere.
+
+Expect this on success:
+
+```
+Signed in as Your Name.
+
+  organization  YOUR ORG
+  project       Your Project
+  API token     created (expires 2027-08-05)
+  saved to      C:\Users\you\.testbots\.env
+
+4 token slot(s) left in this organization.
+```
+
+Three things that can stop it:
+
+| Message | What to do |
+|---|---|
+| `has reached its limit of active API tokens` | Your organization allows only **5**. Delete one you don't use under **Administration → Settings → API Tokens**, then re-run. Established orgs are usually at the limit. |
+| `already holds a token` | You've already signed in. Nothing to do — or pass `--force` to mint another (spends a slot). |
+| `has no projects` | You're in a different organization than you expected. Both lookups are org-scoped, and signing in again won't change which org you're in. |
+
+<details>
+<summary><b>Prefer to paste a token yourself?</b></summary>
+
+Create `~/.testbots/.env` (Windows: `$env:USERPROFILE\.testbots\.env`) with two lines:
 
 ```
 TESTBOTS_API_TOKEN=<your API token>
 TESTBOTS_PROJECT_ID=<your project UUID>
 ```
 
-Or skip the token hunt entirely — from the plugin folder, run:
+Token: TestBots → **Administration → Settings → API Tokens → Create**. Either **Organization** or
+**User** type works — but a User token is *not* permission-restricted; it still reaches everything
+in the organization. Project UUID: the **second** UUID in the web app's URL.
 
-```
-uv run testbots-login
-```
-
-It prompts for your TestBots email and password, signs you in, mints a **one-year API token**, lets
-you pick a project, and writes `~/.testbots/.env` for you. **Your password is never stored** — it is
-used for the single sign-in call and then discarded; only the token is written.
-
-Two things to know: your organization has a **finite token limit**, so `testbots-login` refuses to
-run again once a token exists (pass `--force` if you really want a second one), and it prints how
-many slots are left. And you can only mint for an organization you belong to or created — if you get
-"User does not belong to this organization", ask whoever set the org up.
+</details>
 
 > **Already have a working install?** Nothing to do. `~/.ahq/.env` is still read and the
 > `AHQ_API_TOKEN` / `AHQ_PROJECT_ID` / `AHQ_BASE_URL` names still resolve — the TestBots ones are
 > additions, not replacements, and win only where both are set. Move when it suits you.
 
-Token: TestBots → **Administration → Settings → API Tokens → Create**. Either **Organization** or
-**User** type works — but a User token is *not* permission-restricted; it still reaches everything
-in the organization.
-Project UUID: the **second** UUID in the TestBots web app's URL.
-
 **4. Restart Claude Code**, then check:
 
 ```
 /mcp        →  testbots-mcp-server: connected, 137 tools
-/ahq        →  9 skills autocomplete
+/testbots   →  9 skills autocomplete
 ```
 
 Ask *"list my TestBots websites"*. Real data back means you're done.
@@ -111,9 +133,13 @@ Ask *"list my TestBots websites"*. Real data back means you're done.
 |---|---|---|
 | Claude Code v2+ | `claude --version` | https://claude.com/claude-code |
 | `uv` on PATH | `uv --version` | Windows: `winget install astral-sh.uv` · macOS/Linux: `curl -LsSf https://astral.sh/uv/install.sh \| sh` — no Python install needed, uv brings its own |
-| An TestBots API token (Organization or User) | — | TestBots UI → Administration → Settings → API Tokens (ask your admin if you can't create one) |
+| A TestBots account | you can sign in to the web app | ask your admin |
 
-> The `testbots-mcp-server` repo is public, so `/plugin marketplace add` in Step 1 works with no
+You do **not** need an API token up front — Step 3 creates one for you. You only need to visit
+Administration → Settings → API Tokens if you prefer to paste one yourself, or if your organization
+has hit its 5-token limit and you need to free a slot.
+
+> The `testbots-ai/mcp-server` repo is public, so `/plugin marketplace add` in Step 1 works with no
 > GitHub login required. If it still fails with a git error, install `git` and retry.
 
 ## Step 1 — Add the marketplace
@@ -143,29 +169,17 @@ The plugin clones itself to a fixed location:
 %USERPROFILE%\.claude\plugins\cache\testbots\testbots-skills\<version>\
 ```
 
-(e.g. `C:\Users\<you>\.claude\plugins\cache\testbots\testbots-skills\1.6.8` — **the last folder is
-the plugin version; check which one exists on your machine and use that below**).
+**The last folder is the plugin version and it changes on every update**, so don't hard-code it —
+the commands in Step 3 of the Quick start select the newest one for you. If you type a path by
+hand after an upgrade, you will run the old version and wonder why a fix didn't land.
 
 The server launches via `uv run`, which **installs all Python dependencies automatically on the
 first launch** (pinned by `uv.lock`, isolated from your system Python) — there is nothing to
-`pip install`. The only setup is your credentials file, and the recommended place for it is the
-**stable, version-independent** `~/.testbots/.env` — the server checks it on every start, and it
-**survives plugin upgrades** (a `.env` placed inside a plugin version folder dies with that
-folder on the next update):
+`pip install`. The only setup is your credentials, and `testbots-login` writes them for you.
 
-**Windows (PowerShell):**
-
-```powershell
-mkdir $env:USERPROFILE\.testbots -Force
-notepad $env:USERPROFILE\.testbots\.env   # fill in the two values below
-```
-
-**macOS / Linux:**
-
-```bash
-mkdir -p ~/.testbots
-nano ~/.testbots/.env   # fill in the two values below
-```
+They go in `~/.testbots/.env`, which is **stable and version-independent** — the server checks it
+on every start and it **survives plugin upgrades**. A `.env` placed inside a plugin version folder
+dies with that folder on the next update, which is why `testbots-login` never writes there.
 
 > **No browser install needed.** `crawl_url` and `heal_locator` drive a real Chromium, and the
 > first call to either downloads it automatically (~150 MB, a few minutes, once per
@@ -212,7 +226,7 @@ TESTBOTS_PROJECT_ID=<the UUID of the project to work in>
 1. **Restart Claude Code** (or run `/reload-plugins`) — the MCP server starts with the session
    (first start installs dependencies, give it a moment).
 2. Run `/mcp` → `testbots-mcp-server` should show **connected** with 137 tools.
-3. Type `/ahq` → the 9 skills should autocomplete. Plugin skills are **namespaced**, so the full
+3. Type `/testbots` → the 9 skills should autocomplete. Plugin skills are **namespaced**, so the full
    names are `/testbots-skills:testbots-dashboard`, `/testbots-skills:testbots-gen-from-url`, etc.
 4. Smoke test — ask Claude: *"list my TestBots websites"*. Real data back = you're done.
 
@@ -278,7 +292,10 @@ that message first, it usually IS the fix.
 | Tool errors say `Got the web frontend's HTML instead of an API response` | The gateway URL is normally decoded from your token automatically. This means either your token predates the `urlDetails` claim (add `TESTBOTS_BASE_URL` to `.env`, pointed at the API gateway, e.g. `https://api-dev.automationhq.ai`, never the web UI) or an `TESTBOTS_BASE_URL` override you added yourself points at the web UI — remove or fix it. |
 | `/mcp` shows `testbots-mcp-server` **failed** | Usually `uv` missing from PATH (`uv --version` to check; restart the terminal/session after installing it). Verify the server itself with: `uv run --project <plugin folder> python -c "from src.mcp_server import TOOLS; print(len(TOOLS))"` → must print `137`. |
 | Tools work but `/testbots` skills don't appear | Restart the Claude Code session — skills register at startup. Full names are namespaced: `/testbots-skills:testbots-dashboard`. |
-| Every TestBots call returns 401 | Wrong/expired token in `.env`. Both Organization and User API tokens work; a raw browser-session JWT does not. |
+| Every TestBots call returns 401 | Wrong/expired token in `.env`. Both Organization and User API tokens work; a raw browser-session JWT does not. Re-run `testbots-login` with `--force` to mint a fresh one. |
+| `testbots-login` says `has reached its limit of active API tokens` | Your organization allows 5 active tokens and nothing is freed automatically. Delete an unused one under Administration → Settings → API Tokens, then re-run. |
+| `testbots-login` says `has no projects` | You are signed in to a different organization than you expect. Both project lookups are org-scoped, so signing in again will not change it — check which organization the account belongs to. |
+| `testbots-login` hangs or says it needs a terminal | It has to prompt for a password, so it cannot run inside Claude Code, a pipe, or CI. Use a real terminal window. |
 | `crawl_url` errors about a missing browser | The first crawl downloads Chromium itself, so this normally self-resolves — that one call just takes a few minutes. The error only persists if the download actually failed (no disk space, no network), and it quotes the real reason. Manual fallback: `uv run playwright install chromium` in the plugin folder. |
 | Data lands in the wrong org | Not possible via the token alone — the org ID is decoded from it. Check you were given a token for the right organization. |
 | Assets you created aren't visible in the web app (or vice versa) | Results are scoped to organization **and** project together, and a mismatched pair returns an empty result rather than an error. Check `TESTBOTS_PROJECT_ID` matches the project you're looking at. |

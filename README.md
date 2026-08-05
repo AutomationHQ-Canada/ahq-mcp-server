@@ -70,12 +70,22 @@ The session then carries your own roles and permissions.
 > The slash commands were renamed too — `/ahq-run-bot` is now `/testbots-run-bot`, and so on for
 > all nine.
 
-Then put an API token and project id in `~/.testbots/.env`:
+Then sign in — in a **terminal window**, since it prompts for your password:
 
+```powershell
+cd (Get-ChildItem $env:USERPROFILE\.claude\plugins\cache\testbots\testbots-skills |
+    Sort-Object Name -Descending | Select-Object -First 1).FullName     # Windows
+cd "$(ls -d ~/.claude/plugins/cache/testbots/testbots-skills/* | sort -V | tail -1)"  # macOS/Linux
+
+uv run --project . python -m src.login
 ```
-TESTBOTS_API_TOKEN=<Administration → Settings → API Tokens → Create>
-TESTBOTS_PROJECT_ID=<the second UUID in the TestBots web app's URL>
-```
+
+Email, password, pick a project. It creates a one-year API token and writes `~/.testbots/.env` for
+you — no visit to the web app, no token to copy, no project UUID to paste. The password is used for
+the one sign-in call and is not written anywhere.
+
+Prefer to do it by hand? Put `TESTBOTS_API_TOKEN` (Administration → Settings → API Tokens → Create)
+and `TESTBOTS_PROJECT_ID` (the second UUID in the web app's URL) in `~/.testbots/.env` yourself.
 
 Restart Claude Code and check `/mcp`. Choose the plugin over the hosted connector when you need
 either of the two things a URL connection cannot do: run tests on a **test agent on your own
