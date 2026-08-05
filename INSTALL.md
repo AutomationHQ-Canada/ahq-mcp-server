@@ -108,6 +108,38 @@ in the organization. Project UUID: the **second** UUID in the web app's URL.
 
 </details>
 
+<details>
+<summary><b>Want a smaller, sharper tool set?</b> (optional, recommended for daily use)</summary>
+
+All 137 tool descriptions are sent to the model on **every** message — MCP has no way to load them
+on demand. That is a fixed **~16,000 tokens** per request, and 137 similarly-named tools for the
+model to choose between. Wrong picks between neighbours like `list_bots` and `list_performance_bots`
+return an empty list rather than an error, so they surface as a confident wrong answer.
+
+Add one line to `~/.testbots/.env`:
+
+```
+TESTBOTS_MCP_TOOL_PROFILE=core
+```
+
+| | Tools | Tokens per request |
+|---|---|---|
+| default | 137 | ~16,000 |
+| `core` | 57 | **~8,800** |
+
+`core` is defined as *"every bundled skill still works"* — a test reads each skill's own tool list
+and fails if one falls outside it, so no `/testbots-*` command can break. Left out entirely: API
+testing, load testing, contract testing, service virtualisation, chained workflows, the config
+vault, the tunnel, and admin tools (roles, archive, members).
+
+Need a group back? Add it: `core,api` or `core,performance`. Groups are `context`, `discovery`,
+`healing`, `authoring`, `planning`, `execution`, `scheduling`, `reporting`, `versioning`, `admin`,
+`vault`, `api`, `performance`, `contracts`, `mocks`, `workflows`, `tunnel`, `utility`. A name that
+isn't recognised falls back to all 137 rather than to none — a typo costs you the saving, never the
+tools. Remove the line to go back to everything.
+
+</details>
+
 > **Already have a working install?** Nothing to do. `~/.ahq/.env` is still read and the
 > `AHQ_API_TOKEN` / `AHQ_PROJECT_ID` / `AHQ_BASE_URL` names still resolve — the TestBots ones are
 > additions, not replacements, and win only where both are set. Move when it suits you.

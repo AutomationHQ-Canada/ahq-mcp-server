@@ -99,15 +99,15 @@ Guided, multi-step workflows shipped with the plugin. Each one is a slash comman
 
 | Skill | What it does |
 |---|---|
-| `/testbots-test-architecture` | Crawl a live app, derive modules, lay them out as Epics and Stories |
-| `/testbots-gen-from-url` | Generate test scripts by crawling a URL |
-| `/testbots-gen-from-requirements` | Generate test scripts from a PDF, DOCX, XLSX, CSV or TXT spec |
-| `/testbots-heal-locators` | Find locators broken by a UI change, propose a fix, apply on confirmation |
-| `/testbots-run-bot` | Execute a TestBot now and report the result |
-| `/testbots-schedule-bot` | Put a TestBot on a recurring cron schedule |
-| `/testbots-view-report` | Show the execution report for the last or a specific run |
-| `/testbots-view-performance` | Show performance and ROI metrics for a run |
-| `/testbots-dashboard` | Project overview — websites, scripts, bots, recent runs, queue state |
+| `/testbots-test-architecture` | Map a live app into Epics and Stories, and design a modular test architecture for it |
+| `/testbots-gen-from-url` | Explore a live web app and write test scripts for the flows it finds |
+| `/testbots-gen-from-requirements` | Read a requirements document and write test scripts that cover it (PDF/DOCX/XLSX/CSV/TXT) |
+| `/testbots-heal-locators` | Work out which locators a UI change broke, propose replacements, apply the ones you approve |
+| `/testbots-run-bot` | Run a TestBot now and report how it went, step by step |
+| `/testbots-schedule-bot` | Put a TestBot on a repeating schedule, described in plain English |
+| `/testbots-view-report` | Go through a finished run's results - which steps failed, and where |
+| `/testbots-view-performance` | Read the performance and ROI metrics from a run and say what they show |
+| `/testbots-dashboard` | Survey the whole project - apps, scripts, bots, recent runs and what is queued |
 
 ---
 
@@ -137,14 +137,14 @@ Guided, multi-step workflows shipped with the plugin. Each one is a slash comman
 ### Trimming the surface
 
 Every tool schema is serialized into the model's context on **every** message — MCP has no lazy
-schema loading. At 137 tools that is ~14.5k tokens of fixed overhead per turn, and, more
+schema loading. At 137 tools that is ~16k tokens of fixed overhead per turn, and, more
 importantly, 137 near-identical options for the model to choose between.
 
 Set a profile to advertise fewer:
 
 ```
-AHQ_MCP_TOOL_PROFILE=core        # 57 tools — half the payload, all 9 skills still work
-AHQ_MCP_TOOL_PROFILE=core,api    # add a group
+TESTBOTS_MCP_TOOL_PROFILE=core   # 57 tools — half the payload, all 9 skills still work
+TESTBOTS_MCP_TOOL_PROFILE=core,api # add a group
 ```
 
 Group names are the table above; see [`src/tool_groups.py`](src/tool_groups.py). Unset means
@@ -161,7 +161,7 @@ Copy [`.env.example`](.env.example) to `.env`. Never commit it.
 | `TESTBOTS_API_TOKEN` | stdio mode | Organization or User token from Administration → Settings → API Tokens |
 | `TESTBOTS_PROJECT_ID` | stdio mode | The only credential with no in-token equivalent |
 | `TESTBOTS_BASE_URL` | no | Derived from the token's own `urlDetails.baseUrl` claim; set only as a fallback, and only to the API gateway |
-| `AHQ_MCP_TOOL_PROFILE` | no | See above |
+| `TESTBOTS_MCP_TOOL_PROFILE` | no | See above (`AHQ_MCP_TOOL_PROFILE` still works) |
 | `AHQ_LOCAL_AGENT_WARMUP_SECONDS` | no | Default 15 — the local agent's `/ping` answers before its own startup finishes |
 | `LLM_API_KEY` | no | For tools that call a model directly |
 

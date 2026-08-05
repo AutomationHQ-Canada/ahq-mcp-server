@@ -81,7 +81,7 @@ class Settings(BaseSettings):
     # src/tool_groups.py). Empty = all of them, so nothing changes for anyone who doesn't set it.
     # Stdio only — hosted clients pass ?profile= on the MCP URL, since they configure a URL and
     # not this process's environment.
-    ahq_mcp_tool_profile: str = ""
+    ahq_mcp_tool_profile: str = _either("mcp_tool_profile")
 
     # --- Hosted (HTTP) mode only — all defaulted so stdio users and tests never notice them ---
     # Public URL this service is reachable at THROUGH the gateway, including the route prefix
