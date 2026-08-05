@@ -47,3 +47,25 @@ async def test_network_failure_downgrades_to_warning(monkeypatch):
     monkeypatch.setattr(DEFAULT_BUNDLE.user, "list_projects", fake_list_projects)
     message = await _check_project_in_org()
     assert message.startswith("WARNING")
+
+
+def test_list_my_projects_degrades_instead_of_surfacing_a_500():
+    """/users/me 500s for an ORGANIZATION token, which made the friendly guard unreachable.
+
+    The tool exists to disambiguate between several projects. A credential that names no user
+    has nothing to disambiguate, so that is an empty result with an explanation -- not an error.
+    """
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+    import src.mcp_server as m
+    from src.clients.base_client import AhqApiError
+
+    clients = MagicMock()
+    clients.user.get_current_user = AsyncMock(
+        side_effect=AhqApiError(500, "Internal Server Error", '{"message":"No value present"}'))
+
+    result = asyncio.run(m._dispatch("list_my_projects", {}, clients))
+
+    assert result["projects"] == []
+    assert "error" not in result
+    assert "ORGANIZATION" in result["note"]

@@ -1009,12 +1009,21 @@ async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: boo
 
     # Context
     if name == "list_my_projects":
-        me = await clients.user.get_current_user() or {}
+        # /users/me 500s for an ORGANIZATION token rather than returning an empty user, so the
+        # "could not identify" guard below was unreachable in exactly the case it was written
+        # for -- callers got a raw 500 instead. That is not an error worth surfacing: the tool
+        # exists to disambiguate between several projects, and a token that names no user has
+        # nothing to disambiguate.
+        try:
+            me = await clients.user.get_current_user() or {}
+        except AhqApiError:
+            me = {}
         user_id = me.get("userId") or me.get("id") or ""
         if not user_id:
-            return {"error": "Could not identify the signed-in user, so their projects cannot be "
-                             "listed. This is expected for ORGANIZATION API tokens, which name no "
-                             "user — use get_context instead."}
+            return {"projects": [], "note": (
+                "This credential names no user, so there are no per-user projects to choose "
+                "between — expected for an ORGANIZATION API token. The project in use is the "
+                "one configured for this session; call get_context to see it.")}
         return {"projects": await clients.user.list_projects_for_user(user_id)}
     if name == "get_context":
         return await _get_context(clients)
