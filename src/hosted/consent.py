@@ -93,6 +93,21 @@ _PAGE = """<!doctype html>
     cursor: pointer;
   }}
   button:hover {{ filter: brightness(0.87); }}
+  button[disabled] {{ opacity: 0.75; cursor: default; }}
+  button[disabled]:hover {{ filter: none; }}
+  .spinner {{
+    display: inline-block;
+    width: 1em;
+    height: 1em;
+    margin-right: 0.5rem;
+    vertical-align: -0.125em;
+    border: 2px solid rgba(255, 255, 255, 0.4);
+    border-top-color: #ffffff;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+  }}
+  @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
+  @media (prefers-reduced-motion: reduce) {{ .spinner {{ animation: none; }} }}
   .error {{ background: #fdecea; border: 1px solid #f5c6cb; color: var(--ahq-danger); padding: 0.6rem 0.75rem; border-radius: 4px; font-size: 0.9rem; }}
   .org {{ background: var(--ahq-primary-tint); padding: 0.6rem 0.75rem; border-radius: 4px; font-size: 0.9rem; }}
   .hint {{ color: var(--ahq-muted); font-size: 0.8rem; margin-top: 0.4rem; }}
@@ -108,7 +123,35 @@ _PAGE = """<!doctype html>
     <button type="submit">Authorize</button>
   </form>
 </div>
+{submit_script}
 </body></html>"""
+
+
+# Inserted after .format(), like _login_inputs' reveal script, so its braces need no escaping.
+#
+# Submitting the first screen costs three sequential gateway calls (sign-in, /users/me,
+# projects), so the wait is the normal case rather than an edge case, and an unchanged page
+# reads as a dead button. Disabling it also makes the double-click harmless — that second
+# POST would be a second live sign-in.
+_SUBMIT_SCRIPT = """<script>(function(){
+var form=document.querySelector("form");
+if(!form)return;
+var button=form.querySelector("button[type=submit]");
+if(!button)return;
+var idle=button.innerHTML;
+form.addEventListener("submit",function(){
+  if(button.disabled)return;
+  // Only the button is disabled, never the fields: a disabled control submits no value, so
+  // disabling the inputs here would post an empty form. The button carries no name.
+  button.disabled=true;
+  button.innerHTML='<span class="spinner"></span>Authorizing\\u2026';
+});
+// Back-button restores from bfcache with the DOM exactly as it was left, i.e. still
+// spinning on a request that is long finished. pageshow is the only event that fires.
+window.addEventListener("pageshow",function(event){
+  if(event.persisted){button.disabled=false;button.innerHTML=idle;}
+});
+})();</script>"""
 
 
 # Inline SVG rather than an <img>/icon font: the page must stay self-contained (no external
@@ -272,6 +315,7 @@ def _render(txn: str, client_name: str, partner_name: str, logo: str, primary_co
             txn=html.escape(txn, quote=True),
             token_field=token_field,
             project_field=project_field,
+            submit_script=_SUBMIT_SCRIPT,
         ),
         status_code=status,
     )
