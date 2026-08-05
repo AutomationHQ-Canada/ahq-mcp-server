@@ -92,7 +92,13 @@ async def _run(base_url: str, force: bool) -> int:
         print(_NEEDS_TERMINAL)
         return 1
 
-    print(f"Signing in to {base_url}\n")
+    # The gateway host is an implementation detail and currently still carries the old brand,
+    # so show the product name instead. An explicit --base-url is different: someone overriding
+    # the environment needs to see which one they actually got, or a prod/dev mix-up is silent.
+    if base_url == settings.ahq_base_url:
+        print("Signing in to TestBots.ai\n")
+    else:
+        print(f"Signing in to {base_url}\n")
     try:
         email = input("Email: ").strip()
         # No usable console means getpass reads the console device and blocks rather than
