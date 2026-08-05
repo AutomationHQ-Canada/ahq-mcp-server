@@ -912,12 +912,12 @@ spending another execution, and confirm epic/story reuse and script granularity 
 
 ## Tool profiles — `src/tool_groups.py` (v1.7.0)
 
-All 136 tool schemas are sent to the model on every request (MCP has no lazy schema loading):
-~14.9k tokens of fixed overhead, and 136 near-neighbours to disambiguate. A wrong pick between
+All 137 tool schemas are sent to the model on every request (MCP has no lazy schema loading):
+~14.9k tokens of fixed overhead, and 137 near-neighbours to disambiguate. A wrong pick between
 siblings like `list_bots`/`list_performance_bots` returns an empty list, not an error, so it
 surfaces as a confidently wrong answer rather than a failure.
 
-`list_tools()` now filters by an optional profile. Default is unchanged — omit it and all 136 are
+`list_tools()` now filters by an optional profile. Default is unchanged — omit it and all 137 are
 advertised.
 
 - **Hosted**: `?profile=core` on the MCP URL (the only lever connector clients have — they
@@ -926,11 +926,11 @@ advertised.
   is multi-tenant, and one deployment-wide value must not truncate the list for clients that never
   asked (pinned by `test_hosted_request_ignores_the_stdio_env_setting`).
 - A spec is comma-separated profiles and/or groups: `core`, `core,api`, `reporting`. Unknown
-  tokens fall back to **all 136**, never to an empty list — a typo costs the reduction, not the
+  tokens fall back to **all 137**, never to an empty list — a typo costs the reduction, not the
   tools, since an empty tool list reads as a broken server.
 - `get_context` is injected into every profile regardless of spec.
 
-**`core` (55 tools, 30,147 chars — half of `full`) is defined as "every bundled skill keeps
+**`core` (57 tools — roughly half of `full`) is defined as "every bundled skill keeps
 working"**, not as a taste judgment. `test_every_skill_works_under_the_core_profile` reads each
 `SKILL.md`'s own `tools:` frontmatter and fails if any declared tool falls outside `core`. If a
 skill gains a dependency, either bring the tool into `core` or move the skill out — do not delete
@@ -945,8 +945,8 @@ gateway re-validates on every call. Never use a profile to withhold a destructiv
 appear in any profile. Kept as a name→group table rather than a field on each `Tool` so adding a
 tool is a one-line edit and doesn't conflict with every branch in flight.
 
-Measured: `full` 136 tools / 59,466 chars / ~14.9k tokens; `core` 55 tools / 30,127 chars /
-~7.5k tokens. Measure with `model_dump(exclude_none=True, by_alias=True)` and compact JSON
+Measured 2026-08-05: `full` 137 tools / 64,191 chars / ~16.0k tokens; `core` 57 tools /
+35,193 chars / ~8.8k tokens. Measure with `model_dump(exclude_none=True, by_alias=True)` and compact JSON
 separators — a naive `model_dump()` keeps every unset field and overstates the real payload by
 ~29%.
 
