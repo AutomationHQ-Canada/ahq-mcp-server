@@ -2,8 +2,8 @@
 name: testbots-dashboard
 description: Show a full project overview — websites, scripts, bots, recent runs, queue state
 tools:
-  - mcp__ahq-mcp-server__get_context
-  - mcp__ahq-mcp-server__list_recent_runs
+  - mcp__testbots-mcp-server__get_context
+  - mcp__testbots-mcp-server__list_recent_runs
 ---
 
 ## When to use this skill

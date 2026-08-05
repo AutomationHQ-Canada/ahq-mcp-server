@@ -35,7 +35,7 @@ def test_status_no_auth_required(client):
     resp = client.get("/status")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["service"] == "ahq-mcp-server"
+    assert body["service"] == "testbots-mcp-server"
     assert "version" in body
     assert body["mode"] == "hosted"
     assert body["tool_count"] == len(TOOLS) - len(_HOSTED_UNSUPPORTED)

@@ -35,8 +35,8 @@ Prerequisites on the machine:
    and again after any playwright version bump (the package and browser build must match;
    playwright is pinned to a minor version in `pyproject.toml` for exactly this reason).
    Skippable if you never crawl.
-3. A `.env` in the plugin root with `AHQ_API_TOKEN` (an ORGANIZATION token from
-   Administration → Settings → API Tokens) and `AHQ_PROJECT_ID`. `AHQ_BASE_URL` is optional —
+3. A `.env` in the plugin root with `TESTBOTS_API_TOKEN` (an ORGANIZATION token from
+   Administration → Settings → API Tokens) and `TESTBOTS_PROJECT_ID`. `TESTBOTS_BASE_URL` is optional —
    the gateway URL is normally decoded from the token itself, see INSTALL.md. `.env` is never
    committed.
 
@@ -45,7 +45,7 @@ Prerequisites on the machine:
 From this repo's checkout:
 
 ```
-claude mcp add ahq-mcp-server -- python -m src.mcp_server
+claude mcp add testbots-mcp-server -- python -m src.mcp_server
 ```
 
 or add to any project's `.mcp.json`:
@@ -53,7 +53,7 @@ or add to any project's `.mcp.json`:
 ```json
 {
   "mcpServers": {
-    "ahq-mcp-server": {
+    "testbots-mcp-server": {
       "command": "python",
       "args": ["-m", "src.mcp_server"],
       "cwd": "C:/path/to/ahq-mcp-server"
@@ -105,7 +105,7 @@ Hosted env vars (see the Helm chart `values-*.yaml` + Secret):
 
 | Var | Where | Notes |
 |---|---|---|
-| `AHQ_BASE_URL` | ConfigMap | gateway URL the server calls TestBots through |
+| `TESTBOTS_BASE_URL` | ConfigMap | gateway URL the server calls TestBots through |
 | `AHQ_MCP_PUBLIC_BASE_URL` | ConfigMap | public URL incl. `/ahq-mcp-server` prefix |
 | `AHQ_MCP_AUTH_SECRET` | **Secret** `ahq-mcp-server-secrets` | REQUIRED; identical on every replica; startup fails without it |
 | `AHQ_MCP_RATE_LIMIT_PER_MIN` | ConfigMap | per-org token bucket, default 60 |

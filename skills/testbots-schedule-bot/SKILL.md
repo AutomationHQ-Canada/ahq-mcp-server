@@ -2,14 +2,14 @@
 name: testbots-schedule-bot
 description: Schedule a TestBot to run on a recurring cron schedule
 tools:
-  - mcp__ahq-mcp-server__get_context
-  - mcp__ahq-mcp-server__list_grids
-  - mcp__ahq-mcp-server__get_grid_capabilities
-  - mcp__ahq-mcp-server__convert_text_to_cron
-  - mcp__ahq-mcp-server__list_scheduler_recipient_emails
-  - mcp__ahq-mcp-server__schedule_bot_recurring
-  - mcp__ahq-mcp-server__list_schedulers
-  - mcp__ahq-mcp-server__cancel_schedule
+  - mcp__testbots-mcp-server__get_context
+  - mcp__testbots-mcp-server__list_grids
+  - mcp__testbots-mcp-server__get_grid_capabilities
+  - mcp__testbots-mcp-server__convert_text_to_cron
+  - mcp__testbots-mcp-server__list_scheduler_recipient_emails
+  - mcp__testbots-mcp-server__schedule_bot_recurring
+  - mcp__testbots-mcp-server__list_schedulers
+  - mcp__testbots-mcp-server__cancel_schedule
 ---
 
 ## When to use this skill

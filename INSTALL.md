@@ -52,19 +52,23 @@ Choose **"Install for you (user scope)"**.
 **3. Add your credentials** — in a terminal:
 
 ```powershell
-mkdir $env:USERPROFILE\.ahq -Force                 # Windows
-notepad $env:USERPROFILE\.ahq\.env
+mkdir $env:USERPROFILE\.testbots -Force                 # Windows
+notepad $env:USERPROFILE\.testbots\.env
 
-mkdir -p ~/.ahq                                    # macOS / Linux
-nano ~/.ahq/.env
+mkdir -p ~/.testbots                                    # macOS / Linux
+nano ~/.testbots/.env
 ```
 
 Put two lines in that file:
 
 ```
-AHQ_API_TOKEN=<your API token>
-AHQ_PROJECT_ID=<your project UUID>
+TESTBOTS_API_TOKEN=<your API token>
+TESTBOTS_PROJECT_ID=<your project UUID>
 ```
+
+> **Already have a working install?** Nothing to do. `~/.ahq/.env` is still read and the
+> `AHQ_API_TOKEN` / `AHQ_PROJECT_ID` / `AHQ_BASE_URL` names still resolve — the TestBots ones are
+> additions, not replacements, and win only where both are set. Move when it suits you.
 
 Token: TestBots → **Administration → Settings → API Tokens → Create**. Either **Organization** or
 **User** type works — but a User token is *not* permission-restricted; it still reaches everything
@@ -74,7 +78,7 @@ Project UUID: the **second** UUID in the TestBots web app's URL.
 **4. Restart Claude Code**, then check:
 
 ```
-/mcp        →  ahq-mcp-server: connected, 137 tools
+/mcp        →  testbots-mcp-server: connected, 137 tools
 /ahq        →  9 skills autocomplete
 ```
 
@@ -94,7 +98,7 @@ Ask *"list my TestBots websites"*. Real data back means you're done.
 | `uv` on PATH | `uv --version` | Windows: `winget install astral-sh.uv` · macOS/Linux: `curl -LsSf https://astral.sh/uv/install.sh \| sh` — no Python install needed, uv brings its own |
 | An TestBots API token (Organization or User) | — | TestBots UI → Administration → Settings → API Tokens (ask your admin if you can't create one) |
 
-> The `ahq-mcp-server` repo is public, so `/plugin marketplace add` in Step 1 works with no
+> The `testbots-mcp-server` repo is public, so `/plugin marketplace add` in Step 1 works with no
 > GitHub login required. If it still fails with a git error, install `git` and retry.
 
 ## Step 1 — Add the marketplace
@@ -130,22 +134,22 @@ the plugin version; check which one exists on your machine and use that below**)
 The server launches via `uv run`, which **installs all Python dependencies automatically on the
 first launch** (pinned by `uv.lock`, isolated from your system Python) — there is nothing to
 `pip install`. The only setup is your credentials file, and the recommended place for it is the
-**stable, version-independent** `~/.ahq/.env` — the server checks it on every start, and it
+**stable, version-independent** `~/.testbots/.env` — the server checks it on every start, and it
 **survives plugin upgrades** (a `.env` placed inside a plugin version folder dies with that
 folder on the next update):
 
 **Windows (PowerShell):**
 
 ```powershell
-mkdir $env:USERPROFILE\.ahq -Force
-notepad $env:USERPROFILE\.ahq\.env   # fill in the two values below
+mkdir $env:USERPROFILE\.testbots -Force
+notepad $env:USERPROFILE\.testbots\.env   # fill in the two values below
 ```
 
 **macOS / Linux:**
 
 ```bash
-mkdir -p ~/.ahq
-nano ~/.ahq/.env   # fill in the two values below
+mkdir -p ~/.testbots
+nano ~/.testbots/.env   # fill in the two values below
 ```
 
 > **No browser install needed.** `crawl_url` and `heal_locator` drive a real Chromium, and the
@@ -155,9 +159,13 @@ nano ~/.ahq/.env   # fill in the two values below
 > pre-warm it instead of paying that cost mid-request, run `uv run playwright install chromium`
 > from the plugin folder.
 
-> A `.env` inside the plugin version folder (or real environment variables `AHQ_API_TOKEN` etc.)
-> also works and overrides `~/.ahq/.env` — precedence: env vars > plugin-folder `.env` >
-> `~/.ahq/.env`. Use those only when you deliberately want a per-version or per-shell override.
+> A `.env` inside the plugin version folder (or real environment variables `TESTBOTS_API_TOKEN` etc.)
+> also works and overrides `~/.testbots/.env` — precedence: env vars > plugin-folder `.env` >
+> `~/.testbots/.env` > `~/.ahq/.env`. Use those only when you deliberately want a per-version or
+> per-shell override.
+>
+> `~/.ahq/.env` is the pre-rebrand location, still read so existing installs keep working. It sits
+> lowest, so creating the new file takes over without your having to delete the old one.
 
 > The very first session start after installing/updating takes a little longer while `uv`
 > resolves and installs dependencies; every start after that is instant (cached).
@@ -165,21 +173,21 @@ nano ~/.ahq/.env   # fill in the two values below
 Your `.env` needs two values:
 
 ```
-AHQ_API_TOKEN=<your API token from Administration -> Settings -> API Tokens>
-AHQ_PROJECT_ID=<the UUID of the project to work in>
+TESTBOTS_API_TOKEN=<your API token from Administration -> Settings -> API Tokens>
+TESTBOTS_PROJECT_ID=<the UUID of the project to work in>
 ```
 
-> **Where to find `AHQ_PROJECT_ID`:** open the TestBots web app and enter your project — the browser
+> **Where to find `TESTBOTS_PROJECT_ID`:** open the TestBots web app and enter your project — the browser
 > URL is `<host>/<orgId>/<projectId>/...`; the **second** UUID is the project ID.
 >
 > **Don't add anything else.** Your organization ID and the API gateway URL are both decoded from
-> the token itself. `AHQ_BASE_URL` is only needed as a fallback for an older token, and only if
+> the token itself. `TESTBOTS_BASE_URL` is only needed as a fallback for an older token, and only if
 > `/mcp` reports the token has no usable base URL — if you do set it, point it at the **API
 > gateway** (e.g. `https://api-dev.automationhq.ai`), never the web app.
 >
 > **Moving between environments? Change BOTH lines.** The same plugin works against any
 > TestBots.ai environment — the gateway and your organization follow the token automatically, so
-> switching is just a matter of pasting a different one. But `AHQ_PROJECT_ID` does *not* follow
+> switching is just a matter of pasting a different one. But `TESTBOTS_PROJECT_ID` does *not* follow
 > the token. Leave a project UUID from the old environment in place and every list comes back
 > empty with no error at all, because results are scoped to organization **and** project
 > together. Update the token and the project ID as a pair.
@@ -188,7 +196,7 @@ AHQ_PROJECT_ID=<the UUID of the project to work in>
 
 1. **Restart Claude Code** (or run `/reload-plugins`) — the MCP server starts with the session
    (first start installs dependencies, give it a moment).
-2. Run `/mcp` → `ahq-mcp-server` should show **connected** with 137 tools.
+2. Run `/mcp` → `testbots-mcp-server` should show **connected** with 137 tools.
 3. Type `/ahq` → the 9 skills should autocomplete. Plugin skills are **namespaced**, so the full
    names are `/testbots-skills:testbots-dashboard`, `/testbots-skills:testbots-gen-from-url`, etc.
 4. Smoke test — ask Claude: *"list my TestBots websites"*. Real data back = you're done.
@@ -207,7 +215,7 @@ In Claude Code (or a terminal with `claude plugin ...`):
 ```
 
 Then restart the session (or `/reload-plugins`) — that's it. If your credentials live in
-`~/.ahq/.env` (the recommended setup), **nothing else is needed**: the new version finds them
+`~/.testbots/.env` (the recommended setup), **nothing else is needed**: the new version finds them
 automatically. Only if you keep a `.env` inside the plugin version folder do you have to copy it
 into the new folder yourself.
 
@@ -251,14 +259,14 @@ that message first, it usually IS the fix.
 | Symptom | Cause / fix |
 |---|---|
 | `marketplace add` fails with a clone error | The repo is public, so this is usually just a missing/misconfigured local `git` install — install `git`, then retry. |
-| Tool errors say `ahq-mcp-server is not configured: ... is empty` | The `.env` is missing, in the wrong folder, or missing a value — the message names the variable and the expected file path. Fix, then `/reload-plugins`. |
-| Tool errors say `Got the web frontend's HTML instead of an API response` | The gateway URL is normally decoded from your token automatically. This means either your token predates the `urlDetails` claim (add `AHQ_BASE_URL` to `.env`, pointed at the API gateway, e.g. `https://api-dev.automationhq.ai`, never the web UI) or an `AHQ_BASE_URL` override you added yourself points at the web UI — remove or fix it. |
-| `/mcp` shows `ahq-mcp-server` **failed** | Usually `uv` missing from PATH (`uv --version` to check; restart the terminal/session after installing it). Verify the server itself with: `uv run --project <plugin folder> python -c "from src.mcp_server import TOOLS; print(len(TOOLS))"` → must print `137`. |
+| Tool errors say `testbots-mcp-server is not configured: ... is empty` | The `.env` is missing, in the wrong folder, or missing a value — the message names the variable and the expected file path. Fix, then `/reload-plugins`. |
+| Tool errors say `Got the web frontend's HTML instead of an API response` | The gateway URL is normally decoded from your token automatically. This means either your token predates the `urlDetails` claim (add `TESTBOTS_BASE_URL` to `.env`, pointed at the API gateway, e.g. `https://api-dev.automationhq.ai`, never the web UI) or an `TESTBOTS_BASE_URL` override you added yourself points at the web UI — remove or fix it. |
+| `/mcp` shows `testbots-mcp-server` **failed** | Usually `uv` missing from PATH (`uv --version` to check; restart the terminal/session after installing it). Verify the server itself with: `uv run --project <plugin folder> python -c "from src.mcp_server import TOOLS; print(len(TOOLS))"` → must print `137`. |
 | Tools work but `/testbots` skills don't appear | Restart the Claude Code session — skills register at startup. Full names are namespaced: `/testbots-skills:testbots-dashboard`. |
 | Every TestBots call returns 401 | Wrong/expired token in `.env`. Both Organization and User API tokens work; a raw browser-session JWT does not. |
 | `crawl_url` errors about a missing browser | The first crawl downloads Chromium itself, so this normally self-resolves — that one call just takes a few minutes. The error only persists if the download actually failed (no disk space, no network), and it quotes the real reason. Manual fallback: `uv run playwright install chromium` in the plugin folder. |
 | Data lands in the wrong org | Not possible via the token alone — the org ID is decoded from it. Check you were given a token for the right organization. |
-| Assets you created aren't visible in the web app (or vice versa) | Results are scoped to organization **and** project together, and a mismatched pair returns an empty result rather than an error. Check `AHQ_PROJECT_ID` matches the project you're looking at. |
+| Assets you created aren't visible in the web app (or vice versa) | Results are scoped to organization **and** project together, and a mismatched pair returns an empty result rather than an error. Check `TESTBOTS_PROJECT_ID` matches the project you're looking at. |
 
 ## For developers (working ON the server, not just using it)
 

@@ -7,10 +7,16 @@ broke, open a pull request — no TestBots.ai web UI needed.
 
 **137 tools** across 18 domains, plus **9 guided workflow skills** for Claude Code.
 
-> **On the name.** The MCP server still identifies itself as `ahq-mcp-server` — that string is in
-> the connection URL, in `/mcp` output, and prefixes every tool name. It is deliberately unchanged
-> for now: renaming it invalidates every configured connector at once, so it is batched with the
-> move to a TestBots.ai hostname rather than broken twice.
+> **On the name.** The MCP server now identifies itself as `testbots-mcp-server` in `/mcp` output
+> and as the prefix on every tool name. Credentials moved with it: `~/.testbots/.env` and
+> `TESTBOTS_API_TOKEN` / `TESTBOTS_PROJECT_ID` / `TESTBOTS_BASE_URL`. **Existing installs keep
+> working** — `~/.ahq/.env` is still read, and the `AHQ_*` names still resolve, so there is
+> nothing you must change. The new names win where both are set.
+>
+> Still `ahq-`, deliberately: the hosted connector's `/ahq-mcp-server` gateway path, the
+> `AHQ_MCP_*` deployment settings, the ECR repository and the k8s resources. Each of those breaks
+> a *live* connection or a deploy rather than an install, so they move together with the
+> connector URL.
 
 ```
 "Crawl https://shop.example.com and generate smoke tests for the checkout flow"
@@ -64,11 +70,11 @@ The session then carries your own roles and permissions.
 > The slash commands were renamed too — `/ahq-run-bot` is now `/testbots-run-bot`, and so on for
 > all nine.
 
-Then put an API token and project id in `~/.ahq/.env`:
+Then put an API token and project id in `~/.testbots/.env`:
 
 ```
-AHQ_API_TOKEN=<Administration → Settings → API Tokens → Create>
-AHQ_PROJECT_ID=<the second UUID in the TestBots web app's URL>
+TESTBOTS_API_TOKEN=<Administration → Settings → API Tokens → Create>
+TESTBOTS_PROJECT_ID=<the second UUID in the TestBots web app's URL>
 ```
 
 Restart Claude Code and check `/mcp`. Choose the plugin over the hosted connector when you need
@@ -142,9 +148,9 @@ Copy [`.env.example`](.env.example) to `.env`. Never commit it.
 
 | Variable | Required | Notes |
 |---|---|---|
-| `AHQ_API_TOKEN` | stdio mode | Organization or User token from Administration → Settings → API Tokens |
-| `AHQ_PROJECT_ID` | stdio mode | The only credential with no in-token equivalent |
-| `AHQ_BASE_URL` | no | Derived from the token's own `urlDetails.baseUrl` claim; set only as a fallback, and only to the API gateway |
+| `TESTBOTS_API_TOKEN` | stdio mode | Organization or User token from Administration → Settings → API Tokens |
+| `TESTBOTS_PROJECT_ID` | stdio mode | The only credential with no in-token equivalent |
+| `TESTBOTS_BASE_URL` | no | Derived from the token's own `urlDetails.baseUrl` claim; set only as a fallback, and only to the API gateway |
 | `AHQ_MCP_TOOL_PROFILE` | no | See above |
 | `AHQ_LOCAL_AGENT_WARMUP_SECONDS` | no | Default 15 — the local agent's `/ping` answers before its own startup finishes |
 | `LLM_API_KEY` | no | For tools that call a model directly |
@@ -224,7 +230,7 @@ uv run playwright install chromium     # only if you'll use crawl_url or locator
 Register the local checkout with Claude Code:
 
 ```bash
-claude mcp add ahq-mcp-server-dev -- python -m src.mcp_server
+claude mcp add testbots-mcp-server-dev -- python -m src.mcp_server
 ```
 
 Run the tests:

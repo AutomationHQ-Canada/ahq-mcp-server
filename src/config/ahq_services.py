@@ -2,7 +2,21 @@
 import os
 from pathlib import Path
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _either(name: str) -> Field:
+    """Accept TESTBOTS_<NAME> or AHQ_<NAME>, preferring the first.
+
+    The three credentials below are the only settings a plugin user types by hand, so they are
+    the only ones the rebrand can rename without a coordinated deploy — every other AHQ_MCP_*
+    setting is written by DevOps into a ConfigMap. Renaming outright would strand every existing
+    .env silently: a missing token reads as "not configured", which looks like a broken install
+    rather than a renamed variable. Same approach as the connector cutover, which brought
+    api-dev.testbots.ai up while the automationhq.ai host kept answering.
+    """
+    return Field("", validation_alias=AliasChoices(f"testbots_{name}", f"ahq_{name}"))
 
 # The directory containing pyproject.toml / .env — resolved from this file's location, NOT the
 # process cwd. Claude Code (and other MCP clients) launch the server with an arbitrary cwd (in
@@ -15,16 +29,23 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 def _env_file_candidates() -> tuple[str, ...]:
     # Ordered lowest→highest precedence (pydantic-settings: later files win); real environment
-    # variables (AHQ_API_TOKEN etc.) beat every file:
-    #   1. ~/.ahq/.env — stable, version-INDEPENDENT credentials home. Each plugin version
+    # variables (TESTBOTS_API_TOKEN / AHQ_API_TOKEN etc.) beat every file:
+    #   1. ~/.ahq/.env — the pre-rebrand credentials home, still read so an existing install
+    #      keeps working untouched. Lowest precedence, so a user who creates the new path wins.
+    #   2. ~/.testbots/.env — stable, version-INDEPENDENT credentials home. Each plugin version
     #      installs into a fresh folder with no .env, so credentials placed only inside a plugin
     #      folder die on every upgrade (bit a user live, 2026-07-13). This path survives.
-    #   2. next to this package (repo checkout, or the plugin root when run via `-m` from there)
-    #   3. AHQ_MCP_HOME — set by the plugin's .mcp.json to ${CLAUDE_PLUGIN_ROOT}; covers the
-    #      pip-installed case where this file lives in site-packages and (2) points nowhere useful
-    #   4. process cwd, as a manual override
-    candidates = [str(Path.home() / ".ahq" / ".env"), str(REPO_ROOT / ".env")]
-    mcp_home = os.environ.get("AHQ_MCP_HOME")
+    #   3. next to this package (repo checkout, or the plugin root when run via `-m` from there)
+    #   4. TESTBOTS_MCP_HOME / AHQ_MCP_HOME — set by the plugin's .mcp.json to
+    #      ${CLAUDE_PLUGIN_ROOT}; covers the pip-installed case where this file lives in
+    #      site-packages and (3) points nowhere useful
+    #   5. process cwd, as a manual override
+    candidates = [
+        str(Path.home() / ".ahq" / ".env"),
+        str(Path.home() / ".testbots" / ".env"),
+        str(REPO_ROOT / ".env"),
+    ]
+    mcp_home = os.environ.get("TESTBOTS_MCP_HOME") or os.environ.get("AHQ_MCP_HOME")
     if mcp_home:
         candidates.append(str(Path(mcp_home) / ".env"))
     candidates.append(".env")
@@ -40,16 +61,16 @@ class Settings(BaseSettings):
 
     # No default on purpose: the only guessable value would be the web frontend, which is never
     # correct for API calls. Empty + the fail-fast guard in mcp_server beats silently wrong.
-    ahq_base_url: str = ""
+    ahq_base_url: str = _either("base_url")
     # Required for stdio mode (loaded from .env); left empty in hosted HTTP mode, where every
     # request supplies its own credentials via headers (AhqCredentials.from_headers) instead —
     # the container itself never holds a single tenant's token/project.
-    ahq_api_token: str = ""
+    ahq_api_token: str = _either("api_token")
     # No ahq_org_id here on purpose — org_id is always derived from the token's own
     # organizationId claim (see AhqCredentials.from_settings), never independently configured.
     # A stale/mismatched org_id here would silently write real data into the wrong organization,
     # since the gateway doesn't validate that a request's org-id header matches the token's claim.
-    ahq_project_id: str = ""
+    ahq_project_id: str = _either("project_id")
     llm_api_key: str = ""
     # Grace period check_local_agent_status waits out the first time it sees the local agent
     # online, before reporting ready — the agent's own async startup (token revalidation,

@@ -41,7 +41,7 @@ async def healthz(request):
 
 async def status(request):
     return JSONResponse({
-        "service": "ahq-mcp-server",
+        "service": "testbots-mcp-server",
         "version": _VERSION,
         "mode": "hosted",
         "tool_count": len(TOOLS) - len(_HOSTED_UNSUPPORTED),

@@ -2,9 +2,9 @@
 name: testbots-view-performance
 description: Show performance and ROI metrics from a test execution
 tools:
-  - mcp__ahq-mcp-server__get_context
-  - mcp__ahq-mcp-server__list_recent_runs
-  - mcp__ahq-mcp-server__get_performance_report
+  - mcp__testbots-mcp-server__get_context
+  - mcp__testbots-mcp-server__list_recent_runs
+  - mcp__testbots-mcp-server__get_performance_report
 ---
 
 ## When to use this skill

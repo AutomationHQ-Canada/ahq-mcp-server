@@ -2,10 +2,10 @@
 name: testbots-run-bot
 description: Execute a TestBot immediately and report the result
 tools:
-  - mcp__ahq-mcp-server__get_context
-  - mcp__ahq-mcp-server__execute_bot
-  - mcp__ahq-mcp-server__get_job_status
-  - mcp__ahq-mcp-server__get_execution_report
+  - mcp__testbots-mcp-server__get_context
+  - mcp__testbots-mcp-server__execute_bot
+  - mcp__testbots-mcp-server__get_job_status
+  - mcp__testbots-mcp-server__get_execution_report
 ---
 
 ## When to use this skill

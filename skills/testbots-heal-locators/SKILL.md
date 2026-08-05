@@ -2,9 +2,9 @@
 name: testbots-heal-locators
 description: Find test locators broken by a UI change and propose (then apply) a fix
 tools:
-  - mcp__ahq-mcp-server__scan_broken_locators
-  - mcp__ahq-mcp-server__heal_locator
-  - mcp__ahq-mcp-server__apply_locator_fix
+  - mcp__testbots-mcp-server__scan_broken_locators
+  - mcp__testbots-mcp-server__heal_locator
+  - mcp__testbots-mcp-server__apply_locator_fix
 ---
 
 ## When to use this skill

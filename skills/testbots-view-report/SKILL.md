@@ -2,10 +2,10 @@
 name: testbots-view-report
 description: Show the test execution report for the last run or a specific job
 tools:
-  - mcp__ahq-mcp-server__get_context
-  - mcp__ahq-mcp-server__list_recent_runs
-  - mcp__ahq-mcp-server__get_execution_report
-  - mcp__ahq-mcp-server__get_execution_screenshots
+  - mcp__testbots-mcp-server__get_context
+  - mcp__testbots-mcp-server__list_recent_runs
+  - mcp__testbots-mcp-server__get_execution_report
+  - mcp__testbots-mcp-server__get_execution_screenshots
 ---
 
 ## When to use this skill

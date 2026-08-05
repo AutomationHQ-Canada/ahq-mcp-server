@@ -2,15 +2,15 @@
 name: testbots-test-architecture
 description: Discover a modular test architecture for a live application (crawl → modules → Epics/Stories), ported from testbotsai's Agent #1 "The Architect"
 tools:
-  - mcp__ahq-mcp-server__get_context
-  - mcp__ahq-mcp-server__crawl_url
-  - mcp__ahq-mcp-server__create_website
-  - mcp__ahq-mcp-server__create_page
-  - mcp__ahq-mcp-server__add_locators
-  - mcp__ahq-mcp-server__list_epics
-  - mcp__ahq-mcp-server__create_epic
-  - mcp__ahq-mcp-server__list_stories
-  - mcp__ahq-mcp-server__create_story
+  - mcp__testbots-mcp-server__get_context
+  - mcp__testbots-mcp-server__crawl_url
+  - mcp__testbots-mcp-server__create_website
+  - mcp__testbots-mcp-server__create_page
+  - mcp__testbots-mcp-server__add_locators
+  - mcp__testbots-mcp-server__list_epics
+  - mcp__testbots-mcp-server__create_epic
+  - mcp__testbots-mcp-server__list_stories
+  - mcp__testbots-mcp-server__create_story
 ---
 
 ## When to use this skill

@@ -21,7 +21,7 @@ from src.tools.crawl_url import crawl_url as _crawl_url
 from src.tools.extract_requirements import extract_requirements as _extract_requirements
 from src.tools.heal_locator import heal_locator as _heal_locator
 
-server = Server("ahq-mcp-server")
+server = Server("testbots-mcp-server")
 
 
 class _HttpClientHolder:
@@ -826,7 +826,7 @@ def _require_stdio_config() -> None:
 
         stable = Path.home() / ".ahq" / ".env"
         raise RuntimeError(
-            f"ahq-mcp-server is not configured: {', '.join(missing)} is empty. "
+            f"testbots-mcp-server is not configured: {', '.join(missing)} is empty. "
             f"Create {stable} (recommended — survives plugin upgrades) or {REPO_ROOT / '.env'} "
             f"(copy .env.example and fill in the values — see INSTALL.md), then run "
             f"/reload-plugins (or restart the session)."
@@ -865,7 +865,7 @@ def _resolve_clients() -> tuple[ClientBundle, bool]:
         # The OAuth path can't hit this: /consent always resolves a project before issuing.
         if not creds.project_id:
             raise RuntimeError(
-                "ahq-mcp-server is not configured for this request: the 'projectId' header is "
+                "testbots-mcp-server is not configured for this request: the 'projectId' header is "
                 "missing. Header auth requires BOTH 'X-API-AUTH-KEY' and 'projectId'. If your "
                 "client can only send one header, connect via OAuth instead — its consent page "
                 "picks the project for you (see CONNECT.md)."
@@ -968,7 +968,7 @@ async def get_prompt(name: str, arguments: dict | None = None):
 
 async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: bool = False):
     if is_hosted and name in _HOSTED_UNSUPPORTED:
-        return {"error": f"{name} is not available over the hosted MCP server yet — run ahq-mcp-server locally via stdio for this tool."}
+        return {"error": f"{name} is not available over the hosted MCP server yet — run testbots-mcp-server locally via stdio for this tool."}
 
     if name in VALIDATORS:
         try:
@@ -1597,19 +1597,19 @@ async def main():
     except RuntimeError as e:
         # Keep serving (so tool calls return the same actionable error instead of the client
         # showing an opaque "server failed to start"), but say it loudly once up front.
-        print(f"[ahq-mcp-server] NOT CONFIGURED: {e}", file=sys.stderr)
+        print(f"[testbots-mcp-server] NOT CONFIGURED: {e}", file=sys.stderr)
     else:
-        print(f"[ahq-mcp-server] base_url={DEFAULT_BUNDLE.asset._credentials.base_url} "
+        print(f"[testbots-mcp-server] base_url={DEFAULT_BUNDLE.asset._credentials.base_url} "
               f"project={settings.ahq_project_id}", file=sys.stderr)
         try:
             me = await DEFAULT_BUNDLE.asset.validate_token()
             name = me.get("name") or me.get("userId", "unknown")
-            print(f"[ahq-mcp-server] Connected as: {name}", file=sys.stderr)
+            print(f"[testbots-mcp-server] Connected as: {name}", file=sys.stderr)
         except Exception as e:
-            print(f"[ahq-mcp-server] WARNING: Token validation failed: {e}", file=sys.stderr)
+            print(f"[testbots-mcp-server] WARNING: Token validation failed: {e}", file=sys.stderr)
         mismatch = await _check_project_in_org()
         if mismatch:
-            print(f"[ahq-mcp-server] {mismatch}", file=sys.stderr)
+            print(f"[testbots-mcp-server] {mismatch}", file=sys.stderr)
 
     async with stdio_server() as (read_stream, write_stream):
         await server.run(read_stream, write_stream, server.create_initialization_options())

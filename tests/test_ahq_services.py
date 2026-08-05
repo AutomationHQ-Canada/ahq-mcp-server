@@ -66,3 +66,48 @@ def test_module_level_svc_constants_derive_from_default_settings():
     assert ahq_services.ASSET_SVC == ahq_services.settings.ahq_gw_prefix_asset
     assert ahq_services.TEST_MGMT_SVC == ahq_services.settings.ahq_gw_prefix_test_mgmt
     assert ahq_services.LOCAL_EXEC_SVC == "/test-local-execution-services"
+
+
+def test_credentials_accept_both_the_testbots_and_ahq_variable_names(monkeypatch, tmp_path):
+    """The rebrand must not strand an existing .env.
+
+    A renamed variable fails silently: the token reads as empty, which surfaces as "not
+    configured" and looks like a broken install rather than a renamed setting. Both spellings
+    resolve, and the TestBots one wins when both are present.
+    """
+    for var in ("AHQ_API_TOKEN", "AHQ_PROJECT_ID", "AHQ_BASE_URL",
+                "TESTBOTS_API_TOKEN", "TESTBOTS_PROJECT_ID", "TESTBOTS_BASE_URL"):
+        monkeypatch.delenv(var, raising=False)
+    # An empty env_file, or a real ~/.ahq/.env on the dev machine masks the result.
+    empty = tmp_path / "empty.env"
+    empty.write_text("")
+
+    def settings() -> Settings:
+        return Settings(_env_file=str(empty))
+
+    monkeypatch.setenv("AHQ_API_TOKEN", "legacy-token")
+    monkeypatch.setenv("AHQ_PROJECT_ID", "legacy-project")
+    monkeypatch.setenv("AHQ_BASE_URL", "https://legacy.example")
+    s = settings()
+    assert (s.ahq_api_token, s.ahq_project_id, s.ahq_base_url) == (
+        "legacy-token", "legacy-project", "https://legacy.example")
+
+    monkeypatch.setenv("TESTBOTS_API_TOKEN", "current-token")
+    monkeypatch.setenv("TESTBOTS_PROJECT_ID", "current-project")
+    monkeypatch.setenv("TESTBOTS_BASE_URL", "https://current.example")
+    s = settings()
+    assert (s.ahq_api_token, s.ahq_project_id, s.ahq_base_url) == (
+        "current-token", "current-project", "https://current.example")
+
+
+def test_both_credential_homes_are_searched_with_testbots_taking_precedence():
+    """~/.ahq/.env keeps working; ~/.testbots/.env wins if a user creates it."""
+    from src.config.ahq_services import _env_file_candidates
+
+    candidates = _env_file_candidates()
+    ahq = next(i for i, c in enumerate(candidates) if c.endswith(r".ahq\.env")
+               or c.endswith(".ahq/.env"))
+    testbots = next(i for i, c in enumerate(candidates) if c.endswith(r".testbots\.env")
+                    or c.endswith(".testbots/.env"))
+    # pydantic-settings: later files win.
+    assert ahq < testbots

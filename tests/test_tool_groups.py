@@ -44,7 +44,7 @@ def _skill_tools() -> dict[str, set[str]]:
 
     Parsed here rather than via prompts.parse_skill_md because that parser deliberately skips
     indented lines — it only needs the scalars. The `tools:` list is exactly what this test is
-    about, so it reads the raw file. Entries are namespaced (mcp__ahq-mcp-server__list_bots);
+    about, so it reads the raw file. Entries are namespaced (mcp__testbots-mcp-server__list_bots);
     only the bare tool name is meaningful to us.
     """
     out: dict[str, set[str]] = {}

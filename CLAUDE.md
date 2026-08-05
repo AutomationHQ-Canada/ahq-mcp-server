@@ -14,6 +14,31 @@ corrections, MINOR for new tools/skills/launcher changes, MAJOR for breaking too
 Internal-only changes (evals, CI, design docs) need no bump. Full policy + release checklist +
 version history: `D:\MCP\AHQ_MCP_SERVER_MASTER_DESIGN.md` §14.
 
+## Naming: what is `testbots-` and what is still `ahq-`
+
+The rebrand moves in waves, split by what a rename actually breaks — an *install* (cheap, fixed by
+reinstalling) or a *live connection / deploy* (expensive, breaks people mid-session).
+
+Renamed: the MCP server id (`testbots-mcp-server` — `.mcp.json` key, `Server(...)`, `/status`'s
+`service`, and the `mcp__testbots-mcp-server__*` prefix in all 16 skill files), the plugin
+(`testbots-skills`), the marketplace (`testbots`), the 9 skills, and the stdio credentials:
+`~/.testbots/.env` plus `TESTBOTS_API_TOKEN` / `TESTBOTS_PROJECT_ID` / `TESTBOTS_BASE_URL`.
+
+**The credential rename is additive and must stay that way.** `_env_file_candidates()` still reads
+`~/.ahq/.env` (lowest precedence) and `_either()` gives each of the three settings an
+`AliasChoices("testbots_x", "ahq_x")`, so every pre-rebrand `.env` keeps working untouched.
+Deleting either fallback strands those users *silently* — a missing token reads as "not
+configured", which looks like a broken install rather than a renamed variable. Pinned by
+`test_credentials_accept_both_the_testbots_and_ahq_variable_names` and
+`test_both_credential_homes_are_searched_with_testbots_taking_precedence`.
+
+Deliberately still `ahq-`: the gateway route prefix `/ahq-mcp-server` (in every live connector
+URL), the `AHQ_MCP_*` deployment settings (DevOps ConfigMap/Secret), `TUNNEL_CLIENT_ID`, the
+distribution name in `pyproject.toml` (paired with `http_server`'s `_pkg_version` call), the ECR
+repository, and the k8s/ArgoCD resource names. These move as one batch with the connector URL —
+same reasoning the connector cutover used, where `api-dev.testbots.ai/mcp-server` came up while
+the `automationhq.ai` host kept answering rather than being switched off.
+
 ## Authentication
 - Header depends on WHICH credential is in play (`AhqCredentials.auth_scheme`):
   - **API token** (stdio/plugin, and legacy hosted headers) → `X-API-AUTH-KEY: <token>`. The

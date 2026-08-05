@@ -2,17 +2,17 @@
 name: testbots-gen-from-requirements
 description: Generate TestBots test scripts from a requirements document (PDF/DOCX/XLSX/CSV/TXT)
 tools:
-  - mcp__ahq-mcp-server__extract_requirements
-  - mcp__ahq-mcp-server__get_context
-  - mcp__ahq-mcp-server__list_epics
-  - mcp__ahq-mcp-server__create_epic
-  - mcp__ahq-mcp-server__list_stories
-  - mcp__ahq-mcp-server__create_story
-  - mcp__ahq-mcp-server__search_step_templates
-  - mcp__ahq-mcp-server__get_step_template
-  - mcp__ahq-mcp-server__create_test_script
-  - mcp__ahq-mcp-server__create_suite
-  - mcp__ahq-mcp-server__add_scripts_to_suite
+  - mcp__testbots-mcp-server__extract_requirements
+  - mcp__testbots-mcp-server__get_context
+  - mcp__testbots-mcp-server__list_epics
+  - mcp__testbots-mcp-server__create_epic
+  - mcp__testbots-mcp-server__list_stories
+  - mcp__testbots-mcp-server__create_story
+  - mcp__testbots-mcp-server__search_step_templates
+  - mcp__testbots-mcp-server__get_step_template
+  - mcp__testbots-mcp-server__create_test_script
+  - mcp__testbots-mcp-server__create_suite
+  - mcp__testbots-mcp-server__add_scripts_to_suite
 ---
 
 ## When to use this skill

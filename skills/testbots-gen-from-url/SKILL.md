@@ -2,17 +2,17 @@
 name: testbots-gen-from-url
 description: Generate TestBots test scripts by crawling a live web application URL
 tools:
-  - mcp__ahq-mcp-server__crawl_url
-  - mcp__ahq-mcp-server__create_website
-  - mcp__ahq-mcp-server__create_page
-  - mcp__ahq-mcp-server__add_locators
-  - mcp__ahq-mcp-server__search_step_templates
-  - mcp__ahq-mcp-server__get_step_template
-  - mcp__ahq-mcp-server__list_epics
-  - mcp__ahq-mcp-server__create_epic
-  - mcp__ahq-mcp-server__list_stories
-  - mcp__ahq-mcp-server__create_story
-  - mcp__ahq-mcp-server__create_test_script
+  - mcp__testbots-mcp-server__crawl_url
+  - mcp__testbots-mcp-server__create_website
+  - mcp__testbots-mcp-server__create_page
+  - mcp__testbots-mcp-server__add_locators
+  - mcp__testbots-mcp-server__search_step_templates
+  - mcp__testbots-mcp-server__get_step_template
+  - mcp__testbots-mcp-server__list_epics
+  - mcp__testbots-mcp-server__create_epic
+  - mcp__testbots-mcp-server__list_stories
+  - mcp__testbots-mcp-server__create_story
+  - mcp__testbots-mcp-server__create_test_script
 ---
 
 ## When to use this skill
