@@ -12,6 +12,7 @@ for a sign-in JWT, use that JWT once to mint an ORGANIZATION token, write only t
 password is never written anywhere and is not held after the first call.
 """
 import asyncio
+import datetime
 import getpass
 import os
 import sys
@@ -22,11 +23,15 @@ import httpx
 from src.clients.base_client import AhqApiError
 from src.clients.user_client import UserClient
 from src.config.ahq_services import settings
-from src.config.credentials import AhqCredentials
+from src.config.credentials import AhqCredentials, decode_ahq_token
 from src.hosted.consent import _normalize_projects, sign_in
 
 CREDENTIALS_HOME = Path.home() / ".testbots"
 ENV_PATH = CREDENTIALS_HOME / ".env"
+
+# Above this, the picker asks for a filter first. Chosen to fit a default terminal without
+# scrolling, so the whole list stays visible once it is short enough to print.
+_FILTER_THRESHOLD = 15
 
 _NEEDS_TERMINAL = (
     "testbots-login needs an interactive terminal for the password prompt.\n"
@@ -68,13 +73,32 @@ def _choose(projects: list) -> dict:
     if len(projects) == 1:
         print(f"\nProject: {projects[0]['name']}")
         return projects[0]
+
+    # A long-lived account can hold roles on scores of projects, most of them throwaway
+    # (one real org listed 88, of which 50+ were E2E_Project_<timestamp> fixtures). Printing
+    # all of them scrolls the one you want off the screen, so narrow before listing.
+    shown = projects
+    while len(shown) > _FILTER_THRESHOLD:
+        print(f"\n{len(shown)} projects.")
+        raw = input("Type part of a name to narrow the list, or Enter to show all: ").strip()
+        if not raw:
+            break
+        matches = [p for p in shown if raw.lower() in p["name"].lower()]
+        if not matches:
+            # Filter the full set, not the narrowed one, or a typo dead-ends the search.
+            matches = [p for p in projects if raw.lower() in p["name"].lower()]
+        if not matches:
+            print(f"Nothing matches {raw!r}.")
+            continue
+        shown = matches
+
     print("\nChoose a project:")
-    for i, p in enumerate(projects, 1):
+    for i, p in enumerate(shown, 1):
         print(f"  {i}. {p['name']}")
     while True:
-        raw = input(f"\nNumber [1-{len(projects)}]: ").strip()
-        if raw.isdigit() and 1 <= int(raw) <= len(projects):
-            return projects[int(raw) - 1]
+        raw = input(f"\nNumber [1-{len(shown)}]: ").strip()
+        if raw.isdigit() and 1 <= int(raw) <= len(shown):
+            return shown[int(raw) - 1]
         print("Not one of the options.")
 
 
@@ -178,12 +202,25 @@ async def _run(base_url: str, force: bool) -> int:
         return 1
 
     _write_env(token, project["id"], base_url)
-    print(f"\nWrote {ENV_PATH}")
-    print(f"  organization {org_id}")
-    print(f"  project      {project['name']}")
+
+    # Read back from the token itself rather than echoing what we sent. The organization name
+    # and expiry are only decided server-side, so this is the one thing that confirms what was
+    # actually issued -- and the org UUID alone tells nobody which organization they landed in.
+    claims = decode_ahq_token(token)
+    org_name = claims.get("organizationName") or org_id
+    person = " ".join(p for p in (me.get("firstName"), me.get("lastName")) if p).strip()
+    expires = claims.get("exp")
+    expiry = f" (expires {datetime.date.fromtimestamp(expires)})" if expires else ""
+
+    print(f"\nSigned in as {person or email}.")
+    print(f"\n  organization  {org_name}")
+    print(f"  project       {project['name']}")
+    print(f"  API token     created{expiry}")
+    print(f"  saved to      {ENV_PATH}")
     if (remaining := result.get("remainingTokens")) is not None:
-        print(f"  {remaining} token slot(s) left in this organization")
-    print("\nRestart Claude Code, then run /mcp to confirm.")
+        print(f"\n{remaining} token slot(s) left in this organization.")
+    print("\nYou are all set. Restart Claude Code, then run /mcp -- it should show\n"
+          "testbots-mcp-server connected.")
     return 0
 
 

@@ -118,3 +118,41 @@ def test_login_explains_the_token_cap_instead_of_raising_the_api_error(monkeypat
 
 async def _async(value):
     return value
+
+
+def _projects(*names):
+    return [{"id": f"p{i}", "name": n} for i, n in enumerate(names)]
+
+
+def test_short_project_lists_are_shown_without_asking_to_filter(monkeypatch, capsys):
+    monkeypatch.setattr("builtins.input", lambda *a: "2")
+    got = login._choose(_projects("alpha", "beta", "gamma"))
+    assert got["name"] == "beta"
+    assert "Type part of a name" not in capsys.readouterr().out
+
+
+def test_long_project_lists_are_filtered_before_being_printed(monkeypatch, capsys):
+    """88 real projects, 50+ of them E2E_Project_<timestamp> fixtures, scrolled the useful
+    ones off screen."""
+    names = [f"E2E_Project_17714{i:05d}" for i in range(60)] + ["AHQ MASTER", "Studentink"]
+    answers = iter(["Studentink", "1"])
+    monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+
+    got = login._choose(_projects(*names))
+
+    assert got["name"] == "Studentink"
+    out = capsys.readouterr().out
+    assert "62 projects." in out
+    # the 60 fixtures must not have been printed
+    assert "E2E_Project_1771400000" not in out
+
+
+def test_a_typo_in_the_filter_does_not_dead_end(monkeypatch, capsys):
+    names = [f"Proj{i}" for i in range(30)] + ["Studentink"]
+    answers = iter(["nope", "Studentink", "1"])
+    monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+
+    got = login._choose(_projects(*names))
+
+    assert got["name"] == "Studentink"
+    assert "Nothing matches 'nope'." in capsys.readouterr().out
