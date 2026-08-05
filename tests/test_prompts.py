@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from src.prompts import SKILL_PROMPTS, get_skill_prompt, list_skill_prompts, parse_skill_md
 
 EXPECTED_SKILLS = {
@@ -27,7 +29,12 @@ def test_frontmatter_stripped_from_body():
 def test_names_and_descriptions_come_from_frontmatter():
     prompts = {p.name: p for p in list_skill_prompts()}
     assert set(prompts) == EXPECTED_SKILLS
-    assert prompts["testbots-run-bot"].description == "Execute a TestBot immediately and report the result"
+    # Pinned against the file rather than a literal: the point is that descriptions are READ
+    # from frontmatter, not hardcoded in prompts.py. A literal here fails on every copy edit,
+    # which teaches people to update the assertion without reading what it was protecting.
+    frontmatter = (Path("skills/testbots-run-bot/SKILL.md").read_text(encoding="utf-8")
+                   .split("description:", 1)[1].splitlines()[0].strip())
+    assert prompts["testbots-run-bot"].description == frontmatter
     assert all(p.description for p in prompts.values())
 
 

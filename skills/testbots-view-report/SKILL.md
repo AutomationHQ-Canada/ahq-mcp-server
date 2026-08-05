@@ -1,6 +1,6 @@
 ---
 name: testbots-view-report
-description: Show the test execution report for the last run or a specific job
+description: Go through a finished run's results - which steps failed, and where
 tools:
   - mcp__testbots-mcp-server__get_context
   - mcp__testbots-mcp-server__list_recent_runs

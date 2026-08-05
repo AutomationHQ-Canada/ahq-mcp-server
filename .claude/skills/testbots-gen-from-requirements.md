@@ -1,6 +1,6 @@
 ---
 name: testbots-gen-from-requirements
-description: Generate TestBots test scripts from a requirements document (PDF/DOCX/XLSX/CSV/TXT)
+description: Read a requirements document and write test scripts that cover it (PDF/DOCX/XLSX/CSV/TXT)
 tools:
   - mcp__testbots-mcp-server__extract_requirements
   - mcp__testbots-mcp-server__get_context

@@ -1,6 +1,6 @@
 ---
 name: testbots-run-bot
-description: Execute a TestBot immediately and report the result
+description: Run a TestBot now and report how it went, step by step
 tools:
   - mcp__testbots-mcp-server__get_context
   - mcp__testbots-mcp-server__execute_bot

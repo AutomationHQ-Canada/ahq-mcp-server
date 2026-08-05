@@ -1,6 +1,6 @@
 ---
 name: testbots-dashboard
-description: Show a full project overview — websites, scripts, bots, recent runs, queue state
+description: Survey the whole project - apps, scripts, bots, recent runs and what is queued
 tools:
   - mcp__testbots-mcp-server__get_context
   - mcp__testbots-mcp-server__list_recent_runs

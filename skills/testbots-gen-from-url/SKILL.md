@@ -1,6 +1,6 @@
 ---
 name: testbots-gen-from-url
-description: Generate TestBots test scripts by crawling a live web application URL
+description: Explore a live web app and write test scripts for the flows it finds
 tools:
   - mcp__testbots-mcp-server__crawl_url
   - mcp__testbots-mcp-server__create_website

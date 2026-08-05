@@ -1,6 +1,6 @@
 ---
 name: testbots-test-architecture
-description: Discover a modular test architecture for a live application (crawl → modules → Epics/Stories), ported from testbotsai's Agent #1 "The Architect"
+description: Map a live app into Epics and Stories, and design a modular test architecture for it
 tools:
   - mcp__testbots-mcp-server__get_context
   - mcp__testbots-mcp-server__crawl_url
@@ -20,9 +20,9 @@ straight to individual test scripts. Run this BEFORE `testbots-gen-from-url` whe
 architectural ("map out a test plan for X", "what should we test on this app") rather than
 "generate test scripts for X".
 
-This is the TestBots-native equivalent of testbotsai's Agent #1 ("The Architect"): same grounding
-discipline and module schema, but crawling with our own `crawl_url` and persisting the result as
-real Epics/Stories instead of a standalone UI artifact.
+Everything it proposes is grounded in pages `crawl_url` actually visited, and the result is
+persisted as real Epics and Stories rather than left as a standalone artifact — so the architecture
+is something the rest of the product can build on, not a document to re-key by hand.
 
 ## What to collect before starting
 - Target URL (required)
@@ -49,8 +49,8 @@ lives behind the login.
 2. Call `crawl_url(url, credentials, max_pages)`. This is the same crawler `testbots-gen-from-url`
    uses — real pages, titles, and locators, not a second/separate crawl implementation.
 
-3. **Apply grounding rules before writing anything** (ported directly from testbotsai's
-   `agent_test_architecture` prompt — this is the core value being carried over):
+3. **Apply grounding rules before writing anything.** These are the core of the skill — an
+   architecture that invents modules is worse than none, because it reads as authoritative:
    - Only produce modules, sub-modules, and test areas for pages/nav-labels/forms that actually
      appear in the `crawl_url` result. Never invent a module because apps "usually have" it
      (no "Settings" or "Search" module unless a page/form for it was actually crawled).

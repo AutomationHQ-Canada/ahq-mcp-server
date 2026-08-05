@@ -1,6 +1,6 @@
 ---
 name: testbots-schedule-bot
-description: Schedule a TestBot to run on a recurring cron schedule
+description: Put a TestBot on a repeating schedule, described in plain English
 tools:
   - mcp__testbots-mcp-server__get_context
   - mcp__testbots-mcp-server__list_grids

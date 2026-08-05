@@ -1,6 +1,6 @@
 ---
 name: testbots-heal-locators
-description: Find test locators broken by a UI change and propose (then apply) a fix
+description: Work out which locators a UI change broke, propose replacements, apply the ones you approve
 tools:
   - mcp__testbots-mcp-server__scan_broken_locators
   - mcp__testbots-mcp-server__heal_locator

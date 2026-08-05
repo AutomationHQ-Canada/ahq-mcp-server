@@ -1,6 +1,6 @@
 ---
 name: testbots-view-performance
-description: Show performance and ROI metrics from a test execution
+description: Read the performance and ROI metrics from a run and say what they show
 tools:
   - mcp__testbots-mcp-server__get_context
   - mcp__testbots-mcp-server__list_recent_runs
