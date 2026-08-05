@@ -272,6 +272,60 @@ class TestMgmtClient(BaseAhqClient):
     async def get_bot(self, bot_id: str) -> dict:
         return await self.get(f"/rest/api/testbots/{bot_id}")
 
+    # The three values the platform actually recognises. Anything else is stored verbatim and
+    # then quietly ignored: resolveBrevoTemplateId returns 0, the `overrideId > 0` guard skips
+    # the override, and the report goes out on the default template. The WITH_FAILURES branch
+    # also never fires, so failedScriptsHtml is not injected and the mail loses its failure
+    # detail — with nothing anywhere reporting a problem. Seen live as "SUMMARY_CHARTS_TOTAL",
+    # a constant invented from the dropdown's label because no validated path existed.
+    REPORT_TEMPLATE_TYPES = (
+        "TEST_EXECUTION_REPORT_SUMMARY",
+        "TEST_EXECUTION_REPORT_WITH_FAILURES",
+        "TEST_EXECUTION_REPORT_EXECUTIVE",
+    )
+
+    async def get_bot_report_config(self, bot_id: str) -> dict:
+        # Returns server-side defaults rather than 404ing when a bot has never been configured.
+        return await self.get(f"/rest/api/testbots/{bot_id}/report-config")
+
+    async def save_bot_report_config(self, bot_id: str, recipients: list = None,
+                                     notify_on_pass: bool = None, notify_on_fail: bool = None,
+                                     attach_pdf: bool = None, template_type: str = None,
+                                     schedule_on_completion: bool = None) -> dict:
+        """Change some of a bot's report settings, leaving the rest as they are.
+
+        GET-merge-PUT, and not optional. saveReportConfig calls setNotifyOnPass/setNotifyOnFail/
+        setAttachPdf/setScheduleOnCompletion unconditionally, and those are Java `boolean`
+        PRIMITIVES — an absent JSON field deserializes to false, so a partial PUT silently
+        switches notifications off rather than leaving them alone. Only templateType is
+        null-guarded server-side. Same destructive-PUT class as update_common_function.
+        """
+        if template_type is not None and template_type not in self.REPORT_TEMPLATE_TYPES:
+            return {"error": f"template_type must be one of {', '.join(self.REPORT_TEMPLATE_TYPES)} "
+                             f"— got {template_type!r}. The server stores an unrecognised value "
+                             f"without complaint and then ignores it at send time, so the report "
+                             f"goes out on the default template."}
+
+        current = await self.get_bot_report_config(bot_id)
+        if not isinstance(current, dict):
+            current = {}
+        body = {
+            "testBotId": bot_id,
+            "recipients": current.get("recipients") or [],
+            "notifyOnPass": current.get("notifyOnPass", True),
+            "notifyOnFail": current.get("notifyOnFail", True),
+            "attachPdf": current.get("attachPdf", False),
+            "templateType": current.get("templateType") or self.REPORT_TEMPLATE_TYPES[1],
+            "scheduleOnCompletion": current.get("scheduleOnCompletion", True),
+        }
+        for key, value in (("recipients", recipients), ("notifyOnPass", notify_on_pass),
+                           ("notifyOnFail", notify_on_fail), ("attachPdf", attach_pdf),
+                           ("templateType", template_type),
+                           ("scheduleOnCompletion", schedule_on_completion)):
+            if value is not None:
+                body[key] = value
+        return await self.put(f"/rest/api/testbots/{bot_id}/report-config", json=body)
+
     async def create_test_bot(self, name: str, test_suites: list, description: str = "",
                               bot_type: dict = None, folder_id: str = None,
                               profile_id: str = None, number_of_retries: int = 0) -> dict:
