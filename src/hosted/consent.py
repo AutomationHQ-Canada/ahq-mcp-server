@@ -42,6 +42,10 @@ _PAGE = """<!doctype html>
     border-radius: 8px;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06);
     padding: 2rem;
+    /* Inherited, so it covers every value the server interpolates: the signed-in email,
+       a project name, the client name. An address has no break opportunity, so without
+       this a long one runs past the card edge instead of wrapping. */
+    overflow-wrap: break-word;
   }}
   .logo {{ display: block; height: 56px; margin: 0 auto 1.5rem; }}
   h1 {{ font-size: 1.15rem; font-weight: 600; text-align: center; margin: 0 0 1.5rem; }}
