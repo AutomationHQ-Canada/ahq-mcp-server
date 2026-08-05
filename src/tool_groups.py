@@ -103,7 +103,6 @@ GROUPS: dict[str, tuple[str, ...]] = {
     "reporting": (
         "list_recent_runs",
         "get_execution_report",
-        "get_execution_screenshots",
         "get_performance_report",
     ),
     "versioning": (

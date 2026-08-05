@@ -59,3 +59,38 @@ async def test_heal_locator_blocks_non_public_url_when_hosted():
 
     result = await heal_locator(FakeAssetClient(), "loc-1", "site-1", hosted=True)
     assert "error" in result
+
+
+def test_crawl_url_reports_authentication_outcome():
+    """A rejected sign-in must not look like an app that has one page.
+
+    Reported from the field: bad credentials came back as pages_crawled: 1 with no error, which
+    is indistinguishable from a single-page site, and cost roughly forty minutes chasing timing
+    and headless theories before the password turned out to be wrong.
+    """
+    import inspect
+    from src.tools import crawl_url as mod
+
+    source = inspect.getsource(mod._crawl)
+    # the outcome is recorded, not swallowed
+    assert '"attempted": True' in source
+    assert 'auth["succeeded"] = True' in source
+    # a changed URL alone must not count as success -- a GET form moves the URL without
+    # signing anyone in, so the surviving password field is what decides it
+    assert 'input[type="password"]' in source and 'auth["succeeded"] = False' in source
+    # and it reaches the caller
+    assert 'result["auth"] = auth' in inspect.getsource(mod._crawl)
+
+
+def test_crawl_url_returns_dom_text_alongside_rendered_text():
+    """CSS text-transform makes innerText a trap for text-based locators.
+
+    An antd/Tailwind sidebar reading "Test Management" in the DOM renders as "TEST MANAGEMENT";
+    a locator written against the rendered string matches nothing.
+    """
+    import inspect
+    from src.tools import crawl_url as mod
+
+    source = inspect.getsource(mod)
+    assert "textContent:" in source
+    assert "textTransform:" in source

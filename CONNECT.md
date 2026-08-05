@@ -254,9 +254,9 @@ with your TestBots.ai contact if report-level protection matters for your use ca
 
 ## Choosing which tools to enable
 
-This server exposes **137 tools**, and every one of their descriptions is sent to the model on
+This server exposes **136 tools**, and every one of their descriptions is sent to the model on
 every message — MCP has no way to load them on demand. That is roughly 15,000 tokens before your
-question is even read, and more importantly it is 137 near-neighbours for the model to tell apart.
+question is even read, and more importantly it is 136 near-neighbours for the model to tell apart.
 A wrong pick usually doesn't error; it returns an empty list, and the answer comes back confidently
 wrong.
 
@@ -268,7 +268,7 @@ Add `?profile=core` to the MCP URL:
 https://api-dev.testbots.ai/mcp-server/mcp?profile=core
 ```
 
-`core` is **57 tools, about half the payload** — the everyday loop (discover, author, run, report,
+`core` is **56 tools, about half the payload** — the everyday loop (discover, author, run, report,
 heal) and everything the bundled skills need. All 9 skills are guaranteed to work under it; a test
 enforces that, so a skill can never quietly outgrow the profile.
 
@@ -276,11 +276,11 @@ Compose extra groups onto it when you need them:
 
 | Spec | What you get |
 |---|---|
-| `?profile=core` | The everyday loop — 57 tools |
+| `?profile=core` | The everyday loop — 56 tools |
 | `?profile=core,api` | …plus API/REST testing |
 | `?profile=core,versioning` | …plus branches and pull requests |
 | `?profile=reporting` | A single group on its own — read-only run results |
-| *(omitted)* | All 137 — the default, unchanged |
+| *(omitted)* | All 136 — the default, unchanged |
 
 Groups: `context`, `discovery`, `healing`, `authoring`, `planning`, `execution`, `scheduling`,
 `reporting`, `versioning`, `admin`, `vault`, `api`, `performance`, `contracts`, `mocks`,
@@ -289,7 +289,7 @@ Groups: `context`, `discovery`, `healing`, `authoring`, `planning`, `execution`,
 A client that can't edit the URL can send an `X-AHQ-Tool-Profile` header instead. Running over
 stdio, set `AHQ_MCP_TOOL_PROFILE=core`.
 
-A misspelled profile falls back to all 137 rather than to none — you lose the reduction, never the
+A misspelled profile falls back to all 136 rather than to none — you lose the reduction, never the
 tools.
 
 > Filtering controls what the model is *shown*, not what it is *allowed* to do. Your signed-in
@@ -299,7 +299,7 @@ tools.
 ### Then narrow further in the client
 
 Clients that let you pick individual tools (Copilot Studio, M365 declarative agents) should still
-do so — an orchestrator choosing from 57 is better than from 137, but a dozen is better again.
+do so — an orchestrator choosing from 56 is better than from 136, but a dozen is better again.
 Keep destructive tools — `permanently_delete_asset`, `merge_pull_request`, `delete_test_script` —
 out of any agent aimed at general users.
 

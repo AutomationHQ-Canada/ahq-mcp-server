@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from src.config.ahq_services import settings
 from src.config.credentials import AhqCredentials
+from src.clients.base_client import AhqApiError
 from src.clients.bundle import ClientBundle, DEFAULT_BUNDLE
 from src.clients.generic_client import SERVICE_MAP
 from src.hosted.audit import audit_log
@@ -642,7 +643,7 @@ TOOLS = [
     Tool(name="list_execution_types", description="List execution types (e.g. Web/Mobile) and platform options.", inputSchema={"type": "object", "properties": {}}),
     Tool(name="create_environment", description="Create an execution Environment (name + app-under-test URL). execute_bot's executionConfiguration.baseUrl must reference an Environment ID — if list_environments has nothing for the target app, create one here first.", inputSchema={"type": "object", "properties": {"name": {"type": "string"}, "url": {"type": "string", "description": "The app-under-test URL this environment points at"}, "env_type": {"type": "string", "default": "Web"}, "description": {"type": "string"}}, "required": ["name", "url"]}),
     Tool(name="get_grid_capabilities", description="One call returns everything an execute_bot config needs for a grid: valid platforms (osType values), browsers, resolutions, and browser versions (pass browser to get its versions). Use this instead of guessing — values differ per grid ('Grid OS'/'latest' on plain Selenium, real OS/version lists on TestingBot/BrowserStack).", inputSchema={"type": "object", "properties": {"grid_id": {"type": "string"}, "testing_type": {"type": "string", "default": "Web"}, "browser": {"type": "string", "description": "Optional — include to also get this browser's valid versions"}}, "required": ["grid_id"]}),
-    Tool(name="execute_bot", description="Run a TestBot — on the cloud grid pool, or on this machine's own local agent if gridId resolves to it (detected automatically; routed directly to localhost:9202, bypassing the cloud, since the cloud has no way to deliver a job to a specific developer's machine). execution_configuration is validated locally before submission. REQUIRED: baseUrl (an ENVIRONMENT ID from list_environments/create_environment — NOT a URL, despite the name; the backend resolves it via environment lookup and a raw URL kills the run at report time), browser + browserVersion + osType (from get_grid_capabilities), gridId (from list_grids). Returns the background JOB id only — there is NO executionId yet, because the execution record is not created until the job starts. Poll get_job_status(jobId) with widening gaps (~30s, then 60s, then 120s) rather than a fixed long sleep; when it leaves PROCESSING, call list_recent_runs(bot_id) to get the executionId, then get_execution_report(executionId) for per-step pass/fail. Note that a job reporting SUCCEEDED means it ran, NOT that the tests passed — only the report says that. TO RUN A SCRIPT THAT LIVES ON A BRANCH, set execution_configuration.targetBranchName to that branch — this is the run-time branch selector (the same one the UI's run dialog offers). NEVER propose merging a branch into main just to run or verify a script; a merge is only for making a version permanent, and suggesting one as a prerequisite to testing sends the user through a PR they did not need.", inputSchema={"type": "object", "properties": {"bot_id": {"type": "string"}, "execution_configuration": {"type": "object", "description": "Required: baseUrl (Environment ID), browser, browserVersion, osType, gridId. Optional: resolution, type ('Web'), timeout (1-300, default 60), waitForElementTimeout (1-300, default 30), delayBetweenSteps (0-30), numberOfRetries (0-3), screenshot flags, targetBranchName, profileId.", "properties": {"baseUrl": {"type": "string", "description": "Environment ID (NOT a URL)"}, "browser": {"type": "string"}, "browserVersion": {"type": "string"}, "osType": {"type": "string"}, "gridId": {"type": "string", "description": "From list_grids, fetched THIS session — a grid id remembered from an earlier conversation may have been deleted since, and the run fails minutes in with a null gridUrlForExecution."}, "resolution": {"type": "string"}, "timeout": {"type": "integer"}, "targetBranchName": {"type": "string", "description": "Which branch's committed version to run. This is how you test a script on a branch — no merge required. Confirm it with get_scripts_for_branch when a recent edit is supposed to be included; execute_bot runs the last COMMITTED version, so an uncommitted edit will not appear."}}, "required": ["baseUrl", "browser", "browserVersion", "osType", "gridId"]}, "name": {"type": "string", "description": "Execution display name (defaults to the bot's name)"}, "profile_id": {"type": "string"}, "partial_execution": {"type": "boolean", "default": False}}, "required": ["bot_id", "execution_configuration"]}),
+    Tool(name="execute_bot", description="Run a TestBot — on the cloud grid pool, or on this machine's own local agent if gridId resolves to it (detected automatically; routed directly to localhost:9202, bypassing the cloud, since the cloud has no way to deliver a job to a specific developer's machine). execution_configuration is validated locally before submission. REQUIRED: baseUrl (an ENVIRONMENT ID from list_environments/create_environment — NOT a URL, despite the name; the backend resolves it via environment lookup and a raw URL kills the run at report time), browser + browserVersion + osType (from get_grid_capabilities), gridId (from list_grids). Returns the background JOB id only — there is NO executionId yet, because the execution record is not created until the job starts. Poll get_job_status(jobId) with widening gaps (~30s, then 60s, then 120s) rather than a fixed long sleep; when it leaves PROCESSING, call list_recent_runs(bot_id) to get the executionId, then get_execution_report(executionId) for per-step pass/fail. Note that a job reporting SUCCEEDED means it ran, NOT that the tests passed — only the report says that. TO RUN A SCRIPT THAT LIVES ON A BRANCH, set execution_configuration.targetBranchName to that branch — this is the run-time branch selector (the same one the UI's run dialog offers). NEVER propose merging a branch into main just to run or verify a script; a merge is only for making a version permanent, and suggesting one as a prerequisite to testing sends the user through a PR they did not need.", inputSchema={"type": "object", "properties": {"bot_id": {"type": "string"}, "execution_configuration": {"type": "object", "description": "Required: baseUrl (Environment ID), browser, browserVersion, osType, gridId. Optional: resolution, type ('Web'), timeout (1-300, default 60), waitForElementTimeout (1-300, default 30), delayBetweenSteps (0-30), numberOfRetries (0-3), screenshot flags, targetBranchName, profileId.", "properties": {"baseUrl": {"type": "string", "description": "Environment ID (NOT a URL)"}, "browser": {"type": "string"}, "browserVersion": {"type": "string"}, "osType": {"type": "string"}, "gridId": {"type": "string", "description": "From list_grids, fetched THIS session — a grid id remembered from an earlier conversation may have been deleted since, and the run fails minutes in with a null gridUrlForExecution."}, "resolution": {"type": "string"}, "timeout": {"type": "integer"}, "takeScreenshots": {"type": "boolean", "description": "Master switch for capture."}, "screenshotOnError": {"type": "boolean", "description": "Capture on a failed step (server default: true). This is what gives you visual evidence of a failure."}, "screenshotAfterEachStep": {"type": "boolean", "description": "Capture every step, not just failures. Verbose but decisive when a step passes and still did the wrong thing."}, "screenshotOnFinish": {"type": "boolean", "description": "Capture the final state (server default: true)."}, "targetBranchName": {"type": "string", "description": "Which branch's committed version to run. This is how you test a script on a branch — no merge required. Confirm it with get_scripts_for_branch when a recent edit is supposed to be included; execute_bot runs the last COMMITTED version, so an uncommitted edit will not appear."}}, "required": ["baseUrl", "browser", "browserVersion", "osType", "gridId"]}, "name": {"type": "string", "description": "Execution display name (defaults to the bot's name)"}, "profile_id": {"type": "string"}, "partial_execution": {"type": "boolean", "default": False}}, "required": ["bot_id", "execution_configuration"]}),
     Tool(name="get_execution_status", description="Progress/status poll for a running execution (by executionId from execute_bot). The lightweight endpoint reports UNKNOWN for finished runs — this tool automatically falls back to the detailed report's overall status in that case. For queue-position detail, use get_job_status with the jobId from execute_bot's response.", inputSchema={"type": "object", "properties": {"execution_id": {"type": "string"}}, "required": ["execution_id"]}),
     Tool(name="schedule_bot_recurring", description="Create a recurring schedule for a TestBot — the real scheduler backing both the Scheduler Admin page and each TestBot's own clock-icon dialog (test-management-services). REQUIRED: name (1-120 chars, the schedule's own name — ask the user if not given), cron (a real cron expression — use convert_text_to_cron first if the user described it in plain language, e.g. 'every day at 9am'), execution_configuration (same shape as execute_bot's: baseUrl/browser/browserVersion/osType/gridId required). emails (result-recipient list) is optional but should be asked for — check list_scheduler_recipient_emails for previously-used addresses first.", inputSchema={"type": "object", "properties": {"bot_id": {"type": "string"}, "name": {"type": "string", "description": "The schedule's own name, 1-120 chars"}, "emails": {"type": "array", "items": {"type": "string"}, "description": "Result-notification recipients"}, "cron": {"type": "string", "description": "Cron expression, e.g. '0 9 * * *'. Use convert_text_to_cron to derive one from plain language."}, "execution_configuration": {"type": "object", "properties": {"baseUrl": {"type": "string", "description": "Environment ID (NOT a URL)"}, "browser": {"type": "string"}, "browserVersion": {"type": "string"}, "osType": {"type": "string"}, "gridId": {"type": "string"}}, "required": ["baseUrl", "browser", "browserVersion", "osType", "gridId"]}}, "required": ["bot_id", "name", "cron", "execution_configuration"]}),
     Tool(name="cancel_schedule", description="Delete a recurring schedule created by schedule_bot_recurring (test-management-services' real scheduler).", inputSchema={"type": "object", "properties": {"schedule_id": {"type": "string"}}, "required": ["schedule_id"]}),
@@ -655,8 +656,7 @@ TOOLS = [
     Tool(name="list_recent_runs", description="List recent execution reports. With bot_id: that bot's execution history; without: the report list across bots. Start here to find the execution_id that get_execution_report needs.", inputSchema={"type": "object", "properties": {"bot_id": {"type": "string"}, "limit": {"type": "integer", "default": 10}}}),
 
     # Reporting
-    Tool(name="get_execution_report", description="Full per-step pass/fail report for a FINISHED execution, by execution_id. This is 'what did the last run do' / 'why did it fail'. Siblings: get_execution_status for a run still in progress, get_performance_report for timing/ROI on this same execution.", inputSchema={"type": "object", "properties": {"execution_id": {"type": "string"}}, "required": ["execution_id"]}),
-    Tool(name="get_execution_screenshots", description="Get screenshots from a test execution (useful for failures).", inputSchema={"type": "object", "properties": {"execution_id": {"type": "string"}}, "required": ["execution_id"]}),
+    Tool(name="get_execution_report", description="Screenshots come back INSIDE this report, as screenshotUrl on each iteration result — there is no separate screenshots endpoint. Capture is on by default for failed steps; set screenshotAfterEachStep on execute_bot to get them for passing steps too. Full per-step pass/fail report for a FINISHED execution, by execution_id. This is 'what did the last run do' / 'why did it fail'. Siblings: get_execution_status for a run still in progress, get_performance_report for timing/ROI on this same execution.", inputSchema={"type": "object", "properties": {"execution_id": {"type": "string"}}, "required": ["execution_id"]}),
     Tool(name="get_performance_report", description="Duration and ROI/time-saved metrics for an ordinary UI execution, by execution_id. Pass/fail detail is get_execution_report on the same id. Unrelated to get_performance_results, which polls a JMeter load test.", inputSchema={"type": "object", "properties": {"execution_id": {"type": "string"}}, "required": ["execution_id"]}),
 
     # Application context
@@ -964,6 +964,23 @@ async def get_prompt(name: str, arguments: dict | None = None):
     except LookupError:
         hosted = False
     return get_skill_prompt(name, hosted=hosted)
+
+
+async def _execution_id_for_job(clients: ClientBundle, job_id: str) -> str | None:
+    """The executionId for a background job id, or None if it can't be resolved.
+
+    Deliberately best-effort: this only runs after a direct lookup already failed, so a failure
+    here must re-raise the original error rather than replace it with a confusing one about
+    report listings.
+    """
+    try:
+        runs = await clients.test_mgmt.list_recent_reports(limit=50)
+    except Exception:
+        return None
+    for run in runs if isinstance(runs, list) else []:
+        if isinstance(run, dict) and run.get("backgroundJobId") == job_id:
+            return run.get("executionId") or run.get("_id") or run.get("id")
+    return None
 
 
 async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: bool = False):
@@ -1414,20 +1431,46 @@ async def _dispatch(name: str, args: dict, clients: ClientBundle, is_hosted: boo
         return await clients.test_mgmt.list_scheduler_recipient_emails()
     if name == "convert_text_to_cron":
         return await clients.test_mgmt.convert_text_to_cron(args["text"])
-    if name == "get_job_status":
-        return await clients.background.get_job_status(args["job_id"])
     if name == "list_recent_runs":
         return await clients.test_mgmt.list_recent_reports(args.get("bot_id"), args.get("limit", 10))
 
     # Reporting
+    if name == "get_job_status":
+        status = await clients.background.get_job_status(args["job_id"])
+        # This endpoint keeps saying PROCESSING well after a run has finished — observed
+        # reporting it ~11 minutes past a 45-second run, with chromedriver already exited. The
+        # docs correctly tell callers to poll it, so the staleness converts directly into
+        # waiting for nothing. An execution record carrying this job id is proof the run
+        # reached the executor, and its own status is the one that moved.
+        if isinstance(status, dict) and status.get("status") not in {
+                "SUCCEEDED", "FAILED", "DELETED"}:
+            execution_id = await _execution_id_for_job(clients, args["job_id"])
+            if execution_id:
+                status = {**status, "executionId": execution_id,
+                          "note": ("An execution record exists for this job, so the run has "
+                                   "started and this dispatch status may be stale. Call "
+                                   "get_execution_report(executionId) for the real state.")}
+        return status
     if name == "get_execution_report":
         # NOTE: this used to call clients.background.get_execution_report, a method that never
         # existed on BackgroundClient (only get_job_status/get_queue_status/list_recent_runs/
         # schedule_*/cancel_schedule do) — every call threw AttributeError. get_execution_results
         # on ExecutorClient (previously unwired to any Tool) is the real pass/fail report endpoint.
-        return await clients.executor.get_execution_results(args["execution_id"])
-    if name == "get_execution_screenshots":
-        return await clients.executor.get_execution_screenshots(args["execution_id"])
+        # execute_bot hands back a JOB id and nothing else, while this endpoint wants an
+        # EXECUTION id. Callers were told to run list_recent_runs and match on name and
+        # timestamp, which is guesswork that picks the wrong run as soon as two are in flight.
+        # Executions carry backgroundJobId, so the mapping is a lookup, not a guess.
+        execution_id = args["execution_id"]
+        try:
+            report = await clients.executor.get_execution_results(execution_id)
+        except AhqApiError:
+            resolved = await _execution_id_for_job(clients, execution_id)
+            if not resolved:
+                raise
+            report = await clients.executor.get_execution_results(resolved)
+            report = {**report, "resolvedFromJobId": execution_id,
+                      "executionId": resolved} if isinstance(report, dict) else report
+        return report
     if name == "get_performance_report":
         return await clients.executor.get_performance_report(args["execution_id"])
 

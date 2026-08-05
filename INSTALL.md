@@ -1,6 +1,6 @@
 # Installing the TestBots.ai Claude Code Plugin (testbots-skills)
 
-Follow this guide to connect Claude Code to TestBots.ai. You get **137 MCP tools** (script
+Follow this guide to connect Claude Code to TestBots.ai. You get **136 MCP tools** (script
 generation, bot execution, reporting, version control, archive, roles, API/load testing, ...)
 plus **9 workflow skills** (`/testbots-test-architecture`, `/testbots-gen-from-url`,
 `/testbots-gen-from-requirements`, `/testbots-heal-locators`, `/testbots-run-bot`, `/testbots-schedule-bot`,
@@ -111,8 +111,8 @@ in the organization. Project UUID: the **second** UUID in the web app's URL.
 <details>
 <summary><b>Want a smaller, sharper tool set?</b> (optional, recommended for daily use)</summary>
 
-All 137 tool descriptions are sent to the model on **every** message — MCP has no way to load them
-on demand. That is a fixed **~16,000 tokens** per request, and 137 similarly-named tools for the
+All 136 tool descriptions are sent to the model on **every** message — MCP has no way to load them
+on demand. That is a fixed **~16,000 tokens** per request, and 136 similarly-named tools for the
 model to choose between. Wrong picks between neighbours like `list_bots` and `list_performance_bots`
 return an empty list rather than an error, so they surface as a confident wrong answer.
 
@@ -124,8 +124,8 @@ TESTBOTS_MCP_TOOL_PROFILE=core
 
 | | Tools | Tokens per request |
 |---|---|---|
-| default | 137 | ~16,000 |
-| `core` | 57 | **~8,800** |
+| default | 136 | ~16,000 |
+| `core` | 56 | **~8,900** |
 
 `core` is defined as *"every bundled skill still works"* — a test reads each skill's own tool list
 and fails if one falls outside it, so no `/testbots-*` command can break. Left out entirely: API
@@ -135,7 +135,7 @@ vault, the tunnel, and admin tools (roles, archive, members).
 Need a group back? Add it: `core,api` or `core,performance`. Groups are `context`, `discovery`,
 `healing`, `authoring`, `planning`, `execution`, `scheduling`, `reporting`, `versioning`, `admin`,
 `vault`, `api`, `performance`, `contracts`, `mocks`, `workflows`, `tunnel`, `utility`. A name that
-isn't recognised falls back to all 137 rather than to none — a typo costs you the saving, never the
+isn't recognised falls back to all 136 rather than to none — a typo costs you the saving, never the
 tools. Remove the line to go back to everything.
 
 </details>
@@ -147,7 +147,7 @@ tools. Remove the line to go back to everything.
 **4. Restart Claude Code**, then check:
 
 ```
-/mcp        →  testbots-mcp-server: connected, 137 tools
+/mcp        →  testbots-mcp-server: connected, 136 tools
 /testbots   →  9 skills autocomplete
 ```
 
@@ -257,7 +257,7 @@ TESTBOTS_PROJECT_ID=<the UUID of the project to work in>
 
 1. **Restart Claude Code** (or run `/reload-plugins`) — the MCP server starts with the session
    (first start installs dependencies, give it a moment).
-2. Run `/mcp` → `testbots-mcp-server` should show **connected** with 137 tools.
+2. Run `/mcp` → `testbots-mcp-server` should show **connected** with 136 tools.
 3. Type `/testbots` → the 9 skills should autocomplete. Plugin skills are **namespaced**, so the full
    names are `/testbots-skills:testbots-dashboard`, `/testbots-skills:testbots-gen-from-url`, etc.
 4. Smoke test — ask Claude: *"list my TestBots websites"*. Real data back = you're done.
@@ -322,7 +322,7 @@ that message first, it usually IS the fix.
 | `marketplace add` fails with a clone error | The repo is public, so this is usually just a missing/misconfigured local `git` install — install `git`, then retry. |
 | Tool errors say `testbots-mcp-server is not configured: ... is empty` | The `.env` is missing, in the wrong folder, or missing a value — the message names the variable and the expected file path. Fix, then `/reload-plugins`. |
 | Tool errors say `Got the web frontend's HTML instead of an API response` | The gateway URL is normally decoded from your token automatically. This means either your token predates the `urlDetails` claim (add `TESTBOTS_BASE_URL` to `.env`, pointed at the API gateway, e.g. `https://api-dev.automationhq.ai`, never the web UI) or an `TESTBOTS_BASE_URL` override you added yourself points at the web UI — remove or fix it. |
-| `/mcp` shows `testbots-mcp-server` **failed** | Usually `uv` missing from PATH (`uv --version` to check; restart the terminal/session after installing it). Verify the server itself with: `uv run --project <plugin folder> python -c "from src.mcp_server import TOOLS; print(len(TOOLS))"` → must print `137`. |
+| `/mcp` shows `testbots-mcp-server` **failed** | Usually `uv` missing from PATH (`uv --version` to check; restart the terminal/session after installing it). Verify the server itself with: `uv run --project <plugin folder> python -c "from src.mcp_server import TOOLS; print(len(TOOLS))"` → must print `136`. |
 | Tools work but `/testbots` skills don't appear | Restart the Claude Code session — skills register at startup. Full names are namespaced: `/testbots-skills:testbots-dashboard`. |
 | Every TestBots call returns 401 | Wrong/expired token in `.env`. Both Organization and User API tokens work; a raw browser-session JWT does not. Re-run `testbots-login` with `--force` to mint a fresh one. |
 | `testbots-login` says `has reached its limit of active API tokens` | Your organization allows 5 active tokens and nothing is freed automatically. Delete an unused one under Administration → Settings → API Tokens, then re-run. |

@@ -48,8 +48,6 @@ class ExecutorClient(BaseAhqClient):
         # The previously-used /execution/{id}/results path does not exist anywhere.
         return await self.get(f"/rest/api/bots/execution/{execution_id}/detailed-results")
 
-    async def get_execution_screenshots(self, execution_id: str) -> dict:
-        return await self.get(f"/rest/api/screenshots/{execution_id}")
 
     async def get_performance_report(self, execution_id: str) -> dict:
         return await self.get(f"/rest/api/roi/{execution_id}")

@@ -62,6 +62,18 @@ _TVP_CLASS = "ai.automationhq.commons.entities.assets.TypeValuePair"
 # everywhere; results beyond 500 are out of scope for a discovery list.
 _LIST_ALL = {"offset": 0, "size": 500}
 
+# Field names vary across report shapes, so try each and fall back to leaving the order alone —
+# a wrong sort would be worse than the server's, since the caller cannot see that it happened.
+_RUN_TIME_KEYS = ("executionDate", "startTime", "createdAt", "createdTime", "executionStartTime")
+
+
+def _newest_first(runs: list) -> list:
+    key = next((k for k in _RUN_TIME_KEYS
+                if any(isinstance(r, dict) and r.get(k) for r in runs)), None)
+    if not key:
+        return runs
+    return sorted(runs, key=lambda r: str(r.get(key) or ""), reverse=True)
+
 
 def _normalize_step_parameters(steps):
     """
@@ -292,7 +304,11 @@ class TestMgmtClient(BaseAhqClient):
         # TestReportController (test-management). The old list_recent_runs hit
         # GET /background-jobs/execution-jobs, which never existed (404 forever).
         if bot_id:
-            return await self.get(f"/rest/api/testreports/{bot_id}")
+            # Trimmed here rather than by the server: this path takes no paging params, so a
+            # caller asking for the last run got every run the bot has ever had and `limit` was
+            # silently a lie. Newest first, so a trim keeps the ones that were asked for.
+            result = await self.get(f"/rest/api/testreports/{bot_id}")
+            return _newest_first(result)[:limit] if isinstance(result, list) else result
         result = await self.get("/rest/api/testreports/bots/list",
                                 params={"offset": 0, "size": limit, "sortBy": "name"})
         return result.get("content", result) if isinstance(result, dict) else result

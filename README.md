@@ -5,7 +5,7 @@ platform. It puts the platform behind plain language: ask an AI assistant to cra
 generate test scripts, run a TestBot, read the execution report, heal a locator a UI change
 broke, open a pull request — no TestBots.ai web UI needed.
 
-**137 tools** across 18 domains, plus **9 guided workflow skills** for Claude Code.
+**136 tools** across 18 domains, plus **9 guided workflow skills** for Claude Code.
 
 > **On the name.** The MCP server now identifies itself as `testbots-mcp-server` in `/mcp` output
 > and as the prefix on every tool name. Credentials moved with it: `~/.testbots/.env` and
@@ -137,18 +137,18 @@ Guided, multi-step workflows shipped with the plugin. Each one is a slash comman
 ### Trimming the surface
 
 Every tool schema is serialized into the model's context on **every** message — MCP has no lazy
-schema loading. At 137 tools that is ~16k tokens of fixed overhead per turn, and, more
-importantly, 137 near-identical options for the model to choose between.
+schema loading. At 136 tools that is ~16k tokens of fixed overhead per turn, and, more
+importantly, 136 near-identical options for the model to choose between.
 
 Set a profile to advertise fewer:
 
 ```
-TESTBOTS_MCP_TOOL_PROFILE=core   # 57 tools — half the payload, all 9 skills still work
+TESTBOTS_MCP_TOOL_PROFILE=core   # 56 tools — half the payload, all 9 skills still work
 TESTBOTS_MCP_TOOL_PROFILE=core,api # add a group
 ```
 
 Group names are the table above; see [`src/tool_groups.py`](src/tool_groups.py). Unset means
-all 137.
+all 136.
 
 ---
 

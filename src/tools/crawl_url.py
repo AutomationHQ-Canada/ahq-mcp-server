@@ -63,7 +63,18 @@ async def _extract_locators(page: Page) -> list[dict]:
             elements.push({
                 tag: el.tagName.toLowerCase(),
                 type: el.getAttribute('type') || null,
+                // innerText is what the user SEES, after CSS. textContent is what a text-based
+                // locator has to match. They differ whenever text-transform is in play — an
+                // antd/Tailwind sidebar reading "Test Management" in the DOM renders as
+                // "TEST MANAGEMENT", and a locator written against the rendered string matches
+                // nothing. Both are returned so the caller can pick, and textTransform names
+                // the reason when they disagree.
                 text: (el.innerText || el.value || '').trim().slice(0, 100),
+                textContent: (el.textContent || '').trim().slice(0, 100),
+                textTransform: (function () {
+                    var t = getComputedStyle(el).textTransform;
+                    return (t && t !== 'none') ? t : null;
+                })(),
                 ariaLabel: el.getAttribute('aria-label') || null,
                 placeholder: el.getAttribute('placeholder') || null,
                 id: el.id || null,
@@ -177,7 +188,14 @@ async def _crawl(url: str, credentials: dict, max_pages: int, hosted: bool) -> d
 
         post_login_url = None
         pre_auth_page = None
+        auth = None
         if credentials:
+            # Every failure below is caught and ignored so the crawl still returns the pre-auth
+            # pages, which are worth having. That silence is the problem: bad credentials came
+            # back as pages_crawled: 1 with no error, which is indistinguishable from an app that
+            # genuinely has one page — and sends the caller off debugging timing and headless
+            # theories instead of the password. Record what happened as we go and report it.
+            auth = {"attempted": True, "succeeded": False, "detail": None, "final_url": None}
             login_page = await context.new_page()
             await login_page.goto(url, wait_until="networkidle", timeout=30_000)
             # Capture the sign-in form BEFORE submitting it. This is the only moment it exists in
@@ -222,10 +240,27 @@ async def _crawl(url: str, credentials: dict, max_pages: int, hosted: bool) -> d
                 try:
                     await login_page.wait_for_url(lambda u: u != start_url, timeout=15_000)
                 except Exception:
-                    pass
+                    # Sounds the same for bad credentials and for a submit that never fired,
+                    # so report what was observed rather than guessing which.
+                    auth["detail"] = ("still on the sign-in URL 15s after submitting - the "
+                                      "credentials were most likely rejected")
                 await login_page.wait_for_load_state("networkidle", timeout=15_000)
-            except Exception:
-                pass
+                # A changed URL alone is not proof: a form that submits as GET, or posts back to
+                # itself, moves the URL while leaving you on the sign-in screen. A completed
+                # sign-in stops rendering a password field; a rejected one re-renders it with an
+                # error. That is the signal that distinguishes them.
+                if await login_page.locator('input[type="password"]').count():
+                    auth["succeeded"] = False
+                    auth["detail"] = auth["detail"] or (
+                        "a password field is still on the page after submitting — the "
+                        "credentials were most likely rejected")
+                elif auth["detail"] is None:
+                    auth["succeeded"] = True
+            except Exception as exc:
+                # Keep the type: str() on a Playwright timeout can be empty, which would render
+                # as "could not complete the sign-in form: " and say nothing at all.
+                auth["detail"] = (f"could not complete the sign-in form: "
+                                  f"{type(exc).__name__}: {exc}".rstrip(": "))
             # Where the login landed is the authenticated entry point, and it has to be crawled
             # explicitly. Starting the crawl from the caller's original url instead never leaves
             # the login screen on any app that keeps serving the login form at its pre-auth URL
@@ -233,6 +268,7 @@ async def _crawl(url: str, credentials: dict, max_pages: int, hosted: bool) -> d
             # login redirects to /inventory.html but "/" still renders the form, so a
             # credentialed crawl returned nothing but the three login-page fields.
             post_login_url = login_page.url
+            auth["final_url"] = post_login_url
             await login_page.close()
 
         queue = [url]
@@ -295,8 +331,13 @@ async def _crawl(url: str, credentials: dict, max_pages: int, hosted: bool) -> d
         await browser.close()
 
     total_locators = sum(p.get("total_valid", 0) for p in pages_data)
-    return {
+    result = {
         "pages_crawled": len([p for p in pages_data if "error" not in p]),
         "total_locators": total_locators,
         "pages": pages_data,
     }
+    if auth is not None:
+        if auth["succeeded"] and auth["detail"] is None:
+            auth["detail"] = "signed in and reached the authenticated area"
+        result["auth"] = auth
+    return result

@@ -1,6 +1,6 @@
 # Deploying / Installing the TestBots.ai MCP server
 
-Two ways to use this server with Claude Code. Both give you the same 137 MCP tools; the plugin
+Two ways to use this server with Claude Code. Both give you the same 136 MCP tools; the plugin
 additionally installs the curated workflow skills.
 
 > **Just want to install and use it?** Follow the step-by-step handover guide in
