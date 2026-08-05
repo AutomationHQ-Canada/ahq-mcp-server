@@ -105,3 +105,32 @@ class UserClient(BaseAhqClient):
         base = ARCHIVE_ENTITY_PATHS[entity_type]
         suffix = "" if entity_type == "locator" else "/permanent"
         return await self.delete(f"{base}/{asset_id}{suffix}", extra_headers=self._archive_headers())
+
+    async def create_org_token(self, org_id: str, user_id: str, base_url: str,
+                               label: str = "", expiry_minutes: int = 525600) -> dict:
+        """Mint a long-lived ORGANIZATION API token, returning the server's full response.
+
+        Called with a sign-in JWT as the credential, so a person can obtain a token without
+        opening the web UI. Three things about this endpoint are easy to get wrong:
+
+        - It reads `organizationid` and `userid` — all lowercase, unlike the `org-id` every
+          other controller in the platform uses.
+        - `urlDetails` is mandatory: TokenService.validateUrlDetails rejects an empty list with
+          "At least one microservice URL must be provided". Supplying `baseUrl` is also what
+          makes the minted token name its own environment, which is what lets every later run
+          resolve the gateway from the token instead of a configured setting.
+        - There is a per-organization token limit, and hitting it is a 400, not a queue. The
+          response's `remainingTokens` is the only warning a caller gets, so mint once and
+          store the result — never per run.
+
+        `expiry_minutes` defaults to the server's own default of 525600 (one year).
+        """
+        return await self.post(
+            "/rest/api/tokens/generate/org",
+            json={"username": label, "urlDetails": [{"key": "baseUrl", "value": base_url}]},
+            extra_headers={
+                "organizationid": org_id,
+                "userid": user_id,
+                "expiryMinutes": str(expiry_minutes),
+            },
+        )

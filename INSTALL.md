@@ -66,6 +66,21 @@ TESTBOTS_API_TOKEN=<your API token>
 TESTBOTS_PROJECT_ID=<your project UUID>
 ```
 
+Or skip the token hunt entirely — from the plugin folder, run:
+
+```
+uv run testbots-login
+```
+
+It prompts for your TestBots email and password, signs you in, mints a **one-year API token**, lets
+you pick a project, and writes `~/.testbots/.env` for you. **Your password is never stored** — it is
+used for the single sign-in call and then discarded; only the token is written.
+
+Two things to know: your organization has a **finite token limit**, so `testbots-login` refuses to
+run again once a token exists (pass `--force` if you really want a second one), and it prints how
+many slots are left. And you can only mint for an organization you belong to or created — if you get
+"User does not belong to this organization", ask whoever set the org up.
+
 > **Already have a working install?** Nothing to do. `~/.ahq/.env` is still read and the
 > `AHQ_API_TOKEN` / `AHQ_PROJECT_ID` / `AHQ_BASE_URL` names still resolve — the TestBots ones are
 > additions, not replacements, and win only where both are set. Move when it suits you.
