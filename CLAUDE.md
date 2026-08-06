@@ -32,6 +32,32 @@ configured", which looks like a broken install rather than a renamed variable. P
 `test_credentials_accept_both_the_testbots_and_ahq_variable_names` and
 `test_both_credential_homes_are_searched_with_testbots_taking_precedence`.
 
+## Configuration profiles
+
+`.env.<profile>` layered over `.env`, selected by `TESTBOTS_ENV`/`AHQ_ENV` — Spring's
+`application-<profile>.properties` and `spring.profiles.active`. `PROFILE_BASE_URLS`
+(`config/credentials.py`) maps `dev`/`prod` to their gateways and `KNOWN_BASE_URLS` derives from
+it, so adding an environment cannot leave the allowlist behind and reject its own tokens.
+
+Three things here are load-bearing and easy to "simplify" wrongly:
+
+- **`_env_file_candidates()` puts every base file before every profile file**, not each profile
+  file above its own base file. The obvious per-directory interleaving lets `~/.testbots/.env`
+  outrank `~/.ahq/.env.prod`, so what "prod is active" means would depend on which directory a
+  value happened to live in.
+- **`active_profile()` cannot read `settings`** — it decides which files `settings` loads. It
+  re-reads the base `.env` itself. `settings.testbots_env` is declared only because
+  `model_config` forbids extra keys, so an undeclared `TESTBOTS_ENV` line is a *hard startup
+  failure*, not an ignored one. Read `ACTIVE_PROFILE`.
+- **`--env` mints, `--use` switches; neither does the other.** Writing `.env.prod` does not
+  activate it, so minting a prod token can never silently repoint a session at prod.
+
+`--env` also picks the sign-in gateway, which is the reason profiles exist at all: a password
+carries no environment (an API token names its own via `urlDetails.baseUrl`; a password has no
+claim to read), so prod credentials sent to dev's gateway fail as *"your login details are
+incorrect"* — indistinguishable from a wrong password. Hosted mode has the same limit and no fix:
+a deployment only ever signs in against its own configured gateway.
+
 Deliberately still `ahq-`: the gateway route prefix `/ahq-mcp-server` (in every live connector
 URL), the `AHQ_MCP_*` deployment settings (DevOps ConfigMap/Secret), `TUNNEL_CLIENT_ID`, the
 distribution name in `pyproject.toml` (paired with `http_server`'s `_pkg_version` call), the ECR

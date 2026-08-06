@@ -27,7 +27,7 @@ def _either(name: str) -> Field:
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def _env_file_candidates() -> tuple[str, ...]:
+def _env_dirs() -> tuple[Path, ...]:
     # Ordered lowest→highest precedence (pydantic-settings: later files win); real environment
     # variables (TESTBOTS_API_TOKEN / AHQ_API_TOKEN etc.) beat every file:
     #   1. ~/.ahq/.env — the pre-rebrand credentials home, still read so an existing install
@@ -40,15 +40,60 @@ def _env_file_candidates() -> tuple[str, ...]:
     #      ${CLAUDE_PLUGIN_ROOT}; covers the pip-installed case where this file lives in
     #      site-packages and (3) points nowhere useful
     #   5. process cwd, as a manual override
-    candidates = [
-        str(Path.home() / ".ahq" / ".env"),
-        str(Path.home() / ".testbots" / ".env"),
-        str(REPO_ROOT / ".env"),
+    dirs = [
+        Path.home() / ".ahq",
+        Path.home() / ".testbots",
+        REPO_ROOT,
     ]
     mcp_home = os.environ.get("TESTBOTS_MCP_HOME") or os.environ.get("AHQ_MCP_HOME")
     if mcp_home:
-        candidates.append(str(Path(mcp_home) / ".env"))
-    candidates.append(".env")
+        dirs.append(Path(mcp_home))
+    dirs.append(Path("."))
+    return tuple(dirs)
+
+
+def _clean_profile(raw: str) -> str:
+    """A profile name becomes a filename suffix, so reject anything that could name a different
+    file rather than sanitising it into something nobody asked for."""
+    name = raw.strip().strip("\"'")
+    return name if name and all(c.isalnum() or c in "-_" for c in name) else ""
+
+
+def active_profile(dirs: tuple[Path, ...] | None = None) -> str:
+    """The active configuration profile ("dev", "prod", ...) — Spring's spring.profiles.active.
+
+    Resolved from a real environment variable first, then from whichever base .env names one
+    (highest-precedence file wins). The file fallback is the important half here: this server is
+    launched by the MCP client, not from a shell, so an exported variable is the awkward path
+    rather than the obvious one. Empty means no profile, which is exactly the behaviour before
+    profiles existed — an install that never sets one loads the same files it always did.
+    """
+    if raw := (os.environ.get("TESTBOTS_ENV") or os.environ.get("AHQ_ENV") or ""):
+        return _clean_profile(raw)
+    for directory in reversed(dirs or _env_dirs()):
+        try:
+            text = (directory / ".env").read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            key, sep, value = line.partition("=")
+            if sep and key.strip().upper() in ("TESTBOTS_ENV", "AHQ_ENV"):
+                if name := _clean_profile(value.split("#")[0]):
+                    return name
+    return ""
+
+
+def _env_file_candidates() -> tuple[str, ...]:
+    dirs = _env_dirs()
+    candidates = [str(d / ".env") for d in dirs]
+    # Every base file first, then every profile file, so an active profile beats an unprofiled
+    # value regardless of which directory each came from. Same rule as Spring, where
+    # application-<profile>.properties overrides application.properties instead of being ranked
+    # against it by location — the alternative (profile file directly above its own base file)
+    # lets ~/.testbots/.env quietly outrank ~/.ahq/.env.prod, which is not what "prod is active"
+    # can be allowed to mean.
+    if profile := active_profile(dirs):
+        candidates += [str(d / f".env.{profile}") for d in dirs]
     return tuple(candidates)
 
 
@@ -71,6 +116,11 @@ class Settings(BaseSettings):
     # A stale/mismatched org_id here would silently write real data into the wrong organization,
     # since the gateway doesn't validate that a request's org-id header matches the token's claim.
     ahq_project_id: str = _either("project_id")
+    # Declared, not read: active_profile() resolves the profile before any of these files load,
+    # so it cannot come from here. The field exists because model_config forbids extra keys —
+    # without it, a TESTBOTS_ENV line in a .env file is a hard startup failure rather than a
+    # setting.
+    testbots_env: str = _either("env")
     llm_api_key: str = ""
     # Grace period check_local_agent_status waits out the first time it sees the local agent
     # online, before reporting ready — the agent's own async startup (token revalidation,
@@ -136,6 +186,10 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# Which profile the values above actually came from. Read this rather than settings.testbots_env
+# (see that field's comment) — this is the value that selected the files.
+ACTIVE_PROFILE = active_profile()
 
 # Gateway prefix constants, derived from settings so a non-SaaS deployment target can override
 # them (see the ahq_gw_prefix_* fields above) without any code change.

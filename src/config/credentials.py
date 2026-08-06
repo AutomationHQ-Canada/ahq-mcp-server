@@ -3,12 +3,21 @@ import json
 from dataclasses import dataclass
 from typing import Mapping
 
-# The two AHQ gateway hosts a token's own `urlDetails` claim is allowed to resolve to (plus
-# whatever AHQ_MCP_EXTRA_BASE_URLS adds) — see base_url_from_claims below.
-KNOWN_BASE_URLS = (
-    "https://api-dev.automationhq.ai",
-    "https://api.automationhq.ai",
-)
+# The gateway each shipped configuration profile points at. This mapping is what makes password
+# sign-in environment-aware: an API token names its own gateway through its urlDetails.baseUrl
+# claim, but a password carries no such claim, so naming a profile is the only way for
+# testbots-login to know which environment to authenticate against. Without it, prod credentials
+# get checked against whichever gateway happens to be configured — which reads as "wrong
+# password" rather than "wrong environment".
+PROFILE_BASE_URLS = {
+    "dev": "https://api-dev.automationhq.ai",
+    "prod": "https://api.automationhq.ai",
+}
+
+# The AHQ gateway hosts a token's own `urlDetails` claim is allowed to resolve to (plus whatever
+# AHQ_MCP_EXTRA_BASE_URLS adds) — see base_url_from_claims below. Derived from the profile map so
+# adding an environment cannot leave the allowlist behind and silently reject its own tokens.
+KNOWN_BASE_URLS = tuple(PROFILE_BASE_URLS.values())
 
 
 def decode_ahq_token(token: str) -> dict:

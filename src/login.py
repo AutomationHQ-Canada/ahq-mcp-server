@@ -22,12 +22,24 @@ import httpx
 
 from src.clients.base_client import AhqApiError
 from src.clients.user_client import UserClient
-from src.config.ahq_services import settings
-from src.config.credentials import AhqCredentials, decode_ahq_token
+from src.config.ahq_services import _clean_profile, settings
+from src.config.credentials import PROFILE_BASE_URLS, AhqCredentials, decode_ahq_token
 from src.hosted.consent import _normalize_projects, sign_in
 
 CREDENTIALS_HOME = Path.home() / ".testbots"
 ENV_PATH = CREDENTIALS_HOME / ".env"
+
+# Plain ASCII, like _NEEDS_TERMINAL below: the Windows console codepage turns an em dash into a
+# replacement character.
+_USAGE = """testbots-login - sign in and store an API token.
+
+  testbots-login                     sign in to the configured gateway
+  testbots-login --env=prod          sign in to prod, saving to ~/.testbots/.env.prod
+  testbots-login --env=dev           the same for dev
+  testbots-login --use=prod          switch profiles without signing in again
+  testbots-login --base-url=URL      a gateway not covered by a named profile
+  testbots-login --force             mint another token even if one is already stored
+"""
 
 # Above this, the picker asks for a filter first. Chosen to fit a default terminal without
 # scrolling, so the whole list stays visible once it is short enough to print.
@@ -41,17 +53,16 @@ _NEEDS_TERMINAL = (
 )
 
 
-def _write_env(token: str, project_id: str, base_url: str) -> None:
-    """Write the three settings, preserving any unrelated lines already in the file."""
-    managed = {"TESTBOTS_API_TOKEN": token, "TESTBOTS_PROJECT_ID": project_id}
-    # Only pin the gateway when the token cannot name it itself. Writing it unconditionally is
-    # how an .env ends up pointing at the wrong environment after the token is later replaced.
-    if base_url and base_url != settings.ahq_base_url:
-        managed["TESTBOTS_BASE_URL"] = base_url
+def _env_path(profile: str = "") -> Path:
+    """Where a profile's credentials live. No profile keeps writing the file it always did."""
+    return CREDENTIALS_HOME / f".env.{profile}" if profile else ENV_PATH
 
+
+def _merge_env(path: Path, managed: dict) -> None:
+    """Apply `managed`, preserving any unrelated lines already in the file."""
     existing = []
-    if ENV_PATH.exists():
-        for line in ENV_PATH.read_text(encoding="utf-8").splitlines():
+    if path.exists():
+        for line in path.read_text(encoding="utf-8").splitlines():
             key = line.split("=", 1)[0].strip().upper()
             # Drop the AHQ_* spellings too, or the old value survives alongside the new one and
             # which wins depends on precedence rather than on anything the user chose.
@@ -60,13 +71,44 @@ def _write_env(token: str, project_id: str, base_url: str) -> None:
                 continue
             existing.append(line)
 
-    CREDENTIALS_HOME.mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
     body = "\n".join(existing + [f"{k}={v}" for k, v in managed.items()]).strip() + "\n"
-    ENV_PATH.write_text(body, encoding="utf-8")
+    path.write_text(body, encoding="utf-8")
     try:
-        os.chmod(ENV_PATH, 0o600)  # best effort; a no-op on Windows
+        os.chmod(path, 0o600)  # best effort; a no-op on Windows
     except OSError:
         pass
+
+
+def _write_env(token: str, project_id: str, base_url: str, profile: str = "") -> Path:
+    managed = {"TESTBOTS_API_TOKEN": token, "TESTBOTS_PROJECT_ID": project_id}
+    # A profile file exists precisely to name its own environment, so pin the gateway there
+    # unconditionally — that is what makes the file readable on its own and what stops a later
+    # unprofiled default deciding where a prod token points. Without a profile the older, narrower
+    # rule stands: pin only when the token cannot name the gateway itself, since a stale pin is
+    # how an .env ends up on the wrong environment after the token is replaced.
+    if base_url and (profile or base_url != settings.ahq_base_url):
+        managed["TESTBOTS_BASE_URL"] = base_url
+
+    path = _env_path(profile)
+    _merge_env(path, managed)
+    return path
+
+
+def _activate(profile: str) -> int:
+    """Point the base .env at a profile, so switching environments is not a manual file edit.
+
+    The switch is written to the base file rather than exported, because nothing here launches
+    the MCP server — the client does, and it inherits its own environment, not this shell's.
+    """
+    path = _env_path()
+    if not (target := _env_path(profile)).exists():
+        print(f"No {target} yet. Run: testbots-login --env={profile}")
+        return 1
+    _merge_env(path, {"TESTBOTS_ENV": profile})
+    print(f"Profile {profile} is now active ({target}).")
+    print("\nRestart Claude Code for it to take effect.")
+    return 0
 
 
 def _choose(projects: list) -> dict:
@@ -102,12 +144,13 @@ def _choose(projects: list) -> dict:
         print("Not one of the options.")
 
 
-async def _run(base_url: str, force: bool) -> int:
-    if ENV_PATH.exists() and "TESTBOTS_API_TOKEN=" in ENV_PATH.read_text(encoding="utf-8") \
+async def _run(base_url: str, force: bool, profile: str = "") -> int:
+    env_path = _env_path(profile)
+    if env_path.exists() and "TESTBOTS_API_TOKEN=" in env_path.read_text(encoding="utf-8") \
             and not force:
         # Minting is limited per organization and this endpoint does not revoke what it replaces,
         # so a login that silently re-mints burns a finite quota on every run.
-        print(f"{ENV_PATH} already holds a token. Re-run with --force to mint another.")
+        print(f"{env_path} already holds a token. Re-run with --force to mint another.")
         return 1
 
     # Only catches the redirected-stdin case, and only where isatty is trustworthy — Windows
@@ -117,10 +160,12 @@ async def _run(base_url: str, force: bool) -> int:
         print(_NEEDS_TERMINAL)
         return 1
 
-    # The gateway host is an implementation detail and currently still carries the old brand,
-    # so show the product name instead. An explicit --base-url is different: someone overriding
-    # the environment needs to see which one they actually got, or a prod/dev mix-up is silent.
-    if base_url == settings.ahq_base_url:
+    # The gateway host is an implementation detail and currently still carries the old brand, so
+    # show the product name instead. Naming an environment is different: anyone who picked one
+    # needs to see which they actually got, or a prod/dev mix-up is silent.
+    if profile:
+        print(f"Signing in to {profile} ({base_url})\n")
+    elif base_url == settings.ahq_base_url:
         print("Signing in to TestBots.ai\n")
     else:
         print(f"Signing in to {base_url}\n")
@@ -201,7 +246,7 @@ async def _run(base_url: str, force: bool) -> int:
         print(f"\nToken was not issued: {result}")
         return 1
 
-    _write_env(token, project["id"], base_url)
+    env_path = _write_env(token, project["id"], base_url, profile)
 
     # Read back from the token itself rather than echoing what we sent. The organization name
     # and expiry are only decided server-side, so this is the one thing that confirms what was
@@ -213,27 +258,63 @@ async def _run(base_url: str, force: bool) -> int:
     expiry = f" (expires {datetime.date.fromtimestamp(expires)})" if expires else ""
 
     print(f"\nSigned in as {person or email}.")
-    print(f"\n  organization  {org_name}")
+    print()
+    if profile:
+        print(f"  profile       {profile}")
+        print(f"  gateway       {base_url}")
+    print(f"  organization  {org_name}")
     print(f"  project       {project['name']}")
     print(f"  API token     created{expiry}")
-    print(f"  saved to      {ENV_PATH}")
+    print(f"  saved to      {env_path}")
     if (remaining := result.get("remainingTokens")) is not None:
         print(f"\n{remaining} token slot(s) left in this organization.")
+    if profile:
+        # Writing the credentials is not the same as selecting them: a profile file is inert
+        # until something names it. Switching silently here is exactly the prod/dev mix-up this
+        # command is otherwise careful to make visible.
+        print(f"\nThis profile is not active yet. To switch to it:\n\n"
+              f"    testbots-login --use={profile}\n")
     print("\nYou are all set. Restart Claude Code, then run /mcp -- it should show\n"
           "testbots-mcp-server connected.")
     return 0
 
 
+def _arg(args: list, flag: str, default: str = "") -> str:
+    return next((a.split("=", 1)[1] for a in args if a.startswith(f"{flag}=")), default)
+
+
 def main() -> int:
     args = sys.argv[1:]
+    if "--help" in args or "-h" in args:
+        print(_USAGE)
+        return 0
+
+    if switch_to := _arg(args, "--use"):
+        if not (profile := _clean_profile(switch_to)):
+            print(f"{switch_to!r} is not a usable profile name.")
+            return 1
+        return _activate(profile)
+
     force = "--force" in args
-    base_url = next((a.split("=", 1)[1] for a in args if a.startswith("--base-url=")),
-                    settings.ahq_base_url)
+    profile = _clean_profile(_arg(args, "--env"))
+    if _arg(args, "--env") and not profile:
+        print(f"{_arg(args, '--env')!r} is not a usable profile name.")
+        return 1
+
+    # An explicit --base-url wins so an environment with no named profile stays reachable; a
+    # named profile is what supplies the gateway otherwise, since a password cannot name one.
+    base_url = _arg(args, "--base-url") or PROFILE_BASE_URLS.get(profile) or settings.ahq_base_url
     if not base_url:
-        print("No gateway URL. Pass --base-url=https://api-dev.automationhq.ai")
+        print("No gateway URL. Pass --env=prod, --env=dev, or --base-url=<gateway>")
+        return 1
+    if profile and profile not in PROFILE_BASE_URLS and not _arg(args, "--base-url"):
+        # Otherwise a made-up profile silently signs in to whatever the current default is and
+        # writes the result into a file named after an environment it never contacted.
+        print(f"Profile {profile!r} has no known gateway. Pass --base-url=<gateway> with it, "
+              f"or use one of: {', '.join(PROFILE_BASE_URLS)}")
         return 1
     try:
-        return asyncio.run(_run(base_url, force))
+        return asyncio.run(_run(base_url, force, profile))
     except KeyboardInterrupt:
         print("\nCancelled.")
         return 130

@@ -1,4 +1,9 @@
 .env
+# Profile files hold real per-environment credentials (.env.prod, .env.dev, ...); the templates
+# next to them are the only ones meant to be tracked.
+.env.*
+!.env.example
+!.env.*.example
 __pycache__/
 *.pyc
 *.pyo

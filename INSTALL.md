@@ -246,12 +246,48 @@ TESTBOTS_PROJECT_ID=<the UUID of the project to work in>
 > `/mcp` reports the token has no usable base URL — if you do set it, point it at the **API
 > gateway** (e.g. `https://api-dev.automationhq.ai`), never the web app.
 >
-> **Moving between environments? Change BOTH lines.** The same plugin works against any
-> TestBots.ai environment — the gateway and your organization follow the token automatically, so
-> switching is just a matter of pasting a different one. But `TESTBOTS_PROJECT_ID` does *not* follow
-> the token. Leave a project UUID from the old environment in place and every list comes back
-> empty with no error at all, because results are scoped to organization **and** project
-> together. Update the token and the project ID as a pair.
+> **Moving between environments? Change BOTH lines** — or use a profile (below) and stop editing
+> them by hand. The gateway and your organization follow the token automatically, so switching is
+> a matter of pasting a different one. But `TESTBOTS_PROJECT_ID` does *not* follow the token.
+> Leave a project UUID from the old environment in place and every list comes back empty with no
+> error at all, because results are scoped to organization **and** project together. Update the
+> token and the project ID as a pair.
+
+## Working against dev and prod
+
+If you use more than one environment, keep each one's credentials in its own **profile** instead
+of overwriting a single `.env`. This is the same idea as Spring's `application-prod.properties`:
+`~/.testbots/.env` holds what is true everywhere, and `~/.testbots/.env.<profile>` holds what makes
+that environment different. When a profile is active its values win.
+
+Set each one up once:
+
+```
+testbots-login --env=dev      # signs in to dev,  writes ~/.testbots/.env.dev
+testbots-login --env=prod     # signs in to prod, writes ~/.testbots/.env.prod
+```
+
+Then switching is one command, and **restart Claude Code** afterwards:
+
+```
+testbots-login --use=prod
+```
+
+`--env` matters for more than the filename. A password carries no environment with it — an API
+token names its own gateway through its `urlDetails` claim, but a password has nothing to read —
+so without `--env` the sign-in goes to whatever gateway is currently configured. Prod credentials
+checked against dev fail as *"your login details are incorrect"*, which reads as a bad password
+rather than the wrong environment. Naming the profile is what prevents that.
+
+To do it by hand instead, copy `.env.prod.example` to `~/.testbots/.env.prod`, fill it in, and put
+`TESTBOTS_ENV=prod` in `~/.testbots/.env`. Remove that line to go back to the unprofiled setup.
+
+> Profiles are opt-in and invisible until you use one: with no `TESTBOTS_ENV` set, exactly the
+> same files load as before.
+>
+> A profile file is inert until something names it — `testbots-login --env=prod` writes the
+> credentials but does **not** switch you over, so minting a prod token can never silently
+> repoint your session at prod.
 
 ## Step 4 — Verify
 
@@ -328,6 +364,9 @@ that message first, it usually IS the fix.
 | `testbots-login` says `has reached its limit of active API tokens` | Your organization allows 5 active tokens and nothing is freed automatically. Delete an unused one under Administration → Settings → API Tokens, then re-run. |
 | `testbots-login` says `has no projects` | You are signed in to a different organization than you expect. Both project lookups are org-scoped, so signing in again will not change it — check which organization the account belongs to. |
 | `testbots-login` hangs or says it needs a terminal | It has to prompt for a password, so it cannot run inside Claude Code, a pipe, or CI. Use a real terminal window. |
+| Correct password rejected as `your login details are incorrect` | You are signing in to the wrong environment — a password cannot name one, so it goes to whichever gateway is configured. Pass `--env=prod` (or `--env=dev`). |
+| Switched profiles but nothing changed | The MCP server reads its credentials at startup. Restart Claude Code, then check `/mcp`. |
+| Server won't start after editing `.env` | Unknown keys are rejected outright rather than ignored. Check for a typo in a variable name — the profile switch is spelled `TESTBOTS_ENV`. |
 | `crawl_url` errors about a missing browser | The first crawl downloads Chromium itself, so this normally self-resolves — that one call just takes a few minutes. The error only persists if the download actually failed (no disk space, no network), and it quotes the real reason. Manual fallback: `uv run playwright install chromium` in the plugin folder. |
 | Data lands in the wrong org | Not possible via the token alone — the org ID is decoded from it. Check you were given a token for the right organization. |
 | Assets you created aren't visible in the web app (or vice versa) | Results are scoped to organization **and** project together, and a mismatched pair returns an empty result rather than an error. Check `TESTBOTS_PROJECT_ID` matches the project you're looking at. |

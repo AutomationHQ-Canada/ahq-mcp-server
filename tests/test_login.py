@@ -89,6 +89,83 @@ def test_write_env_pins_the_gateway_only_when_it_differs(tmp_path, monkeypatch):
     assert "TESTBOTS_BASE_URL=https://other.example" in env.read_text(encoding="utf-8")
 
 
+def test_a_profile_writes_its_own_file_and_always_pins_its_gateway(tmp_path, monkeypatch):
+    """A profile file exists to name its environment, so the narrower "only pin when it differs"
+    rule does not apply — an unpinned .env.prod is just a second copy of the default."""
+    monkeypatch.setattr(login, "CREDENTIALS_HOME", tmp_path)
+    monkeypatch.setattr(login, "ENV_PATH", tmp_path / ".env")
+
+    path = login._write_env("fresh", "proj-9", base_url=login.settings.ahq_base_url,
+                            profile="prod")
+
+    assert path == tmp_path / ".env.prod"
+    written = path.read_text(encoding="utf-8")
+    assert f"TESTBOTS_BASE_URL={login.settings.ahq_base_url}" in written
+    assert "TESTBOTS_API_TOKEN=fresh" in written
+    # the unprofiled file must be left alone, or switching back loses the other environment
+    assert not (tmp_path / ".env").exists()
+
+
+def test_env_prod_signs_in_to_prods_gateway_not_the_configured_one(monkeypatch):
+    """The bug this whole mechanism exists for: a password carries no urlDetails claim, so
+    without a named profile prod credentials get checked against dev and read as a bad password.
+    """
+    seen = {}
+    monkeypatch.setattr(login.sys, "argv", ["testbots-login", "--env=prod"])
+
+    async def fake_run(base_url, force, profile=""):
+        seen.update(base_url=base_url, profile=profile)
+        return 0
+
+    monkeypatch.setattr(login, "_run", fake_run)
+    assert login.main() == 0
+    assert seen == {"base_url": "https://api.automationhq.ai", "profile": "prod"}
+
+
+def test_an_unknown_profile_is_refused_rather_than_silently_using_the_default(monkeypatch, capsys):
+    """Otherwise it signs in to whatever is configured and saves the result in a file named
+    after an environment it never contacted."""
+    monkeypatch.setattr(login.sys, "argv", ["testbots-login", "--env=staging"])
+
+    assert login.main() == 1
+    assert "no known gateway" in capsys.readouterr().out
+
+
+def test_a_profile_name_that_could_escape_the_directory_is_refused(monkeypatch, capsys):
+    monkeypatch.setattr(login.sys, "argv", ["testbots-login", "--env=../../evil"])
+
+    assert login.main() == 1
+    assert "not a usable profile name" in capsys.readouterr().out
+
+
+def test_use_switches_the_active_profile_by_writing_the_base_env(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(login, "CREDENTIALS_HOME", tmp_path)
+    monkeypatch.setattr(login, "ENV_PATH", tmp_path / ".env")
+    (tmp_path / ".env").write_text("LLM_API_KEY=keep-me\nAHQ_ENV=dev\n", encoding="utf-8")
+    (tmp_path / ".env.prod").write_text("TESTBOTS_API_TOKEN=p\n", encoding="utf-8")
+    monkeypatch.setattr(login.sys, "argv", ["testbots-login", "--use=prod"])
+
+    assert login.main() == 0
+
+    written = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "TESTBOTS_ENV=prod" in written
+    assert "LLM_API_KEY=keep-me" in written
+    # the old spelling must go, or which profile is active comes down to precedence
+    assert "AHQ_ENV=dev" not in written
+
+
+def test_use_refuses_a_profile_that_has_no_credentials_yet(tmp_path, monkeypatch, capsys):
+    """Activating a file that does not exist reads as a broken install: every tool loses its
+    token at once, with nothing naming the cause."""
+    monkeypatch.setattr(login, "CREDENTIALS_HOME", tmp_path)
+    monkeypatch.setattr(login, "ENV_PATH", tmp_path / ".env")
+    monkeypatch.setattr(login.sys, "argv", ["testbots-login", "--use=prod"])
+
+    assert login.main() == 1
+    assert "testbots-login --env=prod" in capsys.readouterr().out
+    assert not (tmp_path / ".env").exists()
+
+
 def test_login_explains_the_token_cap_instead_of_raising_the_api_error(monkeypatch, capsys):
     """The cap is the likeliest failure: per-org, only 5, and nothing revokes on replace."""
     import asyncio

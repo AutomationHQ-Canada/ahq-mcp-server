@@ -10,7 +10,7 @@ resolution-markers = [
 
 [[package]]
 name = "ahq-mcp-server"
-version = "1.9.0"
+version = "5.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography" },
@@ -38,7 +38,7 @@ requires-dist = [
     { name = "cryptography", specifier = ">=42.0" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "mcp", specifier = ">=1.0.0,<2.0.0" },
-    { name = "openpyxl", specifier = ">=3.1.0" },
+    { name = "openpyxl", specifier = ">=3.1.1" },
     { name = "playwright", specifier = ">=1.61,<1.62" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pydantic-settings", specifier = ">=2.0.0" },

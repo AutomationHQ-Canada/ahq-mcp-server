@@ -1,4 +1,8 @@
-from src.config.ahq_services import Settings
+from pathlib import Path
+
+import pytest
+
+from src.config.ahq_services import Settings, _clean_profile, active_profile
 
 
 def test_gw_prefix_defaults_match_saas_gateway_convention():
@@ -111,3 +115,92 @@ def test_both_credential_homes_are_searched_with_testbots_taking_precedence():
                     or c.endswith(".testbots/.env"))
     # pydantic-settings: later files win.
     assert ahq < testbots
+
+
+def _clear_profile_env(monkeypatch):
+    for var in ("TESTBOTS_ENV", "AHQ_ENV"):
+        monkeypatch.delenv(var, raising=False)
+
+
+def test_no_profile_loads_exactly_the_files_it_always_did(monkeypatch, tmp_path):
+    """Profiles must be invisible to an install that never sets one."""
+    _clear_profile_env(monkeypatch)
+    monkeypatch.setattr("src.config.ahq_services._env_dirs", lambda: (tmp_path,))
+    (tmp_path / ".env").write_text("TESTBOTS_API_TOKEN=t\n", encoding="utf-8")
+
+    from src.config.ahq_services import _env_file_candidates
+
+    assert _env_file_candidates() == (str(tmp_path / ".env"),)
+
+
+def test_an_active_profile_beats_every_base_file_not_just_its_own(monkeypatch, tmp_path):
+    """The reason base files all come before profile files.
+
+    Ranking each profile file directly above its own base file would let a higher-precedence
+    directory's unprofiled .env outrank a lower one's .env.prod — so "prod is active" would
+    depend on which directory each value happened to live in.
+    """
+    _clear_profile_env(monkeypatch)
+    low, high = tmp_path / "low", tmp_path / "high"
+    for d in (low, high):
+        d.mkdir()
+    monkeypatch.setattr("src.config.ahq_services._env_dirs", lambda: (low, high))
+    monkeypatch.setenv("TESTBOTS_ENV", "prod")
+
+    from src.config.ahq_services import _env_file_candidates
+
+    candidates = _env_file_candidates()
+    assert candidates == (str(low / ".env"), str(high / ".env"),
+                          str(low / ".env.prod"), str(high / ".env.prod"))
+    # every base file precedes every profile file
+    assert max(i for i, c in enumerate(candidates) if c.endswith(".env")) < \
+           min(i for i, c in enumerate(candidates) if c.endswith(".env.prod"))
+
+
+def test_the_profile_can_be_named_by_the_base_env_file(monkeypatch, tmp_path):
+    """Nothing launches this server from a shell, so an exported variable is the awkward path."""
+    _clear_profile_env(monkeypatch)
+    (tmp_path / ".env").write_text("TESTBOTS_API_TOKEN=t\nTESTBOTS_ENV=prod  # comment\n",
+                                   encoding="utf-8")
+
+    assert active_profile((tmp_path,)) == "prod"
+
+
+def test_a_real_environment_variable_overrides_the_file(monkeypatch, tmp_path):
+    (tmp_path / ".env").write_text("TESTBOTS_ENV=dev\n", encoding="utf-8")
+    monkeypatch.setenv("TESTBOTS_ENV", "prod")
+
+    assert active_profile((tmp_path,)) == "prod"
+
+
+def test_the_legacy_ahq_env_spelling_still_names_a_profile(monkeypatch, tmp_path):
+    _clear_profile_env(monkeypatch)
+    (tmp_path / ".env").write_text("AHQ_ENV=prod\n", encoding="utf-8")
+
+    assert active_profile((tmp_path,)) == "prod"
+
+
+def test_the_highest_precedence_file_decides_the_profile(monkeypatch, tmp_path):
+    _clear_profile_env(monkeypatch)
+    low, high = tmp_path / "low", tmp_path / "high"
+    for d, value in ((low, "dev"), (high, "prod")):
+        d.mkdir()
+        (d / ".env").write_text(f"TESTBOTS_ENV={value}\n", encoding="utf-8")
+
+    assert active_profile((low, high)) == "prod"
+
+
+@pytest.mark.parametrize("raw", ["../../etc/passwd", "..", "a/b", "a\\b", "", "  ", "pro d"])
+def test_a_profile_name_cannot_escape_the_credentials_directory(raw):
+    """The name becomes a filename suffix, so it is rejected rather than sanitised."""
+    assert _clean_profile(raw) == ""
+
+
+def test_a_profile_line_is_accepted_rather_than_failing_startup(tmp_path):
+    """model_config forbids extra keys, so an undeclared TESTBOTS_ENV would not be ignored —
+    it raises, and every tool goes down with it. Both spellings must be declared."""
+    for spelling in ("TESTBOTS_ENV", "AHQ_ENV"):
+        env = tmp_path / f".env.{spelling}"
+        env.write_text(f"{spelling}=prod\n", encoding="utf-8")
+
+        assert Settings(_env_file=str(env)).testbots_env == "prod"
