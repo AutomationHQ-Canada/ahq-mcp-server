@@ -55,7 +55,7 @@ Code or through a pipe):
 ```powershell
 # Windows PowerShell — cd's into the plugin, whatever version you have
 cd (Get-ChildItem $env:USERPROFILE\.claude\plugins\cache\testbots\testbots-skills |
-    Sort-Object Name -Descending | Select-Object -First 1).FullName
+    Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1).FullName
 uv run --project . python -m src.login
 ```
 
@@ -253,41 +253,79 @@ TESTBOTS_PROJECT_ID=<the UUID of the project to work in>
 > error at all, because results are scoped to organization **and** project together. Update the
 > token and the project ID as a pair.
 
-## Working against dev and prod
+## Working against dev and prod (environment profiles)
 
-If you use more than one environment, keep each one's credentials in its own **profile** instead
-of overwriting a single `.env`. This is the same idea as Spring's `application-prod.properties`:
-`~/.testbots/.env` holds what is true everywhere, and `~/.testbots/.env.<profile>` holds what makes
-that environment different. When a profile is active its values win.
+If you use more than one environment, keep each one's credentials in its own **environment
+profile** instead of overwriting a single `.env`. It is the same idea as Spring's
+`application-prod.properties`: `~/.testbots/.env` holds what is true everywhere, and
+`~/.testbots/.env.<name>` holds what makes that environment different. The active one wins.
 
-Set each one up once:
+> **Not to be confused with tool profiles.** `TESTBOTS_MCP_TOOL_PROFILE` / `?profile=core` chooses
+> *how many tools* are advertised. Environment profiles choose *which TestBots environment* you are
+> connected to. They are unrelated and can be used together.
+
+Every command below runs **from the plugin folder**, like the sign-in in the Quick start — `cd`
+first or you will get `No module named src.login`:
+
+```powershell
+# Windows PowerShell — cd's into the plugin, whatever version you have
+cd (Get-ChildItem $env:USERPROFILE\.claude\plugins\cache\testbots\testbots-skills |
+    Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1).FullName
+```
+
+```bash
+# macOS / Linux
+cd "$(ls -d ~/.claude/plugins/cache/testbots/testbots-skills/* | sort -V | tail -1)"
+```
+
+Set each environment up once:
 
 ```
-testbots-login --env=dev      # signs in to dev,  writes ~/.testbots/.env.dev
-testbots-login --env=prod     # signs in to prod, writes ~/.testbots/.env.prod
+uv run --project . python -m src.login --env=dev     # signs in to dev,  writes ~/.testbots/.env.dev
+uv run --project . python -m src.login --env=prod    # signs in to prod, writes ~/.testbots/.env.prod
 ```
 
-Then switching is one command, and **restart Claude Code** afterwards:
+Then switching takes one command — and **restart Claude Code** afterwards, since credentials are
+read when the server starts:
 
 ```
-testbots-login --use=prod
+uv run --project . python -m src.login --use=prod
 ```
 
-`--env` matters for more than the filename. A password carries no environment with it — an API
-token names its own gateway through its `urlDetails` claim, but a password has nothing to read —
-so without `--env` the sign-in goes to whatever gateway is currently configured. Prod credentials
-checked against dev fail as *"your login details are incorrect"*, which reads as a bad password
-rather than the wrong environment. Naming the profile is what prevents that.
+| Command | What it does |
+|---|---|
+| `--env=<name>` | Signs in to that environment and saves to `~/.testbots/.env.<name>`. Does **not** activate it. |
+| `--use=<name>` | Activates an environment you already set up. No sign-in, no new token. |
+| `--force` | Mints another token even though one is already stored. |
+| `--base-url=<url>` | A gateway with no named environment (self-hosted, staging). |
+| `--help` | The above, on demand. |
 
-To do it by hand instead, copy `.env.prod.example` to `~/.testbots/.env.prod`, fill it in, and put
-`TESTBOTS_ENV=prod` in `~/.testbots/.env`. Remove that line to go back to the unprofiled setup.
+### Why `--env` matters beyond the filename
 
-> Profiles are opt-in and invisible until you use one: with no `TESTBOTS_ENV` set, exactly the
-> same files load as before.
+A password carries no environment with it. An API token names its own gateway through its
+`urlDetails` claim, but a password has nothing to read — so without `--env` the sign-in goes to
+whichever gateway happens to be configured. Prod credentials checked against dev come back as
+*"your login details are incorrect"*, which reads as a bad password rather than the wrong
+environment. Naming the environment is what prevents that.
+
+### Doing it by hand
+
+Copy `.env.prod.example` to `~/.testbots/.env.prod`, fill it in, and put `TESTBOTS_ENV=prod` in
+`~/.testbots/.env`. Delete that line to go back to the single-environment setup.
+
+> Environment profiles are opt-in and invisible until you use one: with no `TESTBOTS_ENV` set,
+> exactly the same files load as before.
 >
-> A profile file is inert until something names it — `testbots-login --env=prod` writes the
-> credentials but does **not** switch you over, so minting a prod token can never silently
-> repoint your session at prod.
+> A profile file is inert until something names it — `--env=prod` writes the credentials but does
+> **not** switch you over, so minting a prod token can never silently repoint your session at prod.
+>
+> Switching never overwrites the other environment. `.env.dev` and `.env.prod` coexist, so moving
+> between them costs one command instead of re-pasting credentials.
+
+### Which environment am I on?
+
+Ask Claude *"run get_context"* — it reports the organization and project currently in use. Do this
+after any switch, since the change only takes effect once Claude Code restarts.
 
 ## Step 4 — Verify
 
@@ -364,6 +402,7 @@ that message first, it usually IS the fix.
 | `testbots-login` says `has reached its limit of active API tokens` | Your organization allows 5 active tokens and nothing is freed automatically. Delete an unused one under Administration → Settings → API Tokens, then re-run. |
 | `testbots-login` says `has no projects` | You are signed in to a different organization than you expect. Both project lookups are org-scoped, so signing in again will not change it — check which organization the account belongs to. |
 | `testbots-login` hangs or says it needs a terminal | It has to prompt for a password, so it cannot run inside Claude Code, a pipe, or CI. Use a real terminal window. |
+| `No module named src.login` | You are not in the plugin folder. `--project .` means *the project in the current directory*, so from anywhere else `uv` finds no project and falls back to your system Python. `cd` into the plugin first (see the Quick start snippet), then re-run. |
 | Correct password rejected as `your login details are incorrect` | You are signing in to the wrong environment — a password cannot name one, so it goes to whichever gateway is configured. Pass `--env=prod` (or `--env=dev`). |
 | Switched profiles but nothing changed | The MCP server reads its credentials at startup. Restart Claude Code, then check `/mcp`. |
 | Server won't start after editing `.env` | Unknown keys are rejected outright rather than ignored. Check for a typo in a variable name — the profile switch is spelled `TESTBOTS_ENV`. |

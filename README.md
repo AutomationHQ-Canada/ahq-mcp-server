@@ -140,7 +140,8 @@ Every tool schema is serialized into the model's context on **every** message �
 schema loading. At 138 tools that is ~16k tokens of fixed overhead per turn, and, more
 importantly, 138 near-identical options for the model to choose between.
 
-Set a profile to advertise fewer:
+Set a tool profile to advertise fewer (unrelated to the `TESTBOTS_ENV` environment profiles in
+[INSTALL.md](INSTALL.md) — that one picks dev vs prod, this one picks how many tools):
 
 ```
 TESTBOTS_MCP_TOOL_PROFILE=core   # 58 tools — half the payload, all 9 skills still work

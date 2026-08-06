@@ -254,6 +254,12 @@ with your TestBots.ai contact if report-level protection matters for your use ca
 
 ## Choosing which tools to enable
 
+> The "profile" on this page is a **tool profile** — how many tools are advertised. The plugin also
+> has *environment* profiles (`TESTBOTS_ENV`, dev vs prod), which are unrelated. A connector has no
+> equivalent: each deployment signs in against its own gateway, so which environment you reach is
+> decided by the URL you connect to, not by anything you configure.
+
+
 This server exposes **138 tools**, and every one of their descriptions is sent to the model on
 every message — MCP has no way to load them on demand. That is roughly 15,000 tokens before your
 question is even read, and more importantly it is 138 near-neighbours for the model to tell apart.
