@@ -389,3 +389,35 @@ NO_BASE_URL_TOKEN = _fake_jwt({
     "tokenType": "ORGANIZATION",
 })
 
+
+
+@pytest.mark.parametrize("registered,shown", [
+    ("Claude Code (testbots-prod)", "Claude Code"),
+    ("Claude Code (testbots-dev)", "Claude Code"),
+    ("Cursor (my server)", "Cursor"),
+    ("Claude Code", "Claude Code"),
+    # Nothing left to show, so the original stands rather than an empty heading.
+    ("(only-parens)", "(only-parens)"),
+    # Only a trailing group goes; a name that genuinely contains parentheses keeps them.
+    ("Keeps (inner) name", "Keeps (inner) name"),
+])
+def test_the_local_nickname_is_stripped_from_the_consent_heading(registered, shown):
+    """The parenthetical is the name the user typed when adding the server, so it identifies
+    nothing to them — the same client is "testbots-dev" elsewhere. The product name is the part
+    that answers "who is asking"."""
+    from src.hosted.consent import _display_client_name
+
+    assert _display_client_name(registered) == shown
+
+
+def test_the_consent_page_names_the_client_without_its_nickname(client):
+    resp = client.post("/register", json={
+        "redirect_uris": [REDIRECT_URI],
+        "token_endpoint_auth_method": "none",
+        "client_name": "Claude Code (testbots-prod)",
+    })
+    txn = _authorize_to_txn(client, resp.json()["client_id"])
+    page = client.get("/consent", params={"txn": txn}).text
+
+    assert "Connect <strong>Claude Code</strong>" in page
+    assert "testbots-prod" not in page

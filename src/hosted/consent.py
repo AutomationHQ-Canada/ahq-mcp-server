@@ -1,4 +1,5 @@
 import html
+import re
 import time
 
 from starlette.requests import Request
@@ -277,6 +278,21 @@ def _error_banner(message: str) -> str:
     return f'<p class="error">{html.escape(message)}</p>'
 
 
+def _display_client_name(name: str) -> str:
+    """Drop the trailing "(nickname)" an MCP client appends to its own registered name.
+
+    Claude Code registers as e.g. "Claude Code (testbots-prod)", where the parenthetical is the
+    local name the user typed when adding the server. It identifies nothing on its own — the
+    same client is "testbots-dev" on another machine — and the person reading this page is the
+    one who chose it, moments after typing the URL it stands for. What the heading needs to say
+    is which application is asking, so the product name stays and the nickname goes.
+
+    Falls back to the original whenever stripping would leave nothing, so a client whose entire
+    name is parenthesised still gets named rather than silently becoming blank.
+    """
+    return re.sub(r"\s*\([^()]*\)\s*$", "", name).strip() or name
+
+
 def _render(txn: str, client_name: str, partner_name: str, logo: str, primary_color: str,
             banner: str = "", token_value: str = "", email_value: str = "",
             projects: list | None = None, status: int = 200) -> Response:
@@ -310,7 +326,7 @@ def _render(txn: str, client_name: str, partner_name: str, logo: str, primary_co
             # it stayed magenta against any other partner's brand. Derived from primary_color
             # like the focus ring, it follows whatever colour the deployment configures.
             primary_color_tint=_hex_to_rgba(primary_color, 0.10),
-            client_name=html.escape(client_name),
+            client_name=html.escape(_display_client_name(client_name)),
             banner=banner,
             txn=html.escape(txn, quote=True),
             token_field=token_field,
