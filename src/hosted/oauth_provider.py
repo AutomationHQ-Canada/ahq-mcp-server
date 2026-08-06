@@ -197,6 +197,10 @@ class StatelessAhqProvider(OAuthAuthorizationServerProvider):
             "txn",
             {
                 "client_id": client.client_id,
+                # Recorded but not displayed: the consent page names the account being connected
+                # to, not the client asking, since the user supplied the URL that got them there
+                # and this name is self-declared at registration anyway. Kept in the transaction
+                # so a replica running either side of a deploy can decode the other's payload.
                 "client_name": client.client_name or "an MCP client",
                 "params": params.model_dump(mode="json"),
             },

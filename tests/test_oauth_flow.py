@@ -391,33 +391,36 @@ NO_BASE_URL_TOKEN = _fake_jwt({
 
 
 
-@pytest.mark.parametrize("registered,shown", [
-    ("Claude Code (testbots-prod)", "Claude Code"),
-    ("Claude Code (testbots-dev)", "Claude Code"),
-    ("Cursor (my server)", "Cursor"),
-    ("Claude Code", "Claude Code"),
-    # Nothing left to show, so the original stands rather than an empty heading.
-    ("(only-parens)", "(only-parens)"),
-    # Only a trailing group goes; a name that genuinely contains parentheses keeps them.
-    ("Keeps (inner) name", "Keeps (inner) name"),
+@pytest.mark.parametrize("registered", [
+    "Claude Code (testbots-prod)",
+    "Claude Code",
+    "Cursor (my server)",
+    "an MCP client",
 ])
-def test_the_local_nickname_is_stripped_from_the_consent_heading(registered, shown):
-    """The parenthetical is the name the user typed when adding the server, so it identifies
-    nothing to them — the same client is "testbots-dev" elsewhere. The product name is the part
-    that answers "who is asking"."""
-    from src.hosted.consent import _display_client_name
-
-    assert _display_client_name(registered) == shown
-
-
-def test_the_consent_page_names_the_client_without_its_nickname(client):
+def test_the_consent_page_never_names_the_calling_client(client, registered):
+    """The person reading this page just typed the URL that brought them here, so the client's
+    registered name adds nothing they did not already supply. It is also self-declared at
+    registration and unverified, so it could never have been leaned on as identification."""
     resp = client.post("/register", json={
         "redirect_uris": [REDIRECT_URI],
         "token_endpoint_auth_method": "none",
-        "client_name": "Claude Code (testbots-prod)",
+        "client_name": registered,
     })
     txn = _authorize_to_txn(client, resp.json()["client_id"])
     page = client.get("/consent", params={"txn": txn}).text
 
-    assert "Connect <strong>Claude Code</strong>" in page
-    assert "testbots-prod" not in page
+    assert "Connect to your TestBots.ai account" in page
+    assert registered not in page
+
+
+def test_a_client_registered_without_a_name_still_renders(client):
+    """client_name is optional in dynamic registration, and the heading no longer depends on it."""
+    resp = client.post("/register", json={
+        "redirect_uris": [REDIRECT_URI],
+        "token_endpoint_auth_method": "none",
+    })
+    txn = _authorize_to_txn(client, resp.json()["client_id"])
+    page = client.get("/consent", params={"txn": txn})
+
+    assert page.status_code == 200
+    assert "Connect to your TestBots.ai account" in page.text

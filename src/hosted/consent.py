@@ -1,5 +1,4 @@
 import html
-import re
 import time
 
 from starlette.requests import Request
@@ -115,7 +114,7 @@ _PAGE = """<!doctype html>
 </style></head><body>
 <div class="card">
   <img class="logo" src="{logo}" alt="{partner_name}">
-  <h1>Connect <strong>{client_name}</strong> to your {partner_name} account</h1>
+  <h1>Connect to your {partner_name} account</h1>
   {banner}
   <form method="post" action="consent">
     <input type="hidden" name="txn" value="{txn}">
@@ -278,22 +277,7 @@ def _error_banner(message: str) -> str:
     return f'<p class="error">{html.escape(message)}</p>'
 
 
-def _display_client_name(name: str) -> str:
-    """Drop the trailing "(nickname)" an MCP client appends to its own registered name.
-
-    Claude Code registers as e.g. "Claude Code (testbots-prod)", where the parenthetical is the
-    local name the user typed when adding the server. It identifies nothing on its own — the
-    same client is "testbots-dev" on another machine — and the person reading this page is the
-    one who chose it, moments after typing the URL it stands for. What the heading needs to say
-    is which application is asking, so the product name stays and the nickname goes.
-
-    Falls back to the original whenever stripping would leave nothing, so a client whose entire
-    name is parenthesised still gets named rather than silently becoming blank.
-    """
-    return re.sub(r"\s*\([^()]*\)\s*$", "", name).strip() or name
-
-
-def _render(txn: str, client_name: str, partner_name: str, logo: str, primary_color: str,
+def _render(txn: str, partner_name: str, logo: str, primary_color: str,
             banner: str = "", token_value: str = "", email_value: str = "",
             projects: list | None = None, status: int = 200) -> Response:
     if projects is not None:
@@ -326,7 +310,6 @@ def _render(txn: str, client_name: str, partner_name: str, logo: str, primary_co
             # it stayed magenta against any other partner's brand. Derived from primary_color
             # like the focus ring, it follows whatever colour the deployment configures.
             primary_color_tint=_hex_to_rgba(primary_color, 0.10),
-            client_name=html.escape(_display_client_name(client_name)),
             banner=banner,
             txn=html.escape(txn, quote=True),
             token_field=token_field,
@@ -494,14 +477,13 @@ def make_consent_endpoints(codec: TokenCodec, settings, user_client_factory, htt
         txn, payload = _load_txn(request)
         if payload is None:
             return HTMLResponse(_EXPIRED_HTML, status_code=400)
-        return _render_page(txn, payload["client_name"])
+        return _render_page(txn)
 
     async def consent_post(request: Request) -> Response:
         form = await request.form()
         txn, payload = _load_txn(request, form)
         if payload is None:
             return HTMLResponse(_EXPIRED_HTML, status_code=400)
-        client_name = payload["client_name"]
         email = str(form.get("ahq_email") or "").strip()
         password = str(form.get("ahq_password") or "")
         project_id = str(form.get("project_id") or "").strip()
@@ -515,7 +497,7 @@ def make_consent_endpoints(codec: TokenCodec, settings, user_client_factory, htt
         )
         if not result["ok"]:
             return _render_page(
-                txn, client_name, email_value=email, token_value=issued_jwt,
+                txn, email_value=email, token_value=issued_jwt,
                 projects=result.get("projects"), status=400,
                 banner=_error_banner(result["message"]),
             )
@@ -530,7 +512,7 @@ def make_consent_endpoints(codec: TokenCodec, settings, user_client_factory, htt
             else:
                 extra = f" {html.escape(warning)}" if warning else ""
                 return _render_page(
-                    txn, client_name, email_value=email, token_value=token, projects=projects,
+                    txn, email_value=email, token_value=token, projects=projects,
                     banner=f'<p class="org">Signed in as '
                            f"<strong>{html.escape(result['subject'])}</strong>.{extra}</p>",
                 )
